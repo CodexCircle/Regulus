@@ -55,29 +55,9 @@ Flags:
 		_, _ = fmt.Fprintln(stderr, "warning: running as root; if the hub runs as another user, run this as that user (for example sudo -u regulus ...) so the database files keep their owner")
 	}
 
-	// Do not create an empty database where there is none: that would be a
-	// wrong data directory, not a recovery.
-	dbFile := filepath.Join(cfg.DataDir, storage.FileName)
-	if _, err := os.Stat(dbFile); err != nil {
-		_, _ = fmt.Fprintf(stderr, "regulus: no hub database at %s: check --data-dir (or data_dir in the configuration)\n", dbFile)
-		return 1
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	db, err := storage.Open(ctx, cfg.DataDir)
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "regulus: %v\n", err)
-		return 1
-	}
-	defer func() { _ = db.Close() }()
-
-	log, err := logging.New(cfg.Log, io.Discard)
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "regulus: %v\n", err)
-		return 2
-	}
-	rec, err := auth.RecoverAdmin(ctx, db, user, log)
+	rec, link, err := recoverAdmin(ctx, cfg, user)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "regulus: %v\n", err)
 		return 1
@@ -91,8 +71,34 @@ Flags:
 	}
 	_, _ = fmt.Fprintf(stderr, "Open this link to choose a new password for %q. It works once and expires at %s.\nAll sessions of the account were ended. Replace the host if you reach the dashboard under another name.\n\n",
 		rec.Username, rec.Expires.Local().Format(time.RFC1123))
-	_, _ = fmt.Fprintf(stdout, "%s/#/reset/%s\n", dashboardURL(cfg.Listen), rec.Token)
+	_, _ = fmt.Fprintln(stdout, link)
 	return 0
+}
+
+// recoverAdmin opens the database of the hub in cfg and makes the one-time
+// reset link of an admin (see auth.RecoverAdmin).
+func recoverAdmin(ctx context.Context, cfg config.Config, user string) (auth.Recovery, string, error) {
+	// Do not create an empty database where there is none: that would be a
+	// wrong data directory, not a recovery.
+	dbFile := filepath.Join(cfg.DataDir, storage.FileName)
+	if _, err := os.Stat(dbFile); err != nil {
+		return auth.Recovery{}, "", fmt.Errorf("no hub database at %s: check --data-dir (or data_dir in the configuration)", dbFile)
+	}
+	db, err := storage.Open(ctx, cfg.DataDir)
+	if err != nil {
+		return auth.Recovery{}, "", err
+	}
+	defer func() { _ = db.Close() }()
+
+	log, err := logging.New(cfg.Log, io.Discard)
+	if err != nil {
+		return auth.Recovery{}, "", err
+	}
+	rec, err := auth.RecoverAdmin(ctx, db, user, log)
+	if err != nil {
+		return auth.Recovery{}, "", err
+	}
+	return rec, fmt.Sprintf("%s/#/reset/%s", dashboardURL(cfg.Listen), rec.Token), nil
 }
 
 // dashboardURL guesses where the dashboard is from the listen address.

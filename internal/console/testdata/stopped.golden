@@ -1,0 +1,30 @@
+Regulus v0.3.0  Hub ● not running
+
+ 1 Status   2 Settings   3 Logs   4 Health
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ Hub             not running  (service: inactive)
+ Version         v0.3.0
+ Dashboard       http://localhost:8080
+                 also on http://192.168.1.20:8080
+ Agent port      off
+ Built-in agent  on
+ Data directory  testdata/no-such-dir
+ Configuration   testdata/config.yaml
+
+ Connected agents (0)
+   No agent is connected.
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+tab/←/→ section  ↑/↓ move  enter edit  r restart  q quit

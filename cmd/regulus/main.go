@@ -1,5 +1,5 @@
 // Command regulus is the single Regulus executable. The role it plays is
-// chosen with a subcommand; for now only `hub` is implemented.
+// chosen with a subcommand; without one it opens the console.
 package main
 
 import (
@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/CodexCircle/Regulus/internal/config"
@@ -23,11 +24,20 @@ var version = "dev"
 
 func main() {
 	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
+		os.Exit(runConsole(nil))
+	}
+	// Flags of the console without its name: `regulus --no-tui`.
+	if strings.HasPrefix(os.Args[1], "-") && os.Args[1] != "-h" && os.Args[1] != "--help" {
+		os.Exit(runConsole(os.Args[1:]))
 	}
 
 	switch os.Args[1] {
+	case "console":
+		os.Exit(runConsole(os.Args[2:]))
+	case "status":
+		os.Exit(runStatus(os.Args[2:]))
+	case "config":
+		os.Exit(runConfig(os.Args[2:]))
 	case "hub":
 		os.Exit(runHub(os.Args[2:]))
 	case "agent":
@@ -46,7 +56,13 @@ func main() {
 func usage() {
 	fmt.Fprint(os.Stderr, `Usage: regulus <command> [flags]
 
+Run 'regulus' alone to open the interactive console (it prints the status as
+text when it is not run in a terminal, or with --no-tui).
+
 Commands:
+  console  the interactive console; see 'regulus console -h'
+  status   print what the hub is doing; --json or --plain for scripts
+  config   list, get and set the hub's settings (list|get|set|path)
   hub      run the hub (serves the dashboard); see 'regulus hub -h' for flags
   hub reset-admin
            regain access when the admin cannot log in; see 'regulus hub reset-admin -h'

@@ -39,6 +39,7 @@ type Hub struct {
 	ui  fs.FS
 
 	version   string
+	startedAt time.Time
 	auth      *auth.Service
 	fleet     *fleet.Service
 	agentAddr atomic.Value // string: where the agent listener is bound, once it is
@@ -99,6 +100,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, ui fs.FS, opt
 		ui:        ui,
 		agents:    newAgentServer(log),
 		transport: inproc.New(),
+		startedAt: time.Now(),
 	}
 	h.agents.seen = func(info AgentInfo, at time.Time) {
 		sys := info.System
@@ -173,6 +175,8 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 		}
 		defer stopAgent()
 	}
+
+	defer h.serveLocal(ln.Addr().String())()
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()

@@ -1,0 +1,30 @@
+Regulus v0.3.0  Hub ● running
+
+ 1 Status   2 Settings   3 Logs   4 Health
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ errors only  (f)  following
+ time=2026-10-25T11:59:40Z level=ERROR msg="cannot reach the agent" agent=web1 err="timeout"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+tab/←/→ section  ↑/↓ move  enter edit  r restart  q quit

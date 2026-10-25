@@ -34,6 +34,14 @@ type Config struct {
 	// MetricsInterval is how often agents report their metrics to the hub.
 	MetricsInterval time.Duration `yaml:"metrics_interval"`
 	Log             Log           `yaml:"log"`
+	Console         Console       `yaml:"console"`
+}
+
+// Console configures the interactive terminal console (`regulus`).
+type Console struct {
+	// TUI turns the full-screen console on. When false, `regulus` prints the
+	// same information as plain text.
+	TUI bool `yaml:"tui"`
 }
 
 // MinMetricsInterval is the shortest accepted metrics interval.
@@ -55,6 +63,7 @@ func Default() Config {
 		BuiltinAgent:    true,
 		MetricsInterval: 10 * time.Second,
 		Log:             Log{Level: "info", Format: "text"},
+		Console:         Console{TUI: true},
 	}
 }
 

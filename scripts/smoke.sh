@@ -107,7 +107,25 @@ done
 [[ -n $agents ]] || fail "built-in agent 'local' did not connect and send a heartbeat within 10s"
 grep -q '"status":"connected"' <<<"$agents" || fail "built-in agent is not reported as connected: $agents"
 
+# `regulus status` reads the running hub through its local socket (private to
+# the user that runs it) and never opens the full-screen console.
+[[ -S $tmp/data/regulus.sock && $(stat -c %a "$tmp/data/regulus.sock") == 600 ]] || fail "the local status socket is missing or not private"
+status=$(REGULUS_DATA_DIR=$tmp/data REGULUS_LISTEN=$addr "$bin" status --plain) || fail "regulus status failed"
+grep -q '^running=true$' <<<"$status" || fail "regulus status does not see the running hub: $status"
+grep -q '^agent.local=connected' <<<"$status" || fail "regulus status does not list the built-in agent: $status"
+grep -q "^port=${addr##*:}\$" <<<"$status" || fail "regulus status shows the wrong port: $status"
+
 stop_hub
+[[ ! -e $tmp/data/regulus.sock ]] || fail "the local status socket was left behind"
+status=0
+REGULUS_DATA_DIR=$tmp/data "$bin" status --plain >/dev/null || status=$?
+[[ $status -eq 3 ]] || fail "regulus status of a stopped hub exited with $status, want 3"
+
+# The settings can be read and changed without the hub.
+printf 'listen: ":8080"\nmetrics_interval: 10s\n' >"$tmp/config.yaml"
+"$bin" config set listen 9091 --config "$tmp/config.yaml" >/dev/null 2>&1 || fail "regulus config set failed"
+[[ $("$bin" config get listen --config "$tmp/config.yaml") == :9091 ]] || fail "regulus config get does not return the value that was set"
+grep -q '^metrics_interval: 10s$' "$tmp/config.yaml" || fail "regulus config set changed more than the one setting"
 
 # With the built-in agent disabled no agent must appear.
 start_hub --builtin-agent=false
