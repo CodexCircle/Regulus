@@ -46,11 +46,16 @@ func usage() {
 
 Commands:
   hub      run the hub (serves the dashboard); see 'regulus hub -h' for flags
+  hub reset-admin
+           regain access when the admin cannot log in; see 'regulus hub reset-admin -h'
   version  print the version
 `)
 }
 
 func runHub(args []string) int {
+	if len(args) > 0 && args[0] == "reset-admin" {
+		return runResetAdmin(args[1:])
+	}
 	cfg, err := config.Load(args, os.Getenv, os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return 0

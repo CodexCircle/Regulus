@@ -176,3 +176,17 @@ export const fetchSessions = (signal?: AbortSignal) =>
   request<SessionInfo[]>("GET", "/api/account/sessions", undefined, signal);
 
 export const revokeSession = (id: string) => request<void>("DELETE", `/api/account/sessions/${encodeURIComponent(id)}`, {});
+
+export interface PasswordReset {
+  username: string;
+  token: string;
+  expires_at: string;
+}
+
+// createReset makes a one-time password reset token for a user (admin only).
+export const createReset = (username: string) =>
+  request<PasswordReset>("POST", `/api/users/${encodeURIComponent(username)}/reset`, {});
+
+// resetPassword chooses a new password with a reset token; it does not log in.
+export const resetPassword = (token: string, newPassword: string) =>
+  request<void>("POST", "/api/auth/reset", { token, new_password: newPassword });

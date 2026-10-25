@@ -32,6 +32,7 @@ func RequireRole(role Role, next http.Handler) http.Handler {
 //	POST   /api/users                  create an account (admin)
 //	PATCH  /api/users/{username}       change role or enable/disable (admin)
 //	DELETE /api/users/{username}       delete an account (admin)
+//	POST   /api/users/{username}/reset make a one-time password reset token (admin)
 //	GET    /api/audit                  recent account events (admin)
 //	POST   /api/account/password       change the own password
 //	GET    /api/account/sessions       list the own sessions
@@ -46,6 +47,7 @@ func APIRoutes(s *Service) []Route {
 		{"POST /api/users", adminJSON(s.handleCreateUser)},
 		{"PATCH /api/users/{username}", adminJSON(s.handleUpdateUser)},
 		{"DELETE /api/users/{username}", adminJSON(s.handleDeleteUser)},
+		{"POST /api/users/{username}/reset", adminJSON(s.handleCreateReset)},
 		{"GET /api/audit", admin(s.handleAudit)},
 		{"POST /api/account/password", RequireJSON(http.HandlerFunc(s.handleChangePassword))},
 		{"GET /api/account/sessions", http.HandlerFunc(s.handleListSessions)},
@@ -61,6 +63,8 @@ func (s *Service) fail(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, ErrUserExists), errors.Is(err, ErrLastAdmin):
 		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, ErrInvalidReset):
+		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, ErrWrongPassword), errors.Is(err, ErrForbidden):
 		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, ErrRateLimited):
@@ -123,6 +127,41 @@ func (s *Service) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	by, _ := UserFrom(r.Context())
 	if err := s.DeleteUser(r.Context(), by, r.PathValue("username")); err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Service) handleCreateReset(w http.ResponseWriter, r *http.Request) {
+	var req struct{}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	by, _ := UserFrom(r.Context())
+	username := r.PathValue("username")
+	token, expires, err := s.CreateReset(r.Context(), by.Username, username)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"username":   normalizeUsername(username),
+		"token":      token,
+		"expires_at": expires,
+	})
+}
+
+func (s *Service) handleResetPassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Token    string `json:"token"`
+		Password string `json:"new_password"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if err := s.ResetPassword(withRequestClient(r), remoteIP(r), req.Token, req.Password); err != nil {
 		s.fail(w, err)
 		return
 	}

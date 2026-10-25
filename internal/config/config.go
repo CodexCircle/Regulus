@@ -81,10 +81,20 @@ func (c Config) Validate() error {
 // the program and subcommand names) and the environment. getenv is usually
 // os.Getenv. Flag usage and parse errors are written to output.
 func Load(args []string, getenv func(string) string, output io.Writer) (Config, error) {
+	return LoadWith("hub", args, getenv, output, nil)
+}
+
+// LoadWith is Load for commands that take flags of their own besides the
+// configuration ones: name is shown in the usage, and extra defines the other
+// flags on the flag set before the arguments are parsed.
+func LoadWith(name string, args []string, getenv func(string) string, output io.Writer, extra func(*flag.FlagSet)) (Config, error) {
 	cfg := Default()
 
-	fs := flag.NewFlagSet("hub", flag.ContinueOnError)
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(output)
+	if extra != nil {
+		extra(fs)
+	}
 	path := fs.String("config", "", "path to the YAML configuration file (env REGULUS_CONFIG)")
 	listen := fs.String("listen", "", "address to listen on (env REGULUS_LISTEN)")
 	dataDir := fs.String("data-dir", "", "directory for the hub data (env REGULUS_DATA_DIR)")
