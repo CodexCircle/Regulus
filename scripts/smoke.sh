@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# End-to-end smoke test of the built binary: starts the hub with a temporary
-# data directory, checks the health endpoint and the embedded dashboard, then
-# checks that SIGTERM stops it cleanly.
+# End-to-end smoke test of the built binary. It starts the hub with a temporary
+# data directory and checks the health endpoint, the embedded dashboard, that
+# the built-in agent connects (GET /api/agents) and that SIGTERM stops the hub
+# cleanly. Then it starts a hub with --builtin-agent=false and checks that no
+# agent shows up.
 #
 # Usage: scripts/smoke.sh [path/to/regulus]   (default: bin/regulus)
 set -euo pipefail
@@ -10,6 +12,7 @@ bin=${1:-bin/regulus}
 tmp=$(mktemp -d)
 log=$tmp/hub.log
 pid=
+addr=
 
 cleanup() {
 	if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then
@@ -26,18 +29,34 @@ fail() {
 	exit 1
 }
 
+# start_hub [flags...] runs the hub in the background and sets pid and addr.
 # Port 0 lets the system pick a free port; the hub logs the real address.
-"$bin" hub --listen 127.0.0.1:0 --data-dir "$tmp/data" >"$log" 2>&1 &
-pid=$!
+start_hub() {
+	: >"$log"
+	"$bin" hub --listen 127.0.0.1:0 --data-dir "$tmp/data" "$@" >"$log" 2>&1 &
+	pid=$!
 
-addr=
-for _ in $(seq 1 100); do
-	addr=$(sed -n 's/.*hub listening.*addr=\([0-9.]*:[0-9]*\).*/\1/p' "$log" | head -n1)
-	[[ -n $addr ]] && break
-	kill -0 "$pid" 2>/dev/null || fail "hub exited during startup"
-	sleep 0.1
-done
-[[ -n $addr ]] || fail "hub did not report its listen address within 10s"
+	addr=
+	for _ in $(seq 1 100); do
+		addr=$(sed -n 's/.*hub listening.*addr=\([0-9.]*:[0-9]*\).*/\1/p' "$log" | head -n1)
+		[[ -n $addr ]] && break
+		kill -0 "$pid" 2>/dev/null || fail "hub exited during startup"
+		sleep 0.1
+	done
+	[[ -n $addr ]] || fail "hub did not report its listen address within 10s"
+}
+
+# stop_hub stops the hub with SIGTERM and checks that it shuts down cleanly.
+stop_hub() {
+	kill -TERM "$pid"
+	local status=0
+	wait "$pid" || status=$?
+	pid=
+	[[ $status -eq 0 ]] || fail "hub exited with status $status after SIGTERM"
+	grep -q 'shutting down' "$log" || fail "hub did not log a graceful shutdown"
+}
+
+start_hub
 base=http://$addr
 
 health=$(curl -fsS "$base/healthz") || fail "/healthz request failed"
@@ -53,11 +72,26 @@ curl -fsS -o /dev/null "$base$script" || fail "dashboard bundle $script is not s
 
 [[ -s $tmp/data/regulus.db ]] || fail "database file was not created"
 
-kill -TERM "$pid"
-status=0
-wait "$pid" || status=$?
-pid=
-[[ $status -eq 0 ]] || fail "hub exited with status $status after SIGTERM"
-grep -q 'shutting down' "$log" || fail "hub did not log a graceful shutdown"
+# The built-in agent must connect through the contract and report a heartbeat.
+agents=
+for _ in $(seq 1 100); do
+	agents=$(curl -fsS "$base/api/agents") || fail "/api/agents request failed"
+	if grep -q '"id":"local"' <<<"$agents" && ! grep -q '"last_heartbeat":null' <<<"$agents"; then
+		break
+	fi
+	agents=
+	sleep 0.1
+done
+[[ -n $agents ]] || fail "built-in agent 'local' did not connect and send a heartbeat within 10s"
+grep -q '"status":"connected"' <<<"$agents" || fail "built-in agent is not reported as connected: $agents"
 
-echo "smoke test passed ($addr)"
+stop_hub
+
+# With the built-in agent disabled no agent must appear.
+start_hub --builtin-agent=false
+sleep 1
+agents=$(curl -fsS "http://$addr/api/agents") || fail "/api/agents request failed"
+[[ $agents == '[]' ]] || fail "expected no agents with --builtin-agent=false, got: $agents"
+stop_hub
+
+echo "smoke test passed"
