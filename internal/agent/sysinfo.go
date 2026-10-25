@@ -88,8 +88,8 @@ type Collector interface {
 	Collect(ctx context.Context) (*agentv1.MetricsReport, error)
 }
 
-// basicCollector reports only the time and the uptime. The full Linux
-// collector (CPU, memory, disk, network) replaces it.
+// basicCollector reports only the time and the uptime. It is the fallback on
+// systems where /proc cannot be read.
 type basicCollector struct{}
 
 func (basicCollector) Collect(context.Context) (*agentv1.MetricsReport, error) {
@@ -97,4 +97,13 @@ func (basicCollector) Collect(context.Context) (*agentv1.MetricsReport, error) {
 		CollectedAt:   timestamppb.New(time.Now()),
 		UptimeSeconds: parseUptime(readFile("/proc/uptime")),
 	}, nil
+}
+
+// defaultCollector is the Linux collector when /proc is available, and the
+// basic one otherwise.
+func defaultCollector() Collector {
+	if _, err := parseCPUTimes(readFile("/proc/stat")); err != nil {
+		return basicCollector{}
+	}
+	return NewLinuxCollector()
 }

@@ -35,8 +35,9 @@ type Options struct {
 	// ID is the agent id. Leave it empty to let the hub assign one; the
 	// assigned id is reused when the agent reconnects.
 	ID string
-	// Collector gathers metrics. Defaults to a collector that reports only
-	// the time and the uptime.
+	// Collector gathers metrics. Defaults to the Linux collector (CPU, memory,
+	// disks, network, uptime), or to one that reports only the time and the
+	// uptime where /proc is not available.
 	Collector Collector
 	// Log defaults to slog.Default().
 	Log *slog.Logger
@@ -69,7 +70,7 @@ type agent struct {
 // backoff; a rejection by the hub is returned as a *RejectedError.
 func Run(ctx context.Context, conn grpc.ClientConnInterface, opts Options) error {
 	if opts.Collector == nil {
-		opts.Collector = basicCollector{}
+		opts.Collector = defaultCollector()
 	}
 	if opts.Log == nil {
 		opts.Log = slog.Default()
