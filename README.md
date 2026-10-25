@@ -55,7 +55,7 @@ Third-party plugins come after the plugin system is stable. Work is tracked in t
 
 ## Development
 
-Requirements: Go 1.25+, Node.js 22+.
+Requirements: Go 1.26+, Node.js 22+.
 
 ```sh
 make build            # builds the dashboard, then bin/regulus
@@ -65,17 +65,33 @@ make test             # go vet, go test, dashboard typecheck
 
 For dashboard work, run `npm run dev` in `dashboard/` (proxies `/api` to the hub on `:8080`).
 
+### Configuration
+
+The hub reads, in increasing priority: defaults, a YAML file (`--config` or `REGULUS_CONFIG`), environment variables, flags.
+
+| Setting (YAML) | Flag | Environment | Default |
+|---|---|---|---|
+| `listen` | `--listen` | `REGULUS_LISTEN` | `:8080` |
+| `data_dir` | `--data-dir` | `REGULUS_DATA_DIR` | `data` |
+| `log.level` (`debug`, `info`, `warn`, `error`) | `--log-level` | `REGULUS_LOG_LEVEL` | `info` |
+| `log.format` (`text`, `json`) | `--log-format` | `REGULUS_LOG_FORMAT` | `text` |
+
+The hub stores its data in a SQLite database (`regulus.db`) inside `data_dir` and applies schema migrations automatically at startup.
+
 ## Repository layout
 
 ```
 cmd/regulus/       single executable (role chosen with a subcommand)
+internal/config/   configuration (defaults, YAML file, environment, flags)
+internal/logging/  structured logging
+internal/storage/  SQLite database and migrations
 internal/hub/      hub HTTP server
 internal/protocol/ protocol version of the agent-hub contract
 internal/inproc/   in-memory gRPC transport (used by the built-in agent)
 internal/gen/      generated Go code for proto/ (do not edit)
-proto/             Protobuf contract between agents and the hub
 internal/webui/    embeds the compiled dashboard
 dashboard/         React + TypeScript dashboard
+proto/             Protobuf contract between agents and the hub
 ```
 
 Planned: `plugins/` (internal plugins), `packaging/` (systemd, `.deb`).
@@ -128,7 +144,7 @@ I plug-in di terze parti arriveranno dopo la stabilizzazione del sistema di plug
 
 ## Sviluppo
 
-Requisiti: Go 1.25+, Node.js 22+.
+Requisiti: Go 1.26+, Node.js 22+.
 
 ```sh
 make build            # compila la dashboard, poi bin/regulus
@@ -137,6 +153,12 @@ make test             # go vet, go test, typecheck della dashboard
 ```
 
 Per lavorare sulla dashboard, esegui `npm run dev` in `dashboard/` (inoltra `/api` all'hub su `:8080`).
+
+### Configurazione
+
+L'hub legge, in ordine di priorità crescente: valori predefiniti, file YAML (`--config` o `REGULUS_CONFIG`), variabili d'ambiente, flag. Le impostazioni e i nomi sono nella tabella in inglese qui sopra.
+
+L'hub salva i dati in un database SQLite (`regulus.db`) dentro `data_dir` e applica automaticamente le migrazioni dello schema all'avvio.
 
 ## Licenza
 
