@@ -1,0 +1,7 @@
+# Go
+/bin/
+
+# Dashboard
+dashboard/node_modules/
+internal/webui/dist/*
+!internal/webui/dist/.gitkeep
