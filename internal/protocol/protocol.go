@@ -6,3 +6,11 @@ package protocol
 // and Welcome. Bump it only for changes that an older peer cannot understand;
 // adding fields or messages is compatible and does not need a new version.
 const Version uint32 = 1
+
+// MinSupported is the oldest protocol version this build still accepts.
+const MinSupported uint32 = 1
+
+// Supported reports whether a peer speaking version v can be served.
+func Supported(v uint32) bool {
+	return v >= MinSupported && v <= Version
+}

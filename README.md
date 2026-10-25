@@ -97,7 +97,7 @@ cmd/regulus/       single executable (role chosen with a subcommand)
 internal/config/   configuration (defaults, YAML file, environment, flags)
 internal/logging/  structured logging
 internal/storage/  SQLite database and migrations
-internal/hub/      hub HTTP server
+internal/hub/      hub: HTTP server and the agent service (registry of connected agents)
 internal/protocol/ protocol version of the agent-hub contract
 internal/inproc/   in-memory gRPC transport (used by the built-in agent)
 internal/gen/      generated Go code for proto/ (do not edit)
