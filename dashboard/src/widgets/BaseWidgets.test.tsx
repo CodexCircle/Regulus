@@ -261,7 +261,7 @@ describe("live updates", () => {
     const expired = vi.fn();
     const { SessionContext } = await import("../session");
     render(
-      <SessionContext.Provider value={{ user: { username: "a", role: "admin", created_at: "" }, signOut: () => Promise.resolve(), expired }}>
+      <SessionContext.Provider value={{ user: { username: "a", role: "admin", created_at: "", disabled: false }, signOut: () => Promise.resolve(), expired }}>
         <LiveProvider>
           <CpuWidget {...props()} />
         </LiveProvider>

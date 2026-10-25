@@ -6,7 +6,7 @@ info:
     HTTP API of the Regulus hub, used by the dashboard.
 
     Everything under `/api/` needs a login (session cookie `regulus_session`) except
-    the `/api/auth/*` endpoints. State-changing requests (POST, PUT) must send
+    the `/api/auth/*` endpoints. State-changing requests (POST, PUT, PATCH, DELETE) must send
     `Content-Type: application/json` and, if they send an `Origin` header, it must
     be the hub's own. This file is served by the hub at `/api/openapi.yaml`.
 servers:
@@ -17,6 +17,7 @@ tags:
   - name: auth
   - name: agents
   - name: dashboard
+  - name: accounts
 paths:
   /healthz:
     get:
@@ -235,6 +236,195 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/users:
+    get:
+      tags: [accounts]
+      summary: List the accounts (admin only)
+      responses:
+        "200":
+          description: All accounts, ordered by name.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [accounts]
+      summary: Create an account with an initial password (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [username, password, role]
+              properties:
+                username: { type: string, minLength: 3, maxLength: 32 }
+                password: { type: string, minLength: 10, maxLength: 128 }
+                role: { type: string, enum: [admin, viewer] }
+      responses:
+        "201":
+          description: The account was created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: The name is taken.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/users/{username}:
+    patch:
+      tags: [accounts]
+      summary: Change the role of an account or disable or enable it (admin only)
+      description: |
+        Fields that are left out stay as they are. Disabling an account ends its
+        sessions. The last enabled admin cannot be demoted or disabled (409).
+      parameters:
+        - $ref: "#/components/parameters/Username"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                role: { type: string, enum: [admin, viewer] }
+                disabled: { type: boolean }
+      responses:
+        "200":
+          description: The account after the change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The change would leave the hub without an enabled admin.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [accounts]
+      summary: Delete an account and its sessions (admin only)
+      description: |
+        The request needs a JSON body (`{}`) like every other request that changes
+        something. The last enabled admin cannot be deleted (409).
+      parameters:
+        - $ref: "#/components/parameters/Username"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "204":
+          description: Deleted.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The account is the last enabled admin.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/audit:
+    get:
+      tags: [accounts]
+      summary: Recent account events, newest first (admin only)
+      description: The hub keeps the last 10000 events.
+      parameters:
+        - name: limit
+          in: query
+          description: How many events to return (default 100, at most 500).
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: The events.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AuditEntry" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/account/password:
+    post:
+      tags: [accounts]
+      summary: Change the own password
+      description: |
+        Needs the current password. All the other sessions of the user are ended.
+        Wrong current passwords count toward the limit on failed attempts (429).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string }
+                new_password: { type: string, minLength: 10, maxLength: 128 }
+      responses:
+        "204":
+          description: The password was changed.
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: The current password is wrong.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: Too many wrong passwords; see `Retry-After`.
+          headers:
+            Retry-After: { schema: { type: integer } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/account/sessions:
+    get:
+      tags: [accounts]
+      summary: Active sessions of the logged-in user
+      responses:
+        "200":
+          description: The sessions, most recently used first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SessionInfo" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/account/sessions/{id}:
+    delete:
+      tags: [accounts]
+      summary: End one of the own sessions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "204":
+          description: The session was ended.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/openapi.yaml:
     get:
       summary: This document
@@ -252,6 +442,11 @@ components:
       in: cookie
       name: regulus_session
   parameters:
+    Username:
+      name: username
+      in: path
+      required: true
+      schema: { type: string }
     AgentID:
       name: id
       in: path
@@ -268,8 +463,13 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: The logged-in user is not an admin.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     NotFound:
-      description: Unknown agent.
+      description: Unknown agent, user or session.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -281,11 +481,36 @@ components:
         error: { type: string }
     User:
       type: object
-      required: [username, role, created_at]
+      required: [username, role, created_at, disabled]
       properties:
         username: { type: string }
         role: { type: string, enum: [admin, viewer] }
         created_at: { type: string, format: date-time }
+        disabled: { type: boolean, description: Disabled accounts cannot log in. }
+    SessionInfo:
+      type: object
+      required: [id, remote_addr, user_agent, created_at, last_used_at, expires_at, current]
+      properties:
+        id: { type: string }
+        remote_addr: { type: string }
+        user_agent: { type: string }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        current: { type: boolean, description: True for the session that made the request. }
+    AuditEntry:
+      type: object
+      required: [id, at, actor, event, target, remote, detail]
+      properties:
+        id: { type: integer }
+        at: { type: string, format: date-time }
+        actor: { type: string }
+        event:
+          type: string
+          enum: [setup, login, login_failed, user_created, role_changed, user_disabled, user_enabled, user_deleted, password_changed, password_change_failed, session_revoked]
+        target: { type: string }
+        remote: { type: string }
+        detail: { type: string }
     Me:
       type: object
       required: [setup_required, user]

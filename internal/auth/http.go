@@ -57,8 +57,14 @@ func (s *Service) Require(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, ErrUnauthenticated.Error())
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, user)))
+		ctx := context.WithValue(withRequestClient(r), ctxKey{}, user)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// withRequestClient returns the request context with the client recorded.
+func withRequestClient(r *http.Request) context.Context {
+	return WithClient(r.Context(), Client{Remote: remoteIP(r), UserAgent: clip(r.UserAgent(), 200)})
 }
 
 func (s *Service) userOf(r *http.Request) (User, error) {
@@ -91,7 +97,7 @@ func (s *Service) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &c) {
 		return
 	}
-	user, token, expires, err := s.Setup(r.Context(), c.SetupToken, c.Username, c.Password)
+	user, token, expires, err := s.Setup(withRequestClient(r), c.SetupToken, c.Username, c.Password)
 	s.finishLogin(w, r, user, token, expires, err)
 }
 
@@ -100,7 +106,7 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &c) {
 		return
 	}
-	user, token, expires, err := s.Login(r.Context(), remoteIP(r), c.Username, c.Password)
+	user, token, expires, err := s.Login(withRequestClient(r), remoteIP(r), c.Username, c.Password)
 	s.finishLogin(w, r, user, token, expires, err)
 }
 

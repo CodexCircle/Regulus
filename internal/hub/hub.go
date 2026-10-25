@@ -225,21 +225,28 @@ type Deps struct {
 type route struct {
 	pattern string
 	handler http.Handler
+	// needsAuth marks the account endpoints, which only exist when the hub
+	// has an auth service.
+	needsAuth bool
 }
 
 // apiRoutes lists the endpoints under /api/ that need a login, other than the
 // ones of the auth package. They must all be described in openapi.yaml.
 func apiRoutes(d Deps) []route {
 	h := layoutHandlers{layouts: d.Layouts, log: d.Log}
-	return []route{
-		{"GET /api/agents", agentsHandler(d.Agents)},
-		{"GET /api/agents/{id}", agentGetHandler(d.Agents)},
-		{"GET /api/agents/{id}/metrics", metricsHandler(d.Agents)},
-		{"GET /api/layout", http.HandlerFunc(h.get)},
-		{"PUT /api/layout", auth.RequireJSON(http.HandlerFunc(h.put))},
-		{"GET /api/stream", streamHandler(d.Agents)},
-		{"GET /api/openapi.yaml", http.HandlerFunc(serveOpenAPI)},
+	routes := []route{
+		{pattern: "GET /api/agents", handler: agentsHandler(d.Agents)},
+		{pattern: "GET /api/agents/{id}", handler: agentGetHandler(d.Agents)},
+		{pattern: "GET /api/agents/{id}/metrics", handler: metricsHandler(d.Agents)},
+		{pattern: "GET /api/layout", handler: http.HandlerFunc(h.get)},
+		{pattern: "PUT /api/layout", handler: auth.RequireJSON(http.HandlerFunc(h.put))},
+		{pattern: "GET /api/stream", handler: streamHandler(d.Agents)},
+		{pattern: "GET /api/openapi.yaml", handler: http.HandlerFunc(serveOpenAPI)},
 	}
+	for _, r := range auth.APIRoutes(d.Auth) {
+		routes = append(routes, route{pattern: r.Pattern, handler: r.Handler, needsAuth: true})
+	}
+	return routes
 }
 
 // NewHandler returns the hub HTTP handler. The API (under /api/) requires a
@@ -259,6 +266,9 @@ func NewHandler(d Deps) http.Handler {
 
 	api := http.NewServeMux()
 	for _, r := range apiRoutes(d) {
+		if r.needsAuth && d.Auth == nil {
+			continue
+		}
 		api.Handle(r.pattern, r.handler)
 	}
 	var protected http.Handler = api

@@ -117,6 +117,7 @@ func (s *Service) Setup(ctx context.Context, setupToken, username, password stri
 	s.setupToken = ""
 	s.mu.Unlock()
 	s.log.Info("admin account created", "user", user.Username)
+	s.audit(ctx, user.Username, EventSetup, user.Username, "first admin")
 
 	token, expires, err := s.newSession(ctx, user.ID, now)
 	return user, token, expires, err
@@ -140,8 +141,13 @@ func (s *Service) Login(ctx context.Context, remote, username, password string) 
 	if verr != nil {
 		s.log.Error("stored password hash is unusable", "user", user.Username, "err", verr)
 	}
-	if !known || !ok {
+	if !known || !ok || user.Disabled {
 		s.recordFailure(remote)
+		detail := ""
+		if known && ok && user.Disabled {
+			detail = "account disabled"
+		}
+		s.audit(ctx, usernameForAudit(username), EventLoginFailed, "", detail)
 		return User{}, "", time.Time{}, ErrInvalidCredentials
 	}
 	s.clearFailures(remote)
@@ -149,6 +155,9 @@ func (s *Service) Login(ctx context.Context, remote, username, password string) 
 	now := s.now()
 	_ = s.store.deleteExpiredSessions(ctx, now) // housekeeping; a failure here must not block the login
 	token, expires, err := s.newSession(ctx, user.ID, now)
+	if err == nil {
+		s.audit(ctx, user.Username, EventLogin, "", "")
+	}
 	return user, token, expires, err
 }
 
@@ -157,7 +166,13 @@ func (s *Service) Authenticate(ctx context.Context, token string) (User, error) 
 	if token == "" {
 		return User{}, ErrUnauthenticated
 	}
-	return s.store.sessionUser(ctx, hashToken(token), s.now())
+	hash := hashToken(token)
+	now := s.now()
+	user, err := s.store.sessionUser(ctx, hash, now)
+	if err == nil {
+		s.store.touchSession(ctx, hash, now)
+	}
+	return user, err
 }
 
 // Logout ends the session of the token. An unknown token is not an error.
@@ -174,7 +189,7 @@ func (s *Service) newSession(ctx context.Context, userID int64, now time.Time) (
 		return "", time.Time{}, err
 	}
 	expires := now.Add(SessionTTL)
-	if err := s.store.createSession(ctx, hashToken(token), userID, now, expires); err != nil {
+	if err := s.store.createSession(ctx, hashToken(token), userID, now, expires, clientFrom(ctx)); err != nil {
 		return "", time.Time{}, err
 	}
 	return token, expires, nil
