@@ -1,6 +1,7 @@
 import { AccountPage } from "./AccountPage";
-import { AgentList } from "./AgentList";
 import { Dashboard } from "./Dashboard";
+import { ServerPage } from "./ServerPage";
+import { ServersPage } from "./ServersPage";
 import { useRoute, type Route } from "./route";
 import type { Session } from "./session";
 import { UsersPage } from "./UsersPage";
@@ -14,7 +15,9 @@ const nav: { route: Route; label: string; adminOnly?: boolean }[] = [
 function Page({ route }: { route: Route }) {
   switch (route) {
     case "/servers":
-      return <AgentList />;
+      return <ServersPage />;
+    case "/server":
+      return <ServerPage />;
     case "/users":
       return <UsersPage />;
     case "/account":
@@ -36,7 +39,7 @@ export function Shell({ user, signOut }: Session) {
         </a>
         <nav aria-label="Main">
           {nav.filter((n) => !n.adminOnly || user.role === "admin").map((n) => (
-            <a key={n.route} href={`#${n.route}`} aria-current={route === n.route ? "page" : undefined}>
+            <a key={n.route} href={`#${n.route}`} aria-current={route === n.route || (n.route === "/servers" && route === "/server") ? "page" : undefined}>
               {n.label}
             </a>
           ))}

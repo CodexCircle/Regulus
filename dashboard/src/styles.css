@@ -325,6 +325,50 @@ td.wrap {
   font-size: 0.85rem;
 }
 
+/* servers */
+.muted {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.status {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.status.connected {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.status.stale {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.status.revoked {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.server-facts {
+  max-width: 40rem;
+}
+
+.server-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.server-grid .widget {
+  min-height: 14rem;
+}
+
 /* widgets */
 .agent-view > select {
   width: auto;

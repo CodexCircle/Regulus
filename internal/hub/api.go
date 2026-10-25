@@ -1,11 +1,14 @@
 package hub
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
+	"github.com/CodexCircle/Regulus/internal/fleet"
 	agentv1 "github.com/CodexCircle/Regulus/internal/gen/regulus/agent/v1"
 )
 
@@ -25,15 +28,19 @@ type AgentSource interface {
 	Subscribe() (events <-chan []byte, cancel func())
 }
 
-// Agent statuses reported by GET /api/agents.
+// Agent statuses reported by GET /api/agents. The last two only appear with
+// ?all=true, for enrolled agents that are not connected.
 const (
 	statusConnected = "connected"
 	statusStale     = "stale"
+	statusOffline   = "offline"
+	statusRevoked   = "revoked"
 )
 
 // agentJSON is the JSON form of an agent in GET /api/agents.
 type agentJSON struct {
 	ID               string     `json:"id"`
+	Name             string     `json:"name,omitempty"`
 	Version          string     `json:"version"`
 	Status           string     `json:"status"`
 	Hostname         string     `json:"hostname,omitempty"`
@@ -43,18 +50,20 @@ type agentJSON struct {
 	Arch             string     `json:"arch,omitempty"`
 	CPUCount         uint32     `json:"cpu_count,omitempty"`
 	MemoryTotalBytes uint64     `json:"memory_total_bytes,omitempty"`
-	ConnectedAt      time.Time  `json:"connected_at"`
+	ConnectedAt      *time.Time `json:"connected_at"`
+	LastSeenAt       *time.Time `json:"last_seen_at,omitempty"`
 	LastHeartbeat    *time.Time `json:"last_heartbeat"`
 	MetricsAt        *time.Time `json:"metrics_at"`
 	UptimeSeconds    *uint64    `json:"uptime_seconds"`
 }
 
 func toAgentJSON(a AgentInfo, now time.Time, staleAfter time.Duration) agentJSON {
+	connected := a.ConnectedAt.UTC()
 	out := agentJSON{
 		ID:          a.ID,
 		Version:     a.Version,
 		Status:      statusConnected,
-		ConnectedAt: a.ConnectedAt.UTC(),
+		ConnectedAt: &connected,
 	}
 	if s := a.System; s != nil {
 		out.Hostname = s.Hostname
@@ -87,22 +96,65 @@ func toAgentJSON(a AgentInfo, now time.Time, staleAfter time.Duration) agentJSON
 	return out
 }
 
-// agentsHandler serves the connected agents as a JSON array, ordered by id.
-// It is read-only; authentication comes with the API work.
+// registrySource is implemented by sources that know the enrolled agents,
+// including those that are not connected.
+type registrySource interface {
+	Registry(ctx context.Context) ([]fleet.Agent, error)
+}
+
+// agentsHandler serves the agents as a JSON array, ordered by id: the
+// connected ones, or with ?all=true every enrolled agent too, with the status
+// "offline" or "revoked" for those that are not connected.
 func agentsHandler(src AgentSource) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		agents := []agentJSON{}
 		if src != nil {
+			names := map[string]fleet.Agent{}
+			var enrolled []fleet.Agent
+			if reg, ok := src.(registrySource); ok {
+				var err error
+				if enrolled, err = reg.Registry(r.Context()); err != nil {
+					writeJSONError(w, http.StatusInternalServerError, "internal error")
+					return
+				}
+			}
+			for _, e := range enrolled {
+				names[e.ID] = e
+			}
+
 			now := time.Now()
 			staleAfter := src.StaleAfter()
+			seen := map[string]bool{}
 			for _, a := range src.Agents() {
-				agents = append(agents, toAgentJSON(a, now, staleAfter))
+				j := toAgentJSON(a, now, staleAfter)
+				j.Name = names[a.ID].Name
+				agents = append(agents, j)
+				seen[a.ID] = true
+			}
+			if r.URL.Query().Get("all") == "true" {
+				for _, e := range enrolled {
+					if !seen[e.ID] {
+						agents = append(agents, offlineJSON(e))
+					}
+				}
+				slices.SortFunc(agents, func(a, b agentJSON) int { return strings.Compare(a.ID, b.ID) })
 			}
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(agents)
+		writeJSONBody(w, http.StatusOK, agents)
 	}
+}
+
+// offlineJSON is the JSON form of an enrolled agent that is not connected.
+func offlineJSON(e fleet.Agent) agentJSON {
+	out := agentJSON{ID: e.ID, Name: e.Name, Version: e.Version, Status: statusOffline, Hostname: e.Hostname, OSVersion: e.OSVersion}
+	if e.Revoked {
+		out.Status = statusRevoked
+	}
+	if !e.LastSeen.IsZero() {
+		t := e.LastSeen.UTC()
+		out.LastSeenAt = &t
+	}
+	return out
 }
 
 // metricsJSON is the JSON form of GET /api/agents/{id}/metrics.
@@ -233,15 +285,36 @@ func metricsHandler(src AgentSource) http.HandlerFunc {
 	}
 }
 
-// agentGetHandler serves one connected agent.
+// agentGetHandler serves one agent: a connected one, or an enrolled one that
+// is offline or revoked.
 func agentGetHandler(src AgentSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if src != nil {
+			var enrolled []fleet.Agent
+			if reg, ok := src.(registrySource); ok {
+				var err error
+				if enrolled, err = reg.Registry(r.Context()); err != nil {
+					writeJSONError(w, http.StatusInternalServerError, "internal error")
+					return
+				}
+			}
 			now, staleAfter := time.Now(), src.StaleAfter()
 			for _, a := range src.Agents() {
 				if a.ID == id {
-					writeJSONBody(w, http.StatusOK, toAgentJSON(a, now, staleAfter))
+					j := toAgentJSON(a, now, staleAfter)
+					for _, e := range enrolled {
+						if e.ID == id {
+							j.Name = e.Name
+						}
+					}
+					writeJSONBody(w, http.StatusOK, j)
+					return
+				}
+			}
+			for _, e := range enrolled {
+				if e.ID == id {
+					writeJSONBody(w, http.StatusOK, offlineJSON(e))
 					return
 				}
 			}

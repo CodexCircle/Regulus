@@ -1,8 +1,12 @@
 // Agent as returned by GET /api/agents (see internal/hub/api.go).
 export interface Agent {
   id: string;
+  // The name an admin gave the server, if any.
+  name?: string;
   version: string;
-  status: "connected" | "stale";
+  // offline and revoked only come with fetchAgents(.., true): enrolled agents
+  // that are not connected.
+  status: "connected" | "stale" | "offline" | "revoked";
   hostname?: string;
   os?: string;
   os_version?: string;
@@ -10,7 +14,8 @@ export interface Agent {
   arch?: string;
   cpu_count?: number;
   memory_total_bytes?: number;
-  connected_at: string;
+  connected_at: string | null;
+  last_seen_at?: string;
   last_heartbeat: string | null;
   metrics_at: string | null;
   uptime_seconds: number | null;
@@ -65,7 +70,28 @@ async function request<T>(method: string, path: string, body?: unknown, signal?:
   return (await res.json()) as T;
 }
 
-export const fetchAgents = (signal?: AbortSignal) => request<Agent[]>("GET", "/api/agents", undefined, signal);
+// fetchAgents lists the connected agents, or with all every enrolled agent.
+export const fetchAgents = (signal?: AbortSignal, all = false) =>
+  request<Agent[]>("GET", all ? "/api/agents?all=true" : "/api/agents", undefined, signal);
+
+export const fetchAgent = (id: string, signal?: AbortSignal) =>
+  request<Agent>("GET", `/api/agents/${encodeURIComponent(id)}`, undefined, signal);
+
+// What an admin needs to add a server (see POST /api/enrollment-tokens).
+export interface Enrollment {
+  token: string;
+  name: string;
+  expires_at: string;
+  ca_fingerprint: string;
+  agent_port: number;
+}
+
+export const createEnrollment = (name: string) => request<Enrollment>("POST", "/api/enrollment-tokens", { name });
+
+export const renameAgent = (id: string, name: string) =>
+  request<void>("PATCH", `/api/agents/${encodeURIComponent(id)}`, { name });
+
+export const revokeAgent = (id: string) => request<void>("DELETE", `/api/agents/${encodeURIComponent(id)}`, {});
 
 export const fetchMe = (signal?: AbortSignal) => request<Me>("GET", "/api/auth/me", undefined, signal);
 

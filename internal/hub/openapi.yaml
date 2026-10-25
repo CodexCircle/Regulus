@@ -212,9 +212,18 @@ paths:
     get:
       tags: [agents]
       summary: Connected agents, ordered by id
+      description: |
+        With `all=true` the enrolled agents that are not connected are listed
+        too, with the status `offline` (or `revoked`), the last time they were
+        seen and what the hub last knew about them; they have no metrics.
+      parameters:
+        - name: all
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
       responses:
         "200":
-          description: The connected agents.
+          description: The agents.
           content:
             application/json:
               schema:
@@ -234,6 +243,29 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Agent" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [agents]
+      summary: Rename a remote agent (admin only)
+      description: An empty name goes back to showing the host name. The built-in agent cannot be renamed (404).
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 64 }
+      responses:
+        "204":
+          description: Renamed.
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [agents]
@@ -663,11 +695,17 @@ components:
       required: [id, version, status, connected_at, last_heartbeat, metrics_at, uptime_seconds]
       properties:
         id: { type: string }
+        name:
+          type: string
+          description: The name an admin gave the server; absent if none, then show the host name.
         version: { type: string }
         status:
           type: string
-          enum: [connected, stale]
-          description: "`stale` when nothing was heard from the agent for two heartbeat intervals."
+          enum: [connected, stale, offline, revoked]
+          description: |
+            `stale` when nothing was heard from the agent for two heartbeat
+            intervals. `offline` and `revoked` only appear with `all=true`, for
+            enrolled agents that are not connected.
         hostname: { type: string }
         os: { type: string }
         os_version: { type: string }
@@ -675,7 +713,14 @@ components:
         arch: { type: string }
         cpu_count: { type: integer }
         memory_total_bytes: { type: integer }
-        connected_at: { type: string, format: date-time }
+        connected_at:
+          type: [string, "null"]
+          format: date-time
+          description: Null for an agent that is not connected.
+        last_seen_at:
+          type: string
+          format: date-time
+          description: When an agent that is not connected was last seen.
         last_heartbeat: { type: [string, "null"], format: date-time }
         metrics_at: { type: [string, "null"], format: date-time }
         uptime_seconds: { type: [integer, "null"] }

@@ -319,3 +319,82 @@ func TestEnrollmentAPIWithAgentsOff(t *testing.T) {
 		t.Errorf("status = %d, want 409", rec.Code)
 	}
 }
+
+func (a *api) agents(query string) []agentJSON {
+	a.t.Helper()
+	rec := a.do("GET", "/api/agents"+query, nil)
+	var list []agentJSON
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &list) != nil {
+		a.t.Fatalf("GET /api/agents%s: status = %d, body = %s", query, rec.Code, rec.Body)
+	}
+	return list
+}
+
+func TestServerListShowsOfflineAndRevokedAgents(t *testing.T) {
+	h := startRemoteHub(t)
+	admin := newAPI(t, h, auth.RoleAdmin)
+	creds := enrollNew(t, h, "web1")
+
+	// Enrolled but never connected.
+	list := admin.agents("?all=true")
+	if len(list) != 1 || list[0].ID != creds.AgentID || list[0].Status != statusOffline || list[0].Name != "web1" || list[0].ConnectedAt != nil || list[0].LastSeenAt != nil {
+		t.Fatalf("before connecting: %+v", list)
+	}
+	if got := admin.agents(""); len(got) != 0 {
+		t.Errorf("without all=true only connected agents are listed: %+v", got)
+	}
+
+	stop, result := runAgent(t, h, creds)
+	waitFor(t, "the agent to connect", func() bool { return len(h.Agents()) == 1 })
+	list = admin.agents("?all=true")
+	if len(list) != 1 || list[0].Status != statusConnected || list[0].Name != "web1" || list[0].ConnectedAt == nil {
+		t.Fatalf("connected: %+v", list)
+	}
+	if got := admin.agents(""); len(got) != 1 || got[0].Name != "web1" {
+		t.Errorf("the plain list should carry the name too: %+v", got)
+	}
+
+	// Gone: still listed, with when it was last seen and what it said it was.
+	stop()
+	<-result //nolint:errcheck // the stop error is not the point here
+	waitFor(t, "the agent to disconnect", func() bool { return len(h.Agents()) == 0 })
+	var off agentJSON
+	waitFor(t, "the last seen time to be saved", func() bool {
+		list = admin.agents("?all=true")
+		off = list[0]
+		return off.LastSeenAt != nil
+	})
+	if off.Status != statusOffline || off.Hostname == "" || off.Version != "1.2.3" || off.ConnectedAt != nil {
+		t.Errorf("offline: %+v", off)
+	}
+	rec := admin.do("GET", "/api/agents/"+creds.AgentID, nil)
+	var one agentJSON
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &one) != nil || one.Status != statusOffline || one.Name != "web1" {
+		t.Errorf("GET one offline agent: status = %d, body = %s", rec.Code, rec.Body)
+	}
+
+	// Rename, then revoke.
+	if rec := admin.do("PATCH", "/api/agents/"+creds.AgentID, map[string]string{"name": "Web One"}); rec.Code != http.StatusNoContent {
+		t.Fatalf("rename: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	if rec := admin.do("PATCH", "/api/agents/"+creds.AgentID, map[string]string{"name": strings.Repeat("x", 80)}); rec.Code != http.StatusBadRequest {
+		t.Errorf("rename too long: status = %d, want 400", rec.Code)
+	}
+	if rec := admin.do("PATCH", "/api/agents/nope", map[string]string{"name": "x"}); rec.Code != http.StatusNotFound {
+		t.Errorf("rename unknown: status = %d, want 404", rec.Code)
+	}
+	if rec := admin.do("DELETE", "/api/agents/"+creds.AgentID, struct{}{}); rec.Code != http.StatusNoContent {
+		t.Fatalf("revoke: status = %d", rec.Code)
+	}
+	if list := admin.agents("?all=true"); len(list) != 1 || list[0].Status != statusRevoked || list[0].Name != "Web One" {
+		t.Errorf("revoked: %+v", list)
+	}
+}
+
+func TestRenameIsAdminOnly(t *testing.T) {
+	h := startRemoteHub(t)
+	viewer := newAPI(t, h, auth.RoleViewer)
+	if rec := viewer.do("PATCH", "/api/agents/x", map[string]string{"name": "n"}); rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", rec.Code)
+	}
+}
