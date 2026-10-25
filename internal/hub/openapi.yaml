@@ -1,0 +1,382 @@
+openapi: 3.1.0
+info:
+  title: Regulus hub API
+  version: "1"
+  description: |
+    HTTP API of the Regulus hub, used by the dashboard.
+
+    Everything under `/api/` needs a login (session cookie `regulus_session`) except
+    the `/api/auth/*` endpoints. State-changing requests (POST, PUT) must send
+    `Content-Type: application/json` and, if they send an `Origin` header, it must
+    be the hub's own. This file is served by the hub at `/api/openapi.yaml`.
+servers:
+  - url: /
+security:
+  - cookieAuth: []
+tags:
+  - name: auth
+  - name: agents
+  - name: dashboard
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: The hub is running.
+          content:
+            text/plain:
+              schema: { type: string, examples: [ok] }
+  /api/auth/me:
+    get:
+      tags: [auth]
+      summary: Who is logged in, and whether the first-run setup is pending
+      security: []
+      responses:
+        "200":
+          description: Always answers; `user` is null without a valid session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+  /api/auth/setup:
+    post:
+      tags: [auth]
+      summary: Create the first admin and log in
+      description: |
+        Only possible while the hub has no accounts. Needs the one-time setup token
+        that the hub writes to its log at startup (`setup_token`).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [setup_token, username, password]
+              properties:
+                setup_token: { type: string }
+                username: { type: string, minLength: 3, maxLength: 32 }
+                password: { type: string, minLength: 10, maxLength: 128 }
+      responses:
+        "200":
+          description: The admin was created; the session cookie is set.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403":
+          description: Wrong setup token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: The setup was already completed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/auth/login:
+    post:
+      tags: [auth]
+      summary: Log in with username and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+      responses:
+        "200":
+          description: Logged in; the session cookie is set.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: Wrong username or password.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: Too many failed attempts from this address; see `Retry-After`.
+          headers:
+            Retry-After: { schema: { type: integer } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/auth/logout:
+    post:
+      tags: [auth]
+      summary: End the session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "204":
+          description: The session is closed and the cookie cleared.
+  /api/agents:
+    get:
+      tags: [agents]
+      summary: Connected agents, ordered by id
+      responses:
+        "200":
+          description: The connected agents.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Agent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/agents/{id}:
+    get:
+      tags: [agents]
+      summary: One connected agent
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: The agent.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/agents/{id}/metrics:
+    get:
+      tags: [agents]
+      summary: Recent metrics of an agent
+      description: |
+        The hub keeps the last hour (at most 3600 reports) in memory. Points are
+        ordered oldest first. Network rates are computed from the counters of two
+        consecutive reports and are null for the first report, after a counter
+        reset and for a new interface.
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: since
+          in: query
+          description: Return only points received after this time.
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: The metrics.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agent, points]
+                properties:
+                  agent: { type: string }
+                  points:
+                    type: array
+                    items: { $ref: "#/components/schemas/MetricsPoint" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/stream:
+    get:
+      tags: [agents]
+      summary: Live updates over WebSocket
+      description: |
+        Upgrades to a WebSocket. The hub sends JSON text messages and expects
+        nothing from the client. The first message is a `snapshot`; after it come
+        events as they happen. If the client reads too slowly the hub closes the
+        connection (policy violation); reconnect to get a new snapshot. A page from
+        another origin is refused.
+
+        Message types (the `type` field): `snapshot` (`StreamSnapshot`),
+        `agent.connected` (`agent`), `agent.disconnected` (`id`), `agent.heartbeat`
+        (`id`, `at`) and `agent.metrics` (`id`, `point`).
+      responses:
+        "101":
+          description: Switching protocols.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/layout:
+    get:
+      tags: [dashboard]
+      summary: Dashboard layout of the logged-in user
+      responses:
+        "200":
+          description: 'The layout, or {"layout": null} if none was saved yet.'
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Layout" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [dashboard]
+      summary: Save the dashboard layout of the logged-in user
+      description: The hub stores any JSON value up to 64 KiB without interpreting it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [layout]
+              properties:
+                layout: {}
+      responses:
+        "204":
+          description: Saved.
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413":
+          description: The layout is larger than 64 KiB.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/openapi.yaml:
+    get:
+      summary: This document
+      responses:
+        "200":
+          description: The OpenAPI description of the API.
+          content:
+            application/yaml:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: regulus_session
+  parameters:
+    AgentID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    BadRequest:
+      description: Invalid request.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: No valid session.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Unknown agent.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+    User:
+      type: object
+      required: [username, role, created_at]
+      properties:
+        username: { type: string }
+        role: { type: string, enum: [admin, viewer] }
+        created_at: { type: string, format: date-time }
+    Me:
+      type: object
+      required: [setup_required, user]
+      properties:
+        setup_required: { type: boolean }
+        user:
+          oneOf:
+            - $ref: "#/components/schemas/User"
+            - type: "null"
+    Agent:
+      type: object
+      required: [id, version, status, connected_at, last_heartbeat, metrics_at, uptime_seconds]
+      properties:
+        id: { type: string }
+        version: { type: string }
+        status:
+          type: string
+          enum: [connected, stale]
+          description: "`stale` when nothing was heard from the agent for two heartbeat intervals."
+        hostname: { type: string }
+        os: { type: string }
+        os_version: { type: string }
+        kernel: { type: string }
+        arch: { type: string }
+        cpu_count: { type: integer }
+        memory_total_bytes: { type: integer }
+        connected_at: { type: string, format: date-time }
+        last_heartbeat: { type: [string, "null"], format: date-time }
+        metrics_at: { type: [string, "null"], format: date-time }
+        uptime_seconds: { type: [integer, "null"] }
+    MetricsPoint:
+      type: object
+      required:
+        - at
+        - cpu_percent
+        - load_1
+        - load_5
+        - load_15
+        - memory_total_bytes
+        - memory_used_bytes
+        - memory_available_bytes
+        - swap_total_bytes
+        - swap_used_bytes
+        - uptime_seconds
+        - disks
+        - networks
+      properties:
+        at: { type: string, format: date-time, description: When the hub received the report. }
+        cpu_percent: { type: number, minimum: 0, maximum: 100 }
+        load_1: { type: number }
+        load_5: { type: number }
+        load_15: { type: number }
+        memory_total_bytes: { type: integer }
+        memory_used_bytes: { type: integer }
+        memory_available_bytes: { type: integer }
+        swap_total_bytes: { type: integer }
+        swap_used_bytes: { type: integer }
+        uptime_seconds: { type: integer }
+        disks:
+          type: array
+          items:
+            type: object
+            required: [mount_point, filesystem, total_bytes, used_bytes]
+            properties:
+              mount_point: { type: string }
+              filesystem: { type: string }
+              total_bytes: { type: integer }
+              used_bytes: { type: integer }
+        networks:
+          type: array
+          items:
+            type: object
+            required: [interface, rx_bytes, tx_bytes, rx_bytes_per_sec, tx_bytes_per_sec]
+            properties:
+              interface: { type: string }
+              rx_bytes: { type: integer }
+              tx_bytes: { type: integer }
+              rx_bytes_per_sec: { type: [number, "null"] }
+              tx_bytes_per_sec: { type: [number, "null"] }
+    Layout:
+      type: object
+      required: [layout, updated_at]
+      properties:
+        layout: {}
+        updated_at: { type: [string, "null"], format: date-time }
+    StreamSnapshot:
+      type: object
+      required: [type, stale_after_seconds, agents]
+      properties:
+        type: { type: string, const: snapshot }
+        stale_after_seconds: { type: number }
+        agents:
+          type: array
+          items: { $ref: "#/components/schemas/Agent" }

@@ -35,19 +35,27 @@ func newMetricsStore(retention time.Duration) *metricsStore {
 	return &metricsStore{retention: retention, now: time.Now, samples: map[string][]MetricsSample{}}
 }
 
-func (m *metricsStore) add(agentID string, report *agentv1.MetricsReport) {
+// add stores a report and returns it as a sample together with the previous
+// sample of the agent, if any (needed to compute rates).
+func (m *metricsStore) add(agentID string, report *agentv1.MetricsReport) (sample MetricsSample, prev *MetricsSample) {
 	if report == nil {
-		return
+		return MetricsSample{}, nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := m.now()
-	list := append(m.samples[agentID], MetricsSample{At: now, Report: report})
+	sample = MetricsSample{At: now, Report: report}
+	if old := m.samples[agentID]; len(old) > 0 {
+		last := old[len(old)-1]
+		prev = &last
+	}
+	list := append(m.samples[agentID], sample)
 	if over := len(list) - maxMetricsSamples; over > 0 {
 		list = list[over:]
 	}
 	m.samples[agentID] = list
 	m.pruneLocked(now)
+	return sample, prev
 }
 
 // pruneLocked drops the samples older than the retention, for every agent, so

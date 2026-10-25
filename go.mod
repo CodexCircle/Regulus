@@ -3,6 +3,7 @@ module github.com/CodexCircle/Regulus
 go 1.26.0
 
 require (
+	github.com/coder/websocket v1.8.15
 	golang.org/x/crypto v0.58.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12

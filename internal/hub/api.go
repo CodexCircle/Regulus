@@ -19,6 +19,10 @@ type AgentSource interface {
 	// Metrics returns the recent metrics of an agent, oldest first; known is
 	// false for an agent the hub never saw.
 	Metrics(agentID string) (samples []MetricsSample, known bool)
+	// Subscribe returns a channel of JSON events (see events.go) and a function
+	// that ends the subscription. The channel is closed if the subscriber falls
+	// too far behind.
+	Subscribe() (events <-chan []byte, cancel func())
 }
 
 // Agent statuses reported by GET /api/agents.
@@ -227,4 +231,32 @@ func metricsHandler(src AgentSource) http.HandlerFunc {
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(metricsJSON{Agent: id, Points: points})
 	}
+}
+
+// agentGetHandler serves one connected agent.
+func agentGetHandler(src AgentSource) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if src != nil {
+			now, staleAfter := time.Now(), src.StaleAfter()
+			for _, a := range src.Agents() {
+				if a.ID == id {
+					writeJSONBody(w, http.StatusOK, toAgentJSON(a, now, staleAfter))
+					return
+				}
+			}
+		}
+		writeJSONError(w, http.StatusNotFound, "unknown agent")
+	}
+}
+
+func writeJSONBody(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeJSONError(w http.ResponseWriter, status int, msg string) {
+	writeJSONBody(w, status, map[string]string{"error": msg})
 }
