@@ -126,9 +126,11 @@ func TestLayoutNeedsALogin(t *testing.T) {
 
 func TestSingleAgentEndpoint(t *testing.T) {
 	h := startHub(t)
+	// Log in first: hashing the password is slow, and an agent that has to
+	// wait for it can look stale.
+	s := newLoggedIn(t, h)
 	_, _ = register(t, h, "a1")
 	waitFor(t, "agent", func() bool { return len(h.Agents()) == 1 })
-	s := newLoggedIn(t, h)
 
 	rec := s.do("GET", "/api/agents/a1", "")
 	var a agentJSON

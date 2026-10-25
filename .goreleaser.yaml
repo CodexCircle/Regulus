@@ -37,11 +37,32 @@ nfpms:
     license: Apache-2.0
     formats: [deb, rpm]
     bindir: /usr/bin
-    # systemd unit, configuration and maintainer scripts are added with the
-    # installer work (issue #10).
+    # Ubuntu Server is the reference platform. The package runs the hub as the
+    # unprivileged system user "regulus"; see packaging/ and the README.
+    contents:
+      - src: packaging/regulus.service
+        dst: /usr/lib/systemd/system/regulus.service
+      - src: packaging/config.yaml
+        dst: /etc/regulus/config.yaml
+        type: config|noreplace
+        file_info:
+          mode: 0640
+          owner: root
+          group: regulus
+    scripts:
+      preinstall: packaging/scripts/preinstall.sh
+      postinstall: packaging/scripts/postinstall.sh
+      preremove: packaging/scripts/preremove.sh
+      postremove: packaging/scripts/postremove.sh
+    overrides:
+      deb:
+        dependencies: [adduser]
 
 checksum:
   name_template: checksums.txt
+  # The installer is signed together with the packages.
+  extra_files:
+    - glob: packaging/install.sh
 
 # Keyless signature (Sigstore) of the checksums file, made with the GitHub
 # Actions identity of the release workflow. Verify with:
@@ -62,6 +83,9 @@ sboms:
   - artifacts: archive
 
 release:
+  # Published so that .../releases/latest/download/install.sh always works.
+  extra_files:
+    - glob: packaging/install.sh
   # Tags such as v1.2.0-beta.1 are published as pre-releases (beta channel).
   prerelease: auto
 

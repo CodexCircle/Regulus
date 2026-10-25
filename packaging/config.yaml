@@ -1,0 +1,20 @@
+# Regulus hub configuration. Environment variables (REGULUS_*, also from
+# /etc/regulus/regulus.env) and command-line flags override these values.
+# Restart the service after changing it: sudo systemctl restart regulus
+
+# Address of the dashboard and API. Plain HTTP: to reach the hub from other
+# machines, put a reverse proxy with TLS in front and listen on 127.0.0.1:8080.
+listen: ":8080"
+
+# Where the hub keeps its database. Created by the service unit.
+data_dir: /var/lib/regulus
+
+# Run an agent inside the hub, so this server is managed like the others.
+builtin_agent: true
+
+# How often agents report their metrics (at least 1s).
+metrics_interval: 10s
+
+log:
+  level: info # debug, info, warn, error
+  format: text # text, json

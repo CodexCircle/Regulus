@@ -1,0 +1,49 @@
+[Unit]
+Description=Regulus hub (CodexCircle Server Manager)
+Documentation=https://github.com/CodexCircle/Regulus
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=regulus
+Group=regulus
+# Settings chosen by the installer (for example REGULUS_BUILTIN_AGENT) override
+# the configuration file; the file may be missing.
+EnvironmentFile=-/etc/regulus/regulus.env
+ExecStart=/usr/bin/regulus hub --config /etc/regulus/config.yaml
+Restart=on-failure
+RestartSec=5
+
+# /var/lib/regulus, owned by the service user and created by systemd.
+StateDirectory=regulus
+StateDirectoryMode=0750
+UMask=0077
+
+# Hardening: the hub reads /proc and statfs and needs no privileges. See the
+# privilege model in the README before loosening any of this.
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

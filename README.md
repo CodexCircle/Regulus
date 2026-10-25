@@ -53,6 +53,30 @@ Ubuntu Server (22.04 and 24.04, amd64 and arm64) is the reference platform. Debi
 
 Third-party plugins come after the plugin system is stable. Work is tracked in the [issues](https://github.com/CodexCircle/Regulus/issues).
 
+## Installation (Ubuntu Server)
+
+The hub installs on Ubuntu Server 22.04 and 24.04 (amd64 and arm64; other Debian-based systems with systemd should work too). One command downloads the `.deb` of the latest release, verifies its checksum and signature, installs it, starts the service and prints where to open the dashboard and the one-time setup token:
+
+```sh
+curl -fsSL https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh | sh
+```
+
+The installer asks whether to include the **built-in agent** (so the hub's own server is managed like the others). To answer in advance, or in a script, add options after `sh -s --`: `--builtin-agent`, `--no-builtin-agent`, `--yes` (no questions), `--beta` (latest pre-release), `--version 0.2.0`, `--require-signature` (fail unless the signature can be verified with [cosign](https://docs.sigstore.dev/cosign/)). Without cosign the installer verifies the checksum only and says so. If you prefer not to pipe a script into a shell, download the `.deb` from the [releases](https://github.com/CodexCircle/Regulus/releases), verify it as shown under [Releases](#releases) and run `sudo apt install ./regulus_*.deb`. While the repository is private, download the release files with `gh release download` instead.
+
+What the package sets up:
+
+| Path | Purpose |
+|---|---|
+| `/usr/bin/regulus` | the executable |
+| `/usr/lib/systemd/system/regulus.service` | the service, enabled and started at install |
+| `/etc/regulus/config.yaml` | configuration (kept on upgrade) |
+| `/etc/regulus/regulus.env` | settings chosen by the installer, such as `REGULUS_BUILTIN_AGENT`; they override `config.yaml` |
+| `/var/lib/regulus` | the database; kept when the package is removed or purged |
+
+**Privilege model.** The hub runs as the system user `regulus`, which has no login shell, no home directory and no `sudo` rights, and the unit is hardened (no capabilities, read-only system, private `/tmp` and devices, system call filter). Monitoring needs no privileges, so this is enough for now. Actions that do need them (restarting services, package updates, Docker) will be added as explicit, opt-in grants rather than by running as root; see issue #46. Check the unit with `systemd-analyze security regulus`.
+
+The dashboard speaks plain HTTP on port 8080. Before exposing the hub beyond a trusted network, put a reverse proxy with TLS in front of it and set `listen: 127.0.0.1:8080` in `/etc/regulus/config.yaml`.
+
 ## Development
 
 Requirements: Go 1.26+, Node.js 22+.
@@ -63,6 +87,7 @@ make build            # builds the dashboard, then bin/regulus
 make test             # go vet, go test -race, dashboard typecheck and tests
 make lint             # golangci-lint and ESLint
 make smoke            # start bin/regulus and check it end to end (after make build)
+scripts/test-install.sh   # tests of the install script (also part of make test)
 ```
 
 For dashboard work, run `npm run dev` in `dashboard/` (proxies `/api` to the hub on `:8080`).
@@ -131,10 +156,11 @@ internal/inproc/   in-memory gRPC transport (used by the built-in agent)
 internal/gen/      generated Go code for proto/ (do not edit)
 internal/webui/    embeds the compiled dashboard
 dashboard/         React + TypeScript dashboard
+packaging/         systemd unit, default config, maintainer scripts and install.sh
 proto/             Protobuf contract between agents and the hub
 ```
 
-Planned: `plugins/` (internal plugins), `packaging/` (systemd, `.deb`).
+Planned: `plugins/` (internal plugins).
 
 ## Contributing
 
@@ -186,6 +212,30 @@ Ubuntu Server (22.04 e 24.04, amd64 e arm64) è la piattaforma di riferimento. S
 
 I plug-in di terze parti arriveranno dopo la stabilizzazione del sistema di plug-in. Il lavoro è tracciato nelle [issue](https://github.com/CodexCircle/Regulus/issues).
 
+## Installazione (Ubuntu Server)
+
+L'hub si installa su Ubuntu Server 22.04 e 24.04 (amd64 e arm64; dovrebbe funzionare anche su altri sistemi basati su Debian con systemd). Un solo comando scarica il `.deb` dell'ultima release, ne verifica checksum e firma, lo installa, avvia il servizio e mostra dove aprire la dashboard e il token di setup monouso:
+
+```sh
+curl -fsSL https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh | sh
+```
+
+L'installer chiede se includere l'**agent integrato** (così il server dell'hub è gestito come gli altri). Per rispondere in anticipo, o in uno script, aggiungi opzioni dopo `sh -s --`: `--builtin-agent`, `--no-builtin-agent`, `--yes` (nessuna domanda), `--beta` (ultima pre-release), `--version 0.2.0`, `--require-signature` (fallisce se la firma non si può verificare con [cosign](https://docs.sigstore.dev/cosign/)). Senza cosign l'installer verifica solo il checksum e lo dice. Se preferisci non passare uno script a una shell, scarica il `.deb` dalle [release](https://github.com/CodexCircle/Regulus/releases), verificalo come descritto in [Rilasci](#rilasci) ed esegui `sudo apt install ./regulus_*.deb`. Finché il repository è privato, scarica i file della release con `gh release download`.
+
+Cosa prepara il pacchetto:
+
+| Percorso | Scopo |
+|---|---|
+| `/usr/bin/regulus` | l'eseguibile |
+| `/usr/lib/systemd/system/regulus.service` | il servizio, abilitato e avviato all'installazione |
+| `/etc/regulus/config.yaml` | configurazione (conservata negli aggiornamenti) |
+| `/etc/regulus/regulus.env` | impostazioni scelte dall'installer, come `REGULUS_BUILTIN_AGENT`; hanno la precedenza su `config.yaml` |
+| `/var/lib/regulus` | il database; resta se il pacchetto viene rimosso o purgato |
+
+**Modello dei privilegi.** L'hub gira con l'utente di sistema `regulus`, senza shell di login, senza home e senza diritti `sudo`, e l'unità è rinforzata (nessuna capability, sistema in sola lettura, `/tmp` e dispositivi privati, filtro delle system call). Il monitoraggio non richiede privilegi, quindi per ora basta. Le azioni che li richiedono (riavvio servizi, aggiornamenti dei pacchetti, Docker) arriveranno come permessi espliciti e facoltativi, non eseguendo come root; vedi l'issue #46. Controlla l'unità con `systemd-analyze security regulus`.
+
+La dashboard usa HTTP in chiaro sulla porta 8080. Prima di esporre l'hub oltre una rete fidata, metti davanti un reverse proxy con TLS e imposta `listen: 127.0.0.1:8080` in `/etc/regulus/config.yaml`.
+
 ## Sviluppo
 
 Requisiti: Go 1.26+, Node.js 22+.
@@ -196,6 +246,7 @@ make build            # compila la dashboard, poi bin/regulus
 make test             # go vet, go test -race, typecheck e test della dashboard
 make lint             # golangci-lint ed ESLint
 make smoke            # avvia bin/regulus e lo verifica end to end (dopo make build)
+scripts/test-install.sh   # test dello script di installazione (incluso in make test)
 ```
 
 Per lavorare sulla dashboard, esegui `npm run dev` in `dashboard/` (inoltra `/api` all'hub su `:8080`).
