@@ -1,5 +1,5 @@
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 
 // The build output goes where the Go binary embeds it (internal/webui/dist).
 export default defineConfig({
@@ -10,5 +10,9 @@ export default defineConfig({
   },
   server: {
     proxy: { "/api": "http://localhost:8080" },
+  },
+  test: {
+    environment: "jsdom",
+    setupFiles: ["./src/test-setup.ts"],
   },
 });

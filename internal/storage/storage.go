@@ -30,11 +30,11 @@ func Open(ctx context.Context, dataDir string) (*sql.DB, error) {
 	db.SetMaxOpenConns(1)
 
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("connect to database: %w", err)
 	}
 	if err := Migrate(ctx, db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return db, nil

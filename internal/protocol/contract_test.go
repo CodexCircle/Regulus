@@ -86,14 +86,14 @@ func newHub(t *testing.T) (*fakeHub, agentv1.AgentServiceClient) {
 	tr := inproc.New()
 	srv := grpc.NewServer()
 	agentv1.RegisterAgentServiceServer(srv, hub)
-	go srv.Serve(tr.Listener())
+	go func() { _ = srv.Serve(tr.Listener()) }() // returns when the test stops the server
 	t.Cleanup(srv.Stop)
 
 	conn, err := tr.Dial()
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	return hub, agentv1.NewAgentServiceClient(conn)
 }
 

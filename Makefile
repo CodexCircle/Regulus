@@ -1,4 +1,4 @@
-.PHONY: dashboard build test proto proto-check clean
+.PHONY: dashboard build lint test proto proto-check clean
 
 # Build the dashboard into internal/webui/dist so it is embedded in the binary.
 dashboard:
@@ -7,10 +7,14 @@ dashboard:
 build: dashboard
 	go build -ldflags "-X main.version=$$(git describe --tags --always --dirty)" -o bin/regulus ./cmd/regulus
 
+lint:
+	golangci-lint run
+	cd dashboard && npm ci && npm run lint
+
 test:
 	go vet ./...
-	go test ./...
-	cd dashboard && npm ci && npm run typecheck
+	go test -race ./...
+	cd dashboard && npm ci && npm run typecheck && npm test
 
 # Regenerate internal/gen from proto/ (generated code is committed, so a normal
 # build does not need these tools). Tool versions are pinned here.
