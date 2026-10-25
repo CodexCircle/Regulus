@@ -109,6 +109,10 @@ proto/             Protobuf contract between agents and the hub
 
 Planned: `plugins/` (internal plugins), `packaging/` (systemd, `.deb`).
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security problems: [SECURITY.md](SECURITY.md).
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
@@ -178,6 +182,10 @@ Il push di un tag `vX.Y.Z` avvia il workflow di release (GoReleaser): pubblica u
 L'hub legge, in ordine di priorità crescente: valori predefiniti, file YAML (`--config` o `REGULUS_CONFIG`), variabili d'ambiente, flag. Le impostazioni e i nomi sono nella tabella in inglese qui sopra.
 
 L'hub salva i dati in un database SQLite (`regulus.db`) dentro `data_dir` e applica automaticamente le migrazioni dello schema all'avvio.
+
+## Contribuire
+
+Vedi [CONTRIBUTING.md](CONTRIBUTING.md#italiano). Problemi di sicurezza: [SECURITY.md](SECURITY.md#italiano).
 
 ## Licenza
 
