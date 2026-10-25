@@ -87,6 +87,7 @@ The hub reads, in increasing priority: defaults, a YAML file (`--config` or `REG
 | `listen` | `--listen` | `REGULUS_LISTEN` | `:8080` |
 | `data_dir` | `--data-dir` | `REGULUS_DATA_DIR` | `data` |
 | `builtin_agent` (`true`, `false`) | `--builtin-agent` | `REGULUS_BUILTIN_AGENT` | `true` |
+| `metrics_interval` (for example `10s`, minimum `1s`) | `--metrics-interval` | `REGULUS_METRICS_INTERVAL` | `10s` |
 | `log.level` (`debug`, `info`, `warn`, `error`) | `--log-level` | `REGULUS_LOG_LEVEL` | `info` |
 | `log.format` (`text`, `json`) | `--log-format` | `REGULUS_LOG_FORMAT` | `text` |
 
@@ -96,7 +97,7 @@ The hub stores its data in a SQLite database (`regulus.db`) inside `data_dir` an
 
 ### HTTP API
 
-`GET /api/agents` returns the connected agents as JSON (id, version, system info, `status` of `connected` or `stale`, last heartbeat, uptime). It is read-only and has no authentication yet; the dashboard shows it on its home page. Do not expose the hub port to untrusted networks until authentication is in place.
+`GET /api/agents` returns the connected agents as JSON (id, version, system info, `status` of `connected` or `stale`, last heartbeat, uptime). `GET /api/agents/{id}/metrics` returns the recent metrics of an agent (CPU, load, memory, swap, disks, network counters and rates, uptime), oldest first; `?since=<RFC 3339>` returns only newer points. The hub keeps the last hour of metrics in memory (up to 3600 reports per agent), so the history is lost when the hub restarts. Both endpoints are read-only and have no authentication yet; the dashboard shows the first on its home page. Do not expose the hub port to untrusted networks until authentication is in place.
 
 ## Repository layout
 
@@ -106,7 +107,7 @@ internal/config/   configuration (defaults, YAML file, environment, flags)
 internal/logging/  structured logging
 internal/storage/  SQLite database and migrations
 internal/hub/      hub: HTTP server, agents API and the agent service (registry of connected agents)
-internal/agent/    agent runtime (client side of the contract), also used as the built-in agent
+internal/agent/    agent runtime (client side of the contract) and Linux metrics collector, also used as the built-in agent
 internal/protocol/ protocol version of the agent-hub contract
 internal/inproc/   in-memory gRPC transport (used by the built-in agent)
 internal/gen/      generated Go code for proto/ (do not edit)
@@ -195,7 +196,7 @@ L'hub salva i dati in un database SQLite (`regulus.db`) dentro `data_dir` e appl
 
 ### API HTTP
 
-`GET /api/agents` restituisce in JSON gli agent connessi (id, versione, info di sistema, `status` `connected` o `stale`, ultimo heartbeat, uptime). È in sola lettura e per ora senza autenticazione; la dashboard la mostra nella pagina iniziale. Non esporre la porta dell'hub su reti non fidate finché non c'è l'autenticazione.
+`GET /api/agents` restituisce in JSON gli agent connessi (id, versione, info di sistema, `status` `connected` o `stale`, ultimo heartbeat, uptime). `GET /api/agents/{id}/metrics` restituisce le metriche recenti di un agent (CPU, load, memoria, swap, dischi, contatori e velocità di rete, uptime), dalla più vecchia; `?since=<RFC 3339>` restituisce solo i punti più recenti. L'hub tiene in memoria l'ultima ora di metriche (fino a 3600 report per agent), quindi lo storico si perde al riavvio dell'hub. Entrambi gli endpoint sono in sola lettura e per ora senza autenticazione; la dashboard mostra il primo nella pagina iniziale. Non esporre la porta dell'hub su reti non fidate finché non c'è l'autenticazione.
 
 ## Contribuire
 

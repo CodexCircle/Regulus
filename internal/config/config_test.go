@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func env(m map[string]string) func(string) string {
@@ -88,6 +89,36 @@ func TestBuiltinAgent(t *testing.T) {
 
 	if _, err := Load(nil, env(map[string]string{"REGULUS_BUILTIN_AGENT": "maybe"}), io.Discard); err == nil {
 		t.Fatal("expected an error for a value that is not a boolean")
+	}
+}
+
+func TestMetricsInterval(t *testing.T) {
+	file := writeFile(t, "metrics_interval: 30s\n")
+
+	cfg, err := Load(nil, env(nil), io.Discard)
+	if err != nil || cfg.MetricsInterval != 10*time.Second {
+		t.Fatalf("default: cfg = %+v, err = %v; want 10s", cfg, err)
+	}
+	cfg, err = Load([]string{"-config", file}, env(nil), io.Discard)
+	if err != nil || cfg.MetricsInterval != 30*time.Second {
+		t.Fatalf("file: cfg = %+v, err = %v; want 30s", cfg, err)
+	}
+	cfg, err = Load([]string{"-config", file}, env(map[string]string{"REGULUS_METRICS_INTERVAL": "20s"}), io.Discard)
+	if err != nil || cfg.MetricsInterval != 20*time.Second {
+		t.Fatalf("env: cfg = %+v, err = %v; want 20s", cfg, err)
+	}
+	cfg, err = Load([]string{"-metrics-interval", "5s"}, env(map[string]string{"REGULUS_METRICS_INTERVAL": "20s"}), io.Discard)
+	if err != nil || cfg.MetricsInterval != 5*time.Second {
+		t.Fatalf("flag: cfg = %+v, err = %v; want 5s", cfg, err)
+	}
+
+	for name, args := range map[string][]string{"too short": {"-metrics-interval", "100ms"}, "zero": {"-metrics-interval", "0"}} {
+		if _, err := Load(args, env(nil), io.Discard); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+	if _, err := Load(nil, env(map[string]string{"REGULUS_METRICS_INTERVAL": "soon"}), io.Discard); err == nil {
+		t.Error("expected an error for a value that is not a duration")
 	}
 }
 

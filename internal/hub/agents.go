@@ -56,6 +56,8 @@ type agentServer struct {
 	metricsInterval   time.Duration
 	helloTimeout      time.Duration
 
+	metrics *metricsStore
+
 	mu       sync.Mutex
 	sessions map[string]*session
 }
@@ -79,6 +81,7 @@ func newAgentServer(log *slog.Logger) *agentServer {
 		heartbeatInterval: defaultHeartbeatInterval,
 		metricsInterval:   defaultMetricsInterval,
 		helloTimeout:      defaultHelloTimeout,
+		metrics:           newMetricsStore(defaultMetricsRetention),
 		sessions:          map[string]*session{},
 	}
 }
@@ -222,6 +225,7 @@ func (s *agentServer) handle(sess *session, msg *agentv1.AgentMessage) error {
 		s.mu.Lock()
 		sess.info.LastMetrics = p.Metrics
 		s.mu.Unlock()
+		s.metrics.add(sess.info.ID, p.Metrics)
 	case *agentv1.AgentMessage_CommandResult:
 		sess.deliver(p.CommandResult)
 	case *agentv1.AgentMessage_Hello:
@@ -278,6 +282,15 @@ func (s *agentServer) agents() []AgentInfo {
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
 	return list
+}
+
+// metricsHistory returns the recent metrics of an agent, oldest first. known is
+// false when the hub has never seen the agent.
+func (s *agentServer) metricsHistory(agentID string) (samples []MetricsSample, known bool) {
+	s.mu.Lock()
+	_, connected := s.sessions[agentID]
+	s.mu.Unlock()
+	return s.metrics.history(agentID), connected || s.metrics.known(agentID)
 }
 
 // sendCommand sends cmd to the agent and waits for its result. The command id

@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -25,8 +26,13 @@ type Config struct {
 	// BuiltinAgent runs an agent inside the hub, so the hub's own server is
 	// managed like any other.
 	BuiltinAgent bool `yaml:"builtin_agent"`
-	Log          Log  `yaml:"log"`
+	// MetricsInterval is how often agents report their metrics to the hub.
+	MetricsInterval time.Duration `yaml:"metrics_interval"`
+	Log             Log           `yaml:"log"`
 }
+
+// MinMetricsInterval is the shortest accepted metrics interval.
+const MinMetricsInterval = time.Second
 
 // Log configures logging.
 type Log struct {
@@ -39,10 +45,11 @@ type Log struct {
 // Default returns the built-in defaults.
 func Default() Config {
 	return Config{
-		Listen:       ":8080",
-		DataDir:      "data",
-		BuiltinAgent: true,
-		Log:          Log{Level: "info", Format: "text"},
+		Listen:          ":8080",
+		DataDir:         "data",
+		BuiltinAgent:    true,
+		MetricsInterval: 10 * time.Second,
+		Log:             Log{Level: "info", Format: "text"},
 	}
 }
 
@@ -53,6 +60,9 @@ func (c Config) Validate() error {
 	}
 	if c.DataDir == "" {
 		return errors.New("data_dir must not be empty")
+	}
+	if c.MetricsInterval < MinMetricsInterval {
+		return fmt.Errorf("metrics_interval %v is too short (minimum %v)", c.MetricsInterval, MinMetricsInterval)
 	}
 	switch c.Log.Level {
 	case "debug", "info", "warn", "error":
@@ -79,6 +89,7 @@ func Load(args []string, getenv func(string) string, output io.Writer) (Config, 
 	listen := fs.String("listen", "", "address to listen on (env REGULUS_LISTEN)")
 	dataDir := fs.String("data-dir", "", "directory for the hub data (env REGULUS_DATA_DIR)")
 	builtinAgent := fs.Bool("builtin-agent", true, "run an agent inside the hub (env REGULUS_BUILTIN_AGENT)")
+	metricsInterval := fs.Duration("metrics-interval", 0, "how often agents report metrics, for example 10s (env REGULUS_METRICS_INTERVAL)")
 	logLevel := fs.String("log-level", "", "log level: debug, info, warn, error (env REGULUS_LOG_LEVEL)")
 	logFormat := fs.String("log-format", "", "log format: text, json (env REGULUS_LOG_FORMAT)")
 	if err := fs.Parse(args); err != nil {
@@ -104,6 +115,13 @@ func Load(args []string, getenv func(string) string, output io.Writer) (Config, 
 		}
 		cfg.BuiltinAgent = b
 	}
+	if v := getenv("REGULUS_METRICS_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid configuration: REGULUS_METRICS_INTERVAL %q is not a duration (for example 10s)", v)
+		}
+		cfg.MetricsInterval = d
+	}
 	setIfNotEmpty(&cfg.Log.Level, getenv("REGULUS_LOG_LEVEL"))
 	setIfNotEmpty(&cfg.Log.Format, getenv("REGULUS_LOG_FORMAT"))
 
@@ -116,6 +134,8 @@ func Load(args []string, getenv func(string) string, output io.Writer) (Config, 
 			cfg.DataDir = *dataDir
 		case "builtin-agent":
 			cfg.BuiltinAgent = *builtinAgent
+		case "metrics-interval":
+			cfg.MetricsInterval = *metricsInterval
 		case "log-level":
 			cfg.Log.Level = *logLevel
 		case "log-format":

@@ -16,10 +16,15 @@ import (
 type fakeSource struct {
 	agents     []AgentInfo
 	staleAfter time.Duration
+	metrics    map[string][]MetricsSample
 }
 
 func (f fakeSource) Agents() []AgentInfo       { return f.agents }
 func (f fakeSource) StaleAfter() time.Duration { return f.staleAfter }
+func (f fakeSource) Metrics(id string) ([]MetricsSample, bool) {
+	samples, ok := f.metrics[id]
+	return samples, ok
+}
 
 func getAgents(t *testing.T, src AgentSource) []agentJSON {
 	t.Helper()

@@ -72,6 +72,9 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, ui fs.FS, opt
 		agents:    newAgentServer(log),
 		transport: inproc.New(),
 	}
+	if cfg.MetricsInterval > 0 {
+		h.agents.metricsInterval = cfg.MetricsInterval
+	}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -81,6 +84,12 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, ui fs.FS, opt
 // Agents returns a snapshot of the connected agents, ordered by id.
 func (h *Hub) Agents() []AgentInfo {
 	return h.agents.agents()
+}
+
+// Metrics returns the recent metrics reported by an agent, oldest first. known
+// is false when the hub has never seen the agent.
+func (h *Hub) Metrics(agentID string) (samples []MetricsSample, known bool) {
+	return h.agents.metricsHistory(agentID)
 }
 
 // SendCommand sends a command to a connected agent and waits for its result.
@@ -193,6 +202,7 @@ func NewHandler(ui fs.FS, agents AgentSource) http.Handler {
 	})
 
 	mux.HandleFunc("GET /api/agents", agentsHandler(agents))
+	mux.HandleFunc("GET /api/agents/{id}/metrics", metricsHandler(agents))
 
 	files := http.FileServerFS(ui)
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
