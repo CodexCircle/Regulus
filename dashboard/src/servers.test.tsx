@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent, User } from "./api";
 import { LiveProvider } from "./LiveProvider";
 import { ServerPage } from "./ServerPage";
-import { installCommand, ServersPage } from "./ServersPage";
+import { agentCommand, installCommand, ServersPage } from "./ServersPage";
 import { SessionContext } from "./session";
 
 const now = new Date().toISOString();
@@ -128,9 +128,14 @@ describe("ServersPage", () => {
     await user.type(await screen.findByLabelText("Name (optional)"), " Web ");
     await user.click(screen.getByRole("button", { name: "Create enrollment token" }));
 
-    const command = await screen.findByLabelText("Command");
-    expect((command as HTMLInputElement).value).toBe(
-      `regulus agent --hub ${window.location.hostname}:7443 --token tok123 --ca-fingerprint sha256:abcd --data-dir /var/lib/regulus-agent`,
+    const host = window.location.hostname;
+    const options = `--hub ${host}:7443 --token tok123 --ca-fingerprint sha256:abcd`;
+    const install = (await screen.findByLabelText("Install command")) as HTMLInputElement;
+    expect(install.value).toBe(
+      `curl -fsSL https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh | sh -s -- --role agent ${options}`,
+    );
+    expect((screen.getByLabelText("Agent command") as HTMLInputElement).value).toBe(
+      `regulus agent ${options} --data-dir /var/lib/regulus-agent`,
     );
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ name: "Web" });
     // The list is fetched again so the new server shows up.
@@ -146,13 +151,17 @@ describe("ServersPage", () => {
     renderAs(admin, <ServersPage />);
     await user.click(await screen.findByRole("button", { name: "Create enrollment token" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("agent listener is off");
-    expect(screen.queryByLabelText("Command")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Install command")).not.toBeInTheDocument();
   });
 
-  it("builds the command from the grant", () => {
-    expect(
-      installCommand({ token: "t", name: "", expires_at: now, ca_fingerprint: "sha256:f", agent_port: 1 }, "hub.lan"),
-    ).toBe("regulus agent --hub hub.lan:1 --token t --ca-fingerprint sha256:f --data-dir /var/lib/regulus-agent");
+  it("builds the commands from the grant", () => {
+    const grant = { token: "t", name: "", expires_at: now, ca_fingerprint: "sha256:f", agent_port: 1 };
+    expect(installCommand(grant, "hub.lan")).toBe(
+      "curl -fsSL https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh | sh -s -- --role agent --hub hub.lan:1 --token t --ca-fingerprint sha256:f",
+    );
+    expect(agentCommand(grant, "hub.lan")).toBe(
+      "regulus agent --hub hub.lan:1 --token t --ca-fingerprint sha256:f --data-dir /var/lib/regulus-agent",
+    );
   });
 });
 

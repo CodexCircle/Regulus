@@ -70,10 +70,21 @@ What the package sets up:
 | `/usr/bin/regulus` | the executable |
 | `/usr/lib/systemd/system/regulus.service` | the service, enabled and started at install |
 | `/etc/regulus/config.yaml` | configuration (kept on upgrade) |
+| `/usr/lib/systemd/system/regulus-agent.service` | the agent service, used only on servers installed with `--role agent` |
 | `/etc/regulus/regulus.env` | settings chosen by the installer, such as `REGULUS_BUILTIN_AGENT`; they override `config.yaml` |
+| `/etc/regulus/agent.yaml`, `/etc/regulus/role` | agent role only: the hub address, and a marker that keeps the package from starting a hub |
 | `/var/lib/regulus` | the database; kept when the package is removed or purged |
+| `/var/lib/regulus-agent` | agent role only: the agent's key and certificates; kept on removal |
 
 **Privilege model.** The hub runs as the system user `regulus`, which has no login shell, no home directory and no `sudo` rights, and the unit is hardened (no capabilities, read-only system, private `/tmp` and devices, system call filter). Monitoring needs no privileges, so this is enough for now. Actions that do need them (restarting services, package updates, Docker) will be added as explicit, opt-in grants rather than by running as root; see issue #46. Check the unit with `systemd-analyze security regulus`.
+
+**Installing an agent on another server.** The same installer sets up the agent role. In the dashboard open **Servers → Add a server**, which shows the command with a one-time token and the hub's CA fingerprint, and run it on the new server (Ubuntu or Debian, as a user that can use `sudo`):
+
+```sh
+curl -fsSL https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh | sh -s -- --role agent --hub HUB_HOST:8443 --token TOKEN --ca-fingerprint sha256:...
+```
+
+It verifies and installs the same package, enrolls the server as the `regulus` user (the token is sent only to a hub whose CA has that fingerprint), then enables and starts `regulus-agent.service`; the server shows as online within seconds. The hub must have the agent listener on (see [Remote agents](#remote-agents)). Keep the token off the command line with `REGULUS_AGENT_TOKEN=... sh -s -- --role agent ...`. Install the same version as the hub: add `--version`. If the hub revokes the agent, the service stops and is not restarted (exit status 3).
 
 The dashboard speaks plain HTTP on port 8080. Before exposing the hub beyond a trusted network, put a reverse proxy with TLS in front of it and set `listen: 127.0.0.1:8080` in `/etc/regulus/config.yaml`.
 
@@ -145,7 +156,7 @@ Besides the built-in agent, a server can run `regulus agent` and be managed from
 
 1. **Turn on the listener.** Remote agents are off by default. Set `agent_listen: ":8443"` (or `--agent-listen`, `REGULUS_AGENT_LISTEN`) and restart the hub. Open that port in the firewall only towards the servers you manage.
 2. **Make a token.** An admin opens **Servers → Add a server** in the dashboard, optionally names the server and gets the command to run, with a one-time token valid for one hour, the port and the **CA fingerprint** of the hub (the same thing `POST /api/enrollment-tokens` returns). The token is shown once.
-3. **Enroll the agent** on the other server, once:
+3. **Enroll the agent** on the other server, once. On Ubuntu or Debian the easiest way is the installer command shown by the dashboard (see [Installation](#installation-ubuntu-server)); by hand, with the binary already there:
    ```sh
    regulus agent --hub HUB_HOST:8443 --token TOKEN --ca-fingerprint sha256:... --data-dir /var/lib/regulus-agent
    ```
@@ -254,10 +265,21 @@ Cosa prepara il pacchetto:
 | `/usr/bin/regulus` | l'eseguibile |
 | `/usr/lib/systemd/system/regulus.service` | il servizio, abilitato e avviato all'installazione |
 | `/etc/regulus/config.yaml` | configurazione (conservata negli aggiornamenti) |
+| `/usr/lib/systemd/system/regulus-agent.service` | il servizio dell'agent, usato solo sui server installati con `--role agent` |
 | `/etc/regulus/regulus.env` | impostazioni scelte dall'installer, come `REGULUS_BUILTIN_AGENT`; hanno la precedenza su `config.yaml` |
+| `/etc/regulus/agent.yaml`, `/etc/regulus/role` | solo ruolo agent: l'indirizzo dell'hub e un segnaposto che impedisce al pacchetto di avviare un hub |
 | `/var/lib/regulus` | il database; resta se il pacchetto viene rimosso o purgato |
+| `/var/lib/regulus-agent` | solo ruolo agent: chiave e certificati dell'agent; restano se si rimuove il pacchetto |
 
 **Modello dei privilegi.** L'hub gira con l'utente di sistema `regulus`, senza shell di login, senza home e senza diritti `sudo`, e l'unità è rinforzata (nessuna capability, sistema in sola lettura, `/tmp` e dispositivi privati, filtro delle system call). Il monitoraggio non richiede privilegi, quindi per ora basta. Le azioni che li richiedono (riavvio servizi, aggiornamenti dei pacchetti, Docker) arriveranno come permessi espliciti e facoltativi, non eseguendo come root; vedi l'issue #46. Controlla l'unità con `systemd-analyze security regulus`.
+
+**Installare un agent su un altro server.** Lo stesso installer prepara il ruolo agent. Nella dashboard apri **Servers → Add a server**, che mostra il comando con un token monouso e la fingerprint della CA dell'hub, ed eseguilo sul nuovo server (Ubuntu o Debian, con un utente che può usare `sudo`):
+
+```sh
+curl -fsSL https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh | sh -s -- --role agent --hub HOST_HUB:8443 --token TOKEN --ca-fingerprint sha256:...
+```
+
+Verifica e installa lo stesso pacchetto, registra il server come utente `regulus` (il token va solo a un hub la cui CA ha quella fingerprint), poi abilita e avvia `regulus-agent.service`; il server risulta online in pochi secondi. L'hub deve avere il listener degli agent attivo (vedi [Agent remoti](#agent-remoti)). Per tenere il token fuori dalla riga di comando usa `REGULUS_AGENT_TOKEN=... sh -s -- --role agent ...`. Installa la stessa versione dell'hub: aggiungi `--version`. Se l'hub revoca l'agent, il servizio si ferma e non viene riavviato (exit status 3).
 
 La dashboard usa HTTP in chiaro sulla porta 8080. Prima di esporre l'hub oltre una rete fidata, metti davanti un reverse proxy con TLS e imposta `listen: 127.0.0.1:8080` in `/etc/regulus/config.yaml`.
 
@@ -313,7 +335,7 @@ Oltre all'agent integrato, un server può eseguire `regulus agent` ed essere ges
 
 1. **Attiva il listener.** Gli agent remoti sono spenti di default. Imposta `agent_listen: ":8443"` (oppure `--agent-listen`, `REGULUS_AGENT_LISTEN`) e riavvia l'hub. Apri quella porta nel firewall solo verso i server che gestisci.
 2. **Crea un token.** Un admin apre **Servers → Add a server** nella dashboard, dà se vuole un nome al server e ottiene il comando da eseguire, con un token monouso valido un'ora, la porta e la **fingerprint della CA** dell'hub (le stesse cose che restituisce `POST /api/enrollment-tokens`). Il token viene mostrato una sola volta.
-3. **Registra l'agent** sull'altro server, una volta sola:
+3. **Registra l'agent** sull'altro server, una volta sola. Su Ubuntu o Debian il modo più semplice è il comando dell'installer mostrato dalla dashboard (vedi [Installazione](#installazione-ubuntu-server)); a mano, con il binario già presente:
    ```sh
    regulus agent --hub HOST_HUB:8443 --token TOKEN --ca-fingerprint sha256:... --data-dir /var/lib/regulus-agent
    ```

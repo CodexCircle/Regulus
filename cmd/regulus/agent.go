@@ -15,6 +15,10 @@ import (
 	"github.com/CodexCircle/Regulus/internal/logging"
 )
 
+// exitRejected is the exit status of an agent the hub does not accept (revoked
+// or removed). The service unit does not restart on it: retrying cannot help.
+const exitRejected = 3
+
 // runAgent implements `regulus agent`: a remote agent that connects out to a
 // hub. The first run enrolls it with the token; later runs only need the hub
 // address and the saved credentials.
@@ -61,6 +65,10 @@ func agentMain(ctx context.Context, args []string, getenv func(string) string, s
 		return 1
 	}
 
+	if cfg.EnrollOnly {
+		return 0
+	}
+
 	conn, err := creds.Dial(cfg.Hub)
 	if err != nil {
 		log.Error("cannot connect", "err", err)
@@ -73,7 +81,7 @@ func agentMain(ctx context.Context, args []string, getenv func(string) string, s
 	var rejected *agent.RejectedError
 	if errors.As(err, &rejected) {
 		log.Error("the hub does not accept this agent: it was revoked or removed. To use this server again, remove the agent data directory and enroll with a new token", "dir", cfg.DataDir, "err", err)
-		return 1
+		return exitRejected
 	}
 	if err != nil {
 		log.Error("agent stopped", "err", err)

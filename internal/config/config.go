@@ -202,6 +202,10 @@ type Agent struct {
 	// DataDir holds the agent's key and certificates.
 	DataDir string `yaml:"data_dir"`
 	Log     Log    `yaml:"log"`
+	// EnrollOnly enrolls and exits without connecting. The installer uses it
+	// to enroll as the service user before the service starts. Command line
+	// only.
+	EnrollOnly bool `yaml:"-"`
 }
 
 // DefaultAgent returns the built-in defaults of an agent.
@@ -247,9 +251,11 @@ func LoadAgent(args []string, getenv func(string) string, output io.Writer) (Age
 	dataDir := fs.String("data-dir", "", "directory for the agent's key and certificates (env REGULUS_AGENT_DATA_DIR)")
 	logLevel := fs.String("log-level", "", "log level: debug, info, warn, error (env REGULUS_LOG_LEVEL)")
 	logFormat := fs.String("log-format", "", "log format: text, json (env REGULUS_LOG_FORMAT)")
+	enrollOnly := fs.Bool("enroll-only", false, "enroll with the token, save the credentials and exit")
 	if err := fs.Parse(args); err != nil {
 		return Agent{}, err
 	}
+	cfg.EnrollOnly = *enrollOnly
 
 	file := *path
 	if file == "" {

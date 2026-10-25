@@ -159,8 +159,13 @@ enroll_token=$(sed -n 's/.*"token":"\([^"]*\)".*/\1/p' <<<"$grant")
 fingerprint=$(sed -n 's/.*"ca_fingerprint":"\([^"]*\)".*/\1/p' <<<"$grant")
 [[ -n $enroll_token && -n $fingerprint ]] || fail "unexpected enrollment answer: $grant"
 
+# --enroll-only (what the installer uses) saves the credentials and exits...
 "$bin" agent --hub "$agent_addr" --token "$enroll_token" --ca-fingerprint "$fingerprint" \
-	--data-dir "$tmp/agent" >"$tmp/agent.log" 2>&1 &
+	--data-dir "$tmp/agent" --enroll-only >"$tmp/enroll.log" 2>&1 || { cat "$tmp/enroll.log" >&2; fail "agent --enroll-only failed"; }
+[[ -s $tmp/agent/agent.key ]] || fail "--enroll-only did not save the credentials"
+[[ -z $(curl -fsS -b "$jar" "http://$addr/api/agents") || $(curl -fsS -b "$jar" "http://$addr/api/agents") == '[]' ]] || fail "--enroll-only left an agent connected"
+# ...and the agent then runs with the saved credentials alone.
+"$bin" agent --hub "$agent_addr" --data-dir "$tmp/agent" >"$tmp/agent.log" 2>&1 &
 agent_pid=$!
 remote_id=
 for _ in $(seq 1 100); do
@@ -190,7 +195,7 @@ if kill -0 "$agent_pid" 2>/dev/null; then
 fi
 agent_status=0
 wait "$agent_pid" || agent_status=$?
-[[ $agent_status -ne 0 ]] || fail "the revoked agent exited with status 0"
+[[ $agent_status -eq 3 ]] || fail "the revoked agent exited with status $agent_status, want 3 (no restart by systemd)"
 stop_hub
 
 echo "smoke test passed"

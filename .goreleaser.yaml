@@ -42,6 +42,8 @@ nfpms:
     contents:
       - src: packaging/regulus.service
         dst: /usr/lib/systemd/system/regulus.service
+      - src: packaging/regulus-agent.service
+        dst: /usr/lib/systemd/system/regulus-agent.service
       - src: packaging/config.yaml
         dst: /etc/regulus/config.yaml
         type: config|noreplace
