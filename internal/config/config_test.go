@@ -63,6 +63,34 @@ func TestPrecedence(t *testing.T) {
 	}
 }
 
+func TestBuiltinAgent(t *testing.T) {
+	file := writeFile(t, "builtin_agent: false\n")
+
+	cfg, err := Load(nil, env(nil), io.Discard)
+	if err != nil || !cfg.BuiltinAgent {
+		t.Fatalf("default: cfg = %+v, err = %v; want the built-in agent enabled", cfg, err)
+	}
+
+	cfg, err = Load([]string{"-config", file}, env(nil), io.Discard)
+	if err != nil || cfg.BuiltinAgent {
+		t.Fatalf("file: cfg = %+v, err = %v; want the built-in agent disabled", cfg, err)
+	}
+
+	// environment overrides the file, flags override the environment
+	cfg, err = Load([]string{"-config", file}, env(map[string]string{"REGULUS_BUILTIN_AGENT": "true"}), io.Discard)
+	if err != nil || !cfg.BuiltinAgent {
+		t.Fatalf("env: cfg = %+v, err = %v; want the built-in agent enabled", cfg, err)
+	}
+	cfg, err = Load([]string{"-builtin-agent=false"}, env(map[string]string{"REGULUS_BUILTIN_AGENT": "true"}), io.Discard)
+	if err != nil || cfg.BuiltinAgent {
+		t.Fatalf("flag: cfg = %+v, err = %v; want the built-in agent disabled", cfg, err)
+	}
+
+	if _, err := Load(nil, env(map[string]string{"REGULUS_BUILTIN_AGENT": "maybe"}), io.Discard); err == nil {
+		t.Fatal("expected an error for a value that is not a boolean")
+	}
+}
+
 func TestConfigPathFromEnv(t *testing.T) {
 	file := writeFile(t, "data_dir: /from/env-file\n")
 	cfg, err := Load(nil, env(map[string]string{"REGULUS_CONFIG": file}), io.Discard)

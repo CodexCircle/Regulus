@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -21,7 +22,10 @@ type Config struct {
 	Listen string `yaml:"listen"`
 	// DataDir is the directory where the hub stores its database.
 	DataDir string `yaml:"data_dir"`
-	Log     Log    `yaml:"log"`
+	// BuiltinAgent runs an agent inside the hub, so the hub's own server is
+	// managed like any other.
+	BuiltinAgent bool `yaml:"builtin_agent"`
+	Log          Log  `yaml:"log"`
 }
 
 // Log configures logging.
@@ -35,9 +39,10 @@ type Log struct {
 // Default returns the built-in defaults.
 func Default() Config {
 	return Config{
-		Listen:  ":8080",
-		DataDir: "data",
-		Log:     Log{Level: "info", Format: "text"},
+		Listen:       ":8080",
+		DataDir:      "data",
+		BuiltinAgent: true,
+		Log:          Log{Level: "info", Format: "text"},
 	}
 }
 
@@ -73,6 +78,7 @@ func Load(args []string, getenv func(string) string, output io.Writer) (Config, 
 	path := fs.String("config", "", "path to the YAML configuration file (env REGULUS_CONFIG)")
 	listen := fs.String("listen", "", "address to listen on (env REGULUS_LISTEN)")
 	dataDir := fs.String("data-dir", "", "directory for the hub data (env REGULUS_DATA_DIR)")
+	builtinAgent := fs.Bool("builtin-agent", true, "run an agent inside the hub (env REGULUS_BUILTIN_AGENT)")
 	logLevel := fs.String("log-level", "", "log level: debug, info, warn, error (env REGULUS_LOG_LEVEL)")
 	logFormat := fs.String("log-format", "", "log format: text, json (env REGULUS_LOG_FORMAT)")
 	if err := fs.Parse(args); err != nil {
@@ -91,6 +97,13 @@ func Load(args []string, getenv func(string) string, output io.Writer) (Config, 
 
 	setIfNotEmpty(&cfg.Listen, getenv("REGULUS_LISTEN"))
 	setIfNotEmpty(&cfg.DataDir, getenv("REGULUS_DATA_DIR"))
+	if v := getenv("REGULUS_BUILTIN_AGENT"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid configuration: REGULUS_BUILTIN_AGENT %q is not a boolean", v)
+		}
+		cfg.BuiltinAgent = b
+	}
 	setIfNotEmpty(&cfg.Log.Level, getenv("REGULUS_LOG_LEVEL"))
 	setIfNotEmpty(&cfg.Log.Format, getenv("REGULUS_LOG_FORMAT"))
 
@@ -101,6 +114,8 @@ func Load(args []string, getenv func(string) string, output io.Writer) (Config, 
 			cfg.Listen = *listen
 		case "data-dir":
 			cfg.DataDir = *dataDir
+		case "builtin-agent":
+			cfg.BuiltinAgent = *builtinAgent
 		case "log-level":
 			cfg.Log.Level = *logLevel
 		case "log-format":

@@ -86,8 +86,11 @@ The hub reads, in increasing priority: defaults, a YAML file (`--config` or `REG
 |---|---|---|---|
 | `listen` | `--listen` | `REGULUS_LISTEN` | `:8080` |
 | `data_dir` | `--data-dir` | `REGULUS_DATA_DIR` | `data` |
+| `builtin_agent` (`true`, `false`) | `--builtin-agent` | `REGULUS_BUILTIN_AGENT` | `true` |
 | `log.level` (`debug`, `info`, `warn`, `error`) | `--log-level` | `REGULUS_LOG_LEVEL` | `info` |
 | `log.format` (`text`, `json`) | `--log-format` | `REGULUS_LOG_FORMAT` | `text` |
+
+With `builtin_agent` enabled (the default) the hub runs an agent for its own server, which connects through the same contract as any other agent (agent id `local`).
 
 The hub stores its data in a SQLite database (`regulus.db`) inside `data_dir` and applies schema migrations automatically at startup.
 
@@ -99,6 +102,7 @@ internal/config/   configuration (defaults, YAML file, environment, flags)
 internal/logging/  structured logging
 internal/storage/  SQLite database and migrations
 internal/hub/      hub: HTTP server and the agent service (registry of connected agents)
+internal/agent/    agent runtime (client side of the contract), also used as the built-in agent
 internal/protocol/ protocol version of the agent-hub contract
 internal/inproc/   in-memory gRPC transport (used by the built-in agent)
 internal/gen/      generated Go code for proto/ (do not edit)
@@ -180,6 +184,8 @@ Il push di un tag `vX.Y.Z` avvia il workflow di release (GoReleaser): pubblica u
 ### Configurazione
 
 L'hub legge, in ordine di priorità crescente: valori predefiniti, file YAML (`--config` o `REGULUS_CONFIG`), variabili d'ambiente, flag. Le impostazioni e i nomi sono nella tabella in inglese qui sopra.
+
+Con `builtin_agent` attivo (predefinito) l'hub esegue un agent per il proprio server, che si collega con lo stesso contratto di qualsiasi altro agent (id `local`).
 
 L'hub salva i dati in un database SQLite (`regulus.db`) dentro `data_dir` e applica automaticamente le migrazioni dello schema all'avvio.
 

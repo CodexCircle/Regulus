@@ -15,6 +15,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/CodexCircle/Regulus/internal/agent"
 	"github.com/CodexCircle/Regulus/internal/config"
 	agentv1 "github.com/CodexCircle/Regulus/internal/gen/regulus/agent/v1"
 	"github.com/CodexCircle/Regulus/internal/inproc"
@@ -31,12 +32,19 @@ type Hub struct {
 	db  *sql.DB
 	ui  fs.FS
 
+	version   string
 	agents    *agentServer
 	transport *inproc.Transport // lets the built-in agent reach the hub without a network port
 }
 
 // Option customizes a Hub.
 type Option func(*Hub)
+
+// WithVersion sets the release version of the hub, reported by the built-in
+// agent.
+func WithVersion(version string) Option {
+	return func(h *Hub) { h.version = version }
+}
 
 // WithAgentIntervals sets the heartbeat and metrics intervals the hub asks
 // agents to use. Mostly useful in tests.
@@ -107,6 +115,14 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 	go func() { _ = grpcSrv.Serve(h.transport.Listener()) }()
 	defer grpcSrv.Stop() // agent streams are long-lived, so a graceful stop would wait forever
 
+	if h.cfg.BuiltinAgent {
+		stopAgent, err := h.startBuiltinAgent(ctx)
+		if err != nil {
+			return err
+		}
+		defer stopAgent()
+	}
+
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	h.log.Info("hub listening", "addr", ln.Addr().String())
@@ -127,6 +143,38 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 		return err
 	}
 	return nil
+}
+
+// BuiltinAgentID is the id of the agent that runs inside the hub.
+const BuiltinAgentID = "local"
+
+// startBuiltinAgent runs the agent of the hub's own server. It talks to the
+// hub through the same contract as any remote agent, over the in-process
+// transport. The returned function stops it and waits for it to finish.
+func (h *Hub) startBuiltinAgent(ctx context.Context) (stop func(), err error) {
+	conn, err := h.AgentConn()
+	if err != nil {
+		return nil, fmt.Errorf("built-in agent: %w", err)
+	}
+	agentCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		err := agent.Run(agentCtx, conn, agent.Options{
+			Version: h.version,
+			ID:      BuiltinAgentID,
+			Log:     h.log.With("component", "builtin-agent"),
+		})
+		if err != nil {
+			h.log.Error("built-in agent stopped", "err", err)
+		}
+	}()
+	h.log.Info("built-in agent enabled")
+	return func() {
+		cancel()
+		<-done
+		_ = conn.Close()
+	}, nil
 }
 
 // NewHandler returns the hub HTTP handler. The dashboard is served from ui.
