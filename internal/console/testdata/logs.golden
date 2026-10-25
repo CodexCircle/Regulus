@@ -1,0 +1,30 @@
+Regulus v0.3.0  Hub ● running
+
+ 1 Status   2 Settings   3 Logs   4 Health
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ all levels  (f)  following
+ time=2026-10-25T11:58:01Z level=INFO msg="hub listening" addr=[::]:8080
+ time=2026-10-25T11:58:02Z level=DEBUG msg="agent heartbeat" agent=local
+ time=2026-10-25T11:59:10Z level=WARN msg="agent is stale" agent=web1
+ time=2026-10-25T11:59:40Z level=ERROR msg="cannot reach the agent" agent=web1 err="timeout"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+tab/←/→ section  ↑/↓ move  enter edit  r restart  q quit

@@ -1,0 +1,30 @@
+Regulus v0.3.0  Hub ● running
+
+ 1 Status   2 Settings   3 Logs   4 Health
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ✓  Configuration     testdata/config.yaml is valid
+ ✓  Hub               answers on its local socket
+ ✓  Dashboard port    :8080 is served by the hub
+ !  Data directory    testdata/no-such-dir does not exist yet (created at the first start)
+ ·  Database          none yet
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+tab/←/→ section  ↑/↓ move  enter edit  r restart  q quit

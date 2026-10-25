@@ -126,10 +126,38 @@ The hub reads, in increasing priority: defaults, a YAML file (`--config` or `REG
 | `metrics_interval` (for example `10s`, minimum `1s`) | `--metrics-interval` | `REGULUS_METRICS_INTERVAL` | `10s` |
 | `log.level` (`debug`, `info`, `warn`, `error`) | `--log-level` | `REGULUS_LOG_LEVEL` | `info` |
 | `log.format` (`text`, `json`) | `--log-format` | `REGULUS_LOG_FORMAT` | `text` |
+| `console.tui` (`true`, `false`) | `--tui`, `--no-tui` (console commands only) | `REGULUS_NO_TUI=1` (the opposite) | `true` |
 
 With `builtin_agent` enabled (the default) the hub runs an agent for its own server, which connects through the same contract as any other agent (agent id `local`).
 
 The hub stores its data in a SQLite database (`regulus.db`) inside `data_dir` and applies schema migrations automatically at startup.
+
+### Console and command line
+
+Run `regulus` on the server (or `regulus console`) to open a full-screen console, in the spirit of the Claude Code and Gemini CLIs. It has four sections, reached with `tab`, the arrow keys, `1`-`4` or the mouse:
+
+- **Status:** whether the hub runs (and the state of its systemd unit), version, uptime, the dashboard address and port (with the addresses of this machine on the network), the agent port, the data directory and database size, the configuration file and the connected agents. While no administrator exists it shows the one-time **setup token**, and `p` makes a one-time password reset link for the administrator (after a confirmation), so a server without a browser nearby is still manageable.
+- **Settings:** every setting with its description, default, current value and where the value comes from (`default`, `file` or `environment`). `enter` edits one; the text is checked as you type, `tab` cycles through the allowed choices, and `enter` writes the change into the YAML file, keeping its comments. The console says whether the hub must be restarted and offers it with `r` (`sudo systemctl restart regulus`).
+- **Logs:** the last lines of the hub's log from journald, refreshed every two seconds, with a level filter on `f`.
+- **Health:** the configuration is valid, the hub answers, the ports are free or served by the hub, the data directory is writable, the database exists.
+
+The live data (agents, uptime, setup token) comes from the running hub through a Unix socket in the data directory (`regulus.sock`, mode `0600`, owned by the user that runs the hub), not through the web login. With the package install the data directory is private to `regulus`, so open the console with `sudo -u regulus regulus` to see it all, or with `sudo regulus` (changes to the configuration file need root as well). Without access to the socket the console still shows the settings and tells you what is missing.
+
+Every screen has a scriptable equivalent that uses the same code and the same file:
+
+| Command | What it does |
+|---|---|
+| `regulus status [--json\|--plain]` | the Status and Health information; exit status `0` when the hub runs, `3` when it does not, `1` when the configuration is broken |
+| `regulus config list [--json\|--plain]` | every setting with value and source |
+| `regulus config get KEY` | the current value of one setting |
+| `regulus config set KEY VALUE` | validates and writes one setting into the configuration file (a bare port such as `9090` becomes `:9090`; `agent_listen off` turns remote agents off) |
+| `regulus config path` | the configuration file in use |
+
+The file is `--config`, else `REGULUS_CONFIG`, else `/etc/regulus/config.yaml` when it exists. `config set` changes only that one line (a commented example such as `# agent_listen: ":8443"` becomes the setting) and refuses a value the hub would not accept. The settings are `listen`, `agent_listen`, `data_dir`, `builtin_agent`, `metrics_interval`, `log.level`, `log.format` and `console.tui`.
+
+**Turning the interactive screen off.** It is never forced. `regulus` prints the status as text instead when any of these holds, in this order (a flag beats an environment variable, which beats the configuration file, which beats detection): the flag `--no-tui` (alias `--notui`; `--tui` forces the screen on), the environment (`REGULUS_NO_TUI=1`, `CI` set, `TERM=dumb`), `console.tui: false` in the configuration file, or detection (stdin or stdout is not a terminal, such as a pipe, cron, systemd or SSH without a TTY, or the terminal is smaller than 60x16). `--json` and `--plain` print instead of opening the screen, and `--no-input` (alias `--non-interactive`) means that nothing is ever asked. `NO_COLOR` and `--no-color` only remove the colours; without a UTF-8 locale the console draws with plain ASCII characters. The strings of the screen are in `internal/console/strings.go`, ready for a translation.
+
+Not in the console yet: the reachability from the network, certificate validity and pending updates in Health (they need the update and TLS features), and creating the administrator (the setup token and the dashboard do it).
 
 ### Authentication
 
@@ -185,7 +213,9 @@ The **Servers** page lists every enrolled server, online or not, with its system
 
 ```
 cmd/regulus/       single executable (role chosen with a subcommand)
-internal/config/   configuration (defaults, YAML file, environment, flags)
+internal/config/   configuration (defaults, YAML file, environment, flags) and the editable settings
+internal/console/  the interactive console (Bubble Tea) and the status and settings output
+internal/localstatus/ the Unix socket where a running hub reports to local tools
 internal/logging/  structured logging
 internal/storage/  SQLite database and migrations
 internal/auth/     local accounts, sessions and the HTTP login endpoints
@@ -313,6 +343,33 @@ L'hub legge, in ordine di priorità crescente: valori predefiniti, file YAML (`-
 Con `builtin_agent` attivo (predefinito) l'hub esegue un agent per il proprio server, che si collega con lo stesso contratto di qualsiasi altro agent (id `local`).
 
 L'hub salva i dati in un database SQLite (`regulus.db`) dentro `data_dir` e applica automaticamente le migrazioni dello schema all'avvio.
+
+### Console e riga di comando
+
+Esegui `regulus` sul server (o `regulus console`) per aprire una console a schermo intero, nello spirito delle CLI di Claude Code e Gemini. Ha quattro sezioni, raggiungibili con `tab`, le frecce, `1`-`4` o il mouse:
+
+- **Status:** se l'hub è in esecuzione (e lo stato dell'unità systemd), versione, uptime, indirizzo e porta della dashboard (con gli indirizzi di questa macchina in rete), la porta degli agent, la directory dati e la dimensione del database, il file di configurazione e gli agent connessi. Finché non esiste un amministratore mostra il **token di setup** monouso, e `p` crea (dopo conferma) un link monouso per reimpostare la password dell'amministratore, così un server senza browser a portata di mano è comunque gestibile.
+- **Settings:** ogni impostazione con descrizione, valore predefinito, valore attuale e origine (`default`, `file` o `environment`). `invio` ne modifica una; il testo è controllato mentre si scrive, `tab` scorre le scelte ammesse, e `invio` scrive la modifica nel file YAML mantenendone i commenti. La console dice se serve riavviare l'hub e lo offre con `r` (`sudo systemctl restart regulus`).
+- **Logs:** le ultime righe del log dell'hub da journald, aggiornate ogni due secondi, con filtro per livello su `f`.
+- **Health:** la configurazione è valida, l'hub risponde, le porte sono libere o servite dall'hub, la directory dati è scrivibile, il database esiste.
+
+I dati in tempo reale (agent, uptime, token di setup) arrivano dall'hub in esecuzione tramite un socket Unix nella directory dati (`regulus.sock`, modo `0600`, di proprietà dell'utente che esegue l'hub), non tramite il login web. Con l'installazione da pacchetto la directory dati è privata per `regulus`, quindi apri la console con `sudo -u regulus regulus` per vedere tutto, o con `sudo regulus` (anche le modifiche al file di configurazione richiedono root). Senza accesso al socket la console mostra comunque le impostazioni e dice cosa manca.
+
+Ogni schermata ha un equivalente da script che usa lo stesso codice e lo stesso file:
+
+| Comando | Cosa fa |
+|---|---|
+| `regulus status [--json\|--plain]` | le informazioni di Status e Health; exit status `0` se l'hub è in esecuzione, `3` se non lo è, `1` se la configurazione è rotta |
+| `regulus config list [--json\|--plain]` | ogni impostazione con valore e origine |
+| `regulus config get CHIAVE` | il valore attuale di un'impostazione |
+| `regulus config set CHIAVE VALORE` | valida e scrive un'impostazione nel file di configurazione (una porta sola come `9090` diventa `:9090`; `agent_listen off` disattiva gli agent remoti) |
+| `regulus config path` | il file di configurazione in uso |
+
+Il file è `--config`, altrimenti `REGULUS_CONFIG`, altrimenti `/etc/regulus/config.yaml` se esiste. `config set` cambia solo quella riga (un esempio commentato come `# agent_listen: ":8443"` diventa l'impostazione) e rifiuta un valore che l'hub non accetterebbe. Le impostazioni sono `listen`, `agent_listen`, `data_dir`, `builtin_agent`, `metrics_interval`, `log.level`, `log.format` e `console.tui`.
+
+**Disattivare lo schermo interattivo.** Non è mai imposto. `regulus` stampa lo stato come testo quando vale una di queste condizioni, in quest'ordine (un flag prevale su una variabile d'ambiente, che prevale sul file di configurazione, che prevale sul rilevamento): il flag `--no-tui` (alias `--notui`; `--tui` forza lo schermo), l'ambiente (`REGULUS_NO_TUI=1`, `CI` impostata, `TERM=dumb`), `console.tui: false` nel file di configurazione, o il rilevamento (stdin o stdout non sono un terminale, come una pipe, cron, systemd o SSH senza TTY, oppure il terminale è più piccolo di 60x16). `--json` e `--plain` stampano invece di aprire lo schermo, e `--no-input` (alias `--non-interactive`) significa che non viene mai fatta una domanda. `NO_COLOR` e `--no-color` tolgono solo i colori; senza un locale UTF-8 la console disegna con caratteri ASCII semplici. Le stringhe dello schermo sono in `internal/console/strings.go`, pronte per una traduzione.
+
+Non ancora nella console: raggiungibilità dalla rete, validità dei certificati e aggiornamenti in sospeso in Health (richiedono le funzioni di aggiornamento e TLS), e la creazione dell'amministratore (la fanno il token di setup e la dashboard).
 
 ### Autenticazione
 

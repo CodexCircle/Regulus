@@ -1,0 +1,24 @@
+Regulus v0.3.0  Hub ● running
+
+ 1 Status   2 Settings   3 Logs   4 Health
+────────────────────────────────────────────────────────────────────────────────
+ Hub             running, up 3h 12m  (service: active)
+ Version         v0.3.0
+ Dashboard       http://localhost:8080
+                 also on http://192.168.1.20:8080
+ Agent port      :8443
+ Built-in agent  on
+ Data directory  testdata/no-such-dir
+ Configuration   testdata/config.yaml
+
+ Connected agents (2)
+   local          connected  4s ago     ubuntu01
+   web1           stale      1m 35s ago web1.lan
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+
+tab/←/→ section  ↑/↓ move  enter edit  r restart  q quit

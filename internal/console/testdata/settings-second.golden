@@ -1,0 +1,30 @@
+Regulus v0.3.0  Hub ● running
+
+ 1 Status   2 Settings   3 Logs   4 Health
+────────────────────────────────────────────────────────────────────────────────────────────────────
+   Setting            Value                      Source
+   listen             :8080                      file
+ ▸ agent_listen       (empty)                    default
+   data_dir           testdata/no-such-dir       file
+   builtin_agent      true                       file
+   metrics_interval   10s                        file
+   log.level          info                       file
+   log.format         text                       file
+   console.tui        true                       default
+
+ agent_listen  default: (empty)
+ Address where remote agents connect (gRPC over TLS); empty keeps remote agents off
+ The hub reads it at start: restart it to apply.
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+tab/←/→ section  ↑/↓ move  enter edit  r restart  q quit
