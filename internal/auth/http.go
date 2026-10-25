@@ -35,9 +35,17 @@ func UserFrom(ctx context.Context) (User, bool) {
 // the same origin, which together rule out cross-site request forgery.
 func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/auth/me", s.handleMe)
-	mux.Handle("POST /api/auth/setup", postJSON(http.HandlerFunc(s.handleSetup)))
-	mux.Handle("POST /api/auth/login", postJSON(http.HandlerFunc(s.handleLogin)))
-	mux.Handle("POST /api/auth/logout", postJSON(http.HandlerFunc(s.handleLogout)))
+	mux.Handle("POST /api/auth/setup", RequireJSON(http.HandlerFunc(s.handleSetup)))
+	mux.Handle("POST /api/auth/login", RequireJSON(http.HandlerFunc(s.handleLogin)))
+	mux.Handle("POST /api/auth/logout", RequireJSON(http.HandlerFunc(s.handleLogout)))
+}
+
+// Routes are the patterns Register adds to the mux.
+var Routes = []string{
+	"GET /api/auth/me",
+	"POST /api/auth/setup",
+	"POST /api/auth/login",
+	"POST /api/auth/logout",
 }
 
 // Require lets a request through only if it carries a valid session cookie;
@@ -139,10 +147,11 @@ func (s *Service) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// postJSON rejects POST requests that a browser could send from another site:
-// the body must be JSON (a content type forms cannot send without a CORS
-// preflight) and an Origin header, when present, must be the hub's own.
-func postJSON(next http.Handler) http.Handler {
+// RequireJSON rejects requests that change state and that a browser could send
+// from another site: the body must be JSON (a content type forms cannot send
+// without a CORS preflight) and an Origin header, when present, must be the
+// hub's own. Wrap every POST, PUT and DELETE handler with it.
+func RequireJSON(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ct := r.Header.Get("Content-Type")
 		if mt, _, _ := strings.Cut(ct, ";"); strings.TrimSpace(strings.ToLower(mt)) != "application/json" {

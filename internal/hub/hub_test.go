@@ -22,7 +22,7 @@ func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 }
 
 func TestHealthz(t *testing.T) {
-	rec := get(t, NewHandler(fstest.MapFS{}, nil, nil), "/healthz")
+	rec := get(t, NewHandler(Deps{UI: fstest.MapFS{}}), "/healthz")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
@@ -30,14 +30,14 @@ func TestHealthz(t *testing.T) {
 
 func TestServesDashboard(t *testing.T) {
 	ui := fstest.MapFS{"index.html": {Data: []byte("<h1>Regulus</h1>")}}
-	rec := get(t, NewHandler(ui, nil, nil), "/")
+	rec := get(t, NewHandler(Deps{UI: ui}), "/")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }
 
 func TestDashboardMissing(t *testing.T) {
-	rec := get(t, NewHandler(fstest.MapFS{}, nil, nil), "/")
+	rec := get(t, NewHandler(Deps{UI: fstest.MapFS{}}), "/")
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
 	}
@@ -87,7 +87,7 @@ func TestHubServesAndShutsDown(t *testing.T) {
 func TestDashboardOnlyAnswersGet(t *testing.T) {
 	ui := fstest.MapFS{"index.html": {Data: []byte("<h1>Regulus</h1>")}}
 	rec := httptest.NewRecorder()
-	NewHandler(ui, nil, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+	NewHandler(Deps{UI: ui}).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
 	if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") == "" {
 		t.Fatalf("status = %d, Allow = %q; want 405 with Allow", rec.Code, rec.Header().Get("Allow"))
 	}

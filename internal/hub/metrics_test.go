@@ -69,7 +69,7 @@ func TestMetricsStoreIgnoresNilReports(t *testing.T) {
 
 func getMetrics(t *testing.T, src AgentSource, path string) (*http.Response, metricsJSON) {
 	t.Helper()
-	rec := get(t, NewHandler(fstest.MapFS{}, src, nil), path)
+	rec := get(t, NewHandler(Deps{UI: fstest.MapFS{}, Agents: src}), path)
 	res := rec.Result()
 	var out metricsJSON
 	if res.StatusCode == http.StatusOK {

@@ -122,7 +122,7 @@ func (h *Hub) Close() error {
 // Serve serves HTTP on ln until ctx is cancelled, then shuts down gracefully.
 func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 	srv := &http.Server{
-		Handler:           NewHandler(h.ui, h, h.auth),
+		Handler:           NewHandler(Deps{UI: h.ui, Agents: h, Layouts: h, Log: h.log, Auth: h.auth}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -196,17 +196,61 @@ func (h *Hub) startBuiltinAgent(ctx context.Context) (stop func(), err error) {
 }
 
 // StaleAfter is how long an agent may stay silent before it is reported as
-// stale: two heartbeat intervals, so one lost heartbeat is tolerated.
+// stale.
 func (h *Hub) StaleAfter() time.Duration {
-	return 2 * h.agents.heartbeatInterval
+	return h.agents.staleAfter()
 }
 
-// NewHandler returns the hub HTTP handler. The dashboard is served from ui and
-// the agents API from agents, which may be nil (the list is then empty). The
-// API requires a login through authn; a nil authn leaves it open, which is only
-// meant for tests. The dashboard files themselves are public: they hold no
-// data, and the page asks for a login before it shows anything.
-func NewHandler(ui fs.FS, agents AgentSource, authn *auth.Service) http.Handler {
+// Subscribe returns a channel of the JSON events pushed on GET /api/stream and
+// a function that ends the subscription.
+func (h *Hub) Subscribe() (<-chan []byte, func()) {
+	return h.agents.events.subscribe()
+}
+
+// Deps are what the HTTP handler serves.
+type Deps struct {
+	// UI holds the compiled dashboard.
+	UI fs.FS
+	// Agents, Layouts and Log may be nil in tests; the agent list is then empty
+	// and the layout endpoints answer 404.
+	Agents  AgentSource
+	Layouts LayoutStore
+	Log     *slog.Logger
+	// Auth protects the API. A nil Auth leaves it open, which is only meant for
+	// tests.
+	Auth *auth.Service
+}
+
+// route is a protected API endpoint.
+type route struct {
+	pattern string
+	handler http.Handler
+}
+
+// apiRoutes lists the endpoints under /api/ that need a login, other than the
+// ones of the auth package. They must all be described in openapi.yaml.
+func apiRoutes(d Deps) []route {
+	h := layoutHandlers{layouts: d.Layouts, log: d.Log}
+	return []route{
+		{"GET /api/agents", agentsHandler(d.Agents)},
+		{"GET /api/agents/{id}", agentGetHandler(d.Agents)},
+		{"GET /api/agents/{id}/metrics", metricsHandler(d.Agents)},
+		{"GET /api/layout", http.HandlerFunc(h.get)},
+		{"PUT /api/layout", auth.RequireJSON(http.HandlerFunc(h.put))},
+		{"GET /api/stream", streamHandler(d.Agents)},
+		{"GET /api/openapi.yaml", http.HandlerFunc(serveOpenAPI)},
+	}
+}
+
+// NewHandler returns the hub HTTP handler. The API (under /api/) requires a
+// login, except for the endpoints of the auth package. The dashboard files and
+// /healthz are public: they hold no data, and the page asks for a login before
+// it shows anything.
+func NewHandler(d Deps) http.Handler {
+	if d.Log == nil {
+		d.Log = slog.Default()
+	}
+	ui := d.UI
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -214,12 +258,13 @@ func NewHandler(ui fs.FS, agents AgentSource, authn *auth.Service) http.Handler 
 	})
 
 	api := http.NewServeMux()
-	api.HandleFunc("GET /api/agents", agentsHandler(agents))
-	api.HandleFunc("GET /api/agents/{id}/metrics", metricsHandler(agents))
+	for _, r := range apiRoutes(d) {
+		api.Handle(r.pattern, r.handler)
+	}
 	var protected http.Handler = api
-	if authn != nil {
-		authn.Register(mux)
-		protected = authn.Require(api)
+	if d.Auth != nil {
+		d.Auth.Register(mux)
+		protected = d.Auth.Require(api)
 	}
 	mux.Handle("/api/", protected)
 

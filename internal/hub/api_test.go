@@ -23,6 +23,10 @@ type fakeSource struct {
 
 func (f fakeSource) Agents() []AgentInfo       { return f.agents }
 func (f fakeSource) StaleAfter() time.Duration { return f.staleAfter }
+func (f fakeSource) Subscribe() (<-chan []byte, func()) {
+	ch := make(chan []byte)
+	return ch, func() {}
+}
 func (f fakeSource) Metrics(id string) ([]MetricsSample, bool) {
 	samples, ok := f.metrics[id]
 	return samples, ok
@@ -30,7 +34,7 @@ func (f fakeSource) Metrics(id string) ([]MetricsSample, bool) {
 
 func getAgents(t *testing.T, src AgentSource) []agentJSON {
 	t.Helper()
-	rec := get(t, NewHandler(fstest.MapFS{}, src, nil), "/api/agents")
+	rec := get(t, NewHandler(Deps{UI: fstest.MapFS{}, Agents: src}), "/api/agents")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
@@ -46,7 +50,7 @@ func getAgents(t *testing.T, src AgentSource) []agentJSON {
 
 func TestAgentsEndpointEmptyIsAnArray(t *testing.T) {
 	for name, src := range map[string]AgentSource{"nil source": nil, "no agents": fakeSource{}} {
-		rec := get(t, NewHandler(fstest.MapFS{}, src, nil), "/api/agents")
+		rec := get(t, NewHandler(Deps{UI: fstest.MapFS{}, Agents: src}), "/api/agents")
 		if got := rec.Body.String(); got != "[]\n" {
 			t.Errorf("%s: body = %q, want %q", name, got, "[]\n")
 		}
@@ -123,7 +127,7 @@ func TestAgentsEndpointListsBuiltinAgent(t *testing.T) {
 
 func TestAPIRequiresLogin(t *testing.T) {
 	h := startHubWithConfig(t, config.Default())
-	handler := NewHandler(fstest.MapFS{"index.html": {Data: []byte("<div id=\"root\"></div>")}}, h, h.auth)
+	handler := NewHandler(Deps{UI: fstest.MapFS{"index.html": {Data: []byte("<div id=\"root\"></div>")}}, Agents: h, Layouts: h, Auth: h.auth})
 
 	do := func(method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))

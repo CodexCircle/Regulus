@@ -57,6 +57,7 @@ type agentServer struct {
 	helloTimeout      time.Duration
 
 	metrics *metricsStore
+	events  *broker
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -82,6 +83,7 @@ func newAgentServer(log *slog.Logger) *agentServer {
 		metricsInterval:   defaultMetricsInterval,
 		helloTimeout:      defaultHelloTimeout,
 		metrics:           newMetricsStore(defaultMetricsRetention),
+		events:            newBroker(),
 		sessions:          map[string]*session{},
 	}
 }
@@ -218,14 +220,18 @@ func (s *agentServer) serve(ctx context.Context, stream grpc.BidiStreamingServer
 func (s *agentServer) handle(sess *session, msg *agentv1.AgentMessage) error {
 	switch p := msg.GetPayload().(type) {
 	case *agentv1.AgentMessage_Heartbeat:
+		now := time.Now()
 		s.mu.Lock()
-		sess.info.LastHeartbeat = time.Now()
+		sess.info.LastHeartbeat = now
 		s.mu.Unlock()
+		s.events.publish(heartbeatEvent{Type: "agent.heartbeat", ID: sess.info.ID, At: now.UTC()})
 	case *agentv1.AgentMessage_Metrics:
 		s.mu.Lock()
 		sess.info.LastMetrics = p.Metrics
 		s.mu.Unlock()
-		s.metrics.add(sess.info.ID, p.Metrics)
+		if sample, prev := s.metrics.add(sess.info.ID, p.Metrics); sample.Report != nil {
+			s.events.publish(metricsEvent{Type: "agent.metrics", ID: sess.info.ID, Point: toPoint(sample, prev)})
+		}
 	case *agentv1.AgentMessage_CommandResult:
 		sess.deliver(p.CommandResult)
 	case *agentv1.AgentMessage_Hello:
@@ -259,17 +265,28 @@ func (s *agentServer) register(id string, hello *agentv1.Hello) *session {
 	if old != nil {
 		close(old.replaced)
 	}
+	s.events.publish(agentEvent{Type: "agent.connected", Agent: toAgentJSON(sess.info, time.Now(), s.staleAfter())})
 	return sess
+}
+
+// staleAfter is how long an agent may stay silent before it is reported as
+// stale: two heartbeat intervals, so one lost heartbeat is tolerated.
+func (s *agentServer) staleAfter() time.Duration {
+	return 2 * s.heartbeatInterval
 }
 
 func (s *agentServer) unregister(sess *session) {
 	close(sess.done)
 	s.mu.Lock()
-	if s.sessions[sess.info.ID] == sess {
+	gone := s.sessions[sess.info.ID] == sess
+	if gone {
 		delete(s.sessions, sess.info.ID)
 	}
 	s.mu.Unlock()
 	s.log.Info("agent disconnected", "agent", sess.info.ID)
+	if gone { // a replaced connection leaves the agent connected through the new one
+		s.events.publish(goneEvent{Type: "agent.disconnected", ID: sess.info.ID})
+	}
 }
 
 // agents returns a snapshot of the connected agents, ordered by id.
