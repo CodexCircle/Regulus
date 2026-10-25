@@ -13,29 +13,79 @@ import (
 	"net/http"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/CodexCircle/Regulus/internal/config"
+	agentv1 "github.com/CodexCircle/Regulus/internal/gen/regulus/agent/v1"
+	"github.com/CodexCircle/Regulus/internal/inproc"
 	"github.com/CodexCircle/Regulus/internal/storage"
 )
 
 const shutdownTimeout = 10 * time.Second
 
-// Hub is a running-capable hub instance: its configuration, database and UI.
+// Hub is a running-capable hub instance: its configuration, database, UI and
+// the agents connected to it.
 type Hub struct {
 	cfg config.Config
 	log *slog.Logger
 	db  *sql.DB
 	ui  fs.FS
+
+	agents    *agentServer
+	transport *inproc.Transport // lets the built-in agent reach the hub without a network port
+}
+
+// Option customizes a Hub.
+type Option func(*Hub)
+
+// WithAgentIntervals sets the heartbeat and metrics intervals the hub asks
+// agents to use. Mostly useful in tests.
+func WithAgentIntervals(heartbeat, metrics time.Duration) Option {
+	return func(h *Hub) {
+		h.agents.heartbeatInterval = heartbeat
+		h.agents.metricsInterval = metrics
+	}
 }
 
 // New opens the database (applying migrations) and returns a Hub that serves
 // the dashboard from ui. Call Close when done.
-func New(ctx context.Context, cfg config.Config, log *slog.Logger, ui fs.FS) (*Hub, error) {
+func New(ctx context.Context, cfg config.Config, log *slog.Logger, ui fs.FS, opts ...Option) (*Hub, error) {
 	db, err := storage.Open(ctx, cfg.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("storage: %w", err)
 	}
 	log.Info("database ready", "dir", cfg.DataDir)
-	return &Hub{cfg: cfg, log: log, db: db, ui: ui}, nil
+
+	h := &Hub{
+		cfg:       cfg,
+		log:       log,
+		db:        db,
+		ui:        ui,
+		agents:    newAgentServer(log),
+		transport: inproc.New(),
+	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h, nil
+}
+
+// Agents returns a snapshot of the connected agents, ordered by id.
+func (h *Hub) Agents() []AgentInfo {
+	return h.agents.agents()
+}
+
+// SendCommand sends a command to a connected agent and waits for its result.
+// It returns ErrAgentNotFound if the agent is not connected and
+// ErrAgentDisconnected if it goes away before answering.
+func (h *Hub) SendCommand(ctx context.Context, agentID string, cmd *agentv1.Command) (*agentv1.CommandResult, error) {
+	return h.agents.sendCommand(ctx, agentID, cmd)
+}
+
+// AgentConn returns a client connection to the hub's agent service over the
+// in-process transport. The built-in agent uses it. Close it when done.
+func (h *Hub) AgentConn() (*grpc.ClientConn, error) {
+	return h.transport.Dial()
 }
 
 // Close releases the hub resources.
@@ -49,6 +99,13 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 		Handler:           NewHandler(h.ui),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+
+	// The agent service runs on the in-process transport; the network
+	// listener for remote agents comes with the remote agent work.
+	grpcSrv := grpc.NewServer()
+	agentv1.RegisterAgentServiceServer(grpcSrv, h.agents)
+	go func() { _ = grpcSrv.Serve(h.transport.Listener()) }()
+	defer grpcSrv.Stop() // agent streams are long-lived, so a graceful stop would wait forever
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
