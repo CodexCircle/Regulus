@@ -62,6 +62,7 @@ make build            # builds the dashboard, then bin/regulus
 ./bin/regulus hub     # serves the dashboard on :8080
 make test             # go vet, go test -race, dashboard typecheck and tests
 make lint             # golangci-lint and ESLint
+make smoke            # start bin/regulus and check it end to end (after make build)
 ```
 
 For dashboard work, run `npm run dev` in `dashboard/` (proxies `/api` to the hub on `:8080`).
@@ -163,6 +164,7 @@ make build            # compila la dashboard, poi bin/regulus
 ./bin/regulus hub     # serve la dashboard su :8080
 make test             # go vet, go test -race, typecheck e test della dashboard
 make lint             # golangci-lint ed ESLint
+make smoke            # avvia bin/regulus e lo verifica end to end (dopo make build)
 ```
 
 Per lavorare sulla dashboard, esegui `npm run dev` in `dashboard/` (inoltra `/api` all'hub su `:8080`).

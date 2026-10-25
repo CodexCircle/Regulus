@@ -61,7 +61,7 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - run: make build
       - name: Smoke test
-        run: ./bin/regulus version
+        run: make smoke
 
   proto:
     name: Protobuf (generated code up to date)

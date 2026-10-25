@@ -1,4 +1,4 @@
-.PHONY: dashboard build lint test proto proto-check clean
+.PHONY: dashboard build lint test smoke proto proto-check clean
 
 # Build the dashboard into internal/webui/dist so it is embedded in the binary.
 dashboard:
@@ -15,6 +15,10 @@ test:
 	go vet ./...
 	go test -race ./...
 	cd dashboard && npm ci && npm run typecheck && npm test
+
+# Start the built binary and check it end to end (run make build first).
+smoke:
+	scripts/smoke.sh bin/regulus
 
 # Regenerate internal/gen from proto/ (generated code is committed, so a normal
 # build does not need these tools). Tool versions are pinned here.
