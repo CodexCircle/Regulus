@@ -22,7 +22,7 @@ func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 }
 
 func TestHealthz(t *testing.T) {
-	rec := get(t, NewHandler(fstest.MapFS{}), "/healthz")
+	rec := get(t, NewHandler(fstest.MapFS{}, nil), "/healthz")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
@@ -30,14 +30,14 @@ func TestHealthz(t *testing.T) {
 
 func TestServesDashboard(t *testing.T) {
 	ui := fstest.MapFS{"index.html": {Data: []byte("<h1>Regulus</h1>")}}
-	rec := get(t, NewHandler(ui), "/")
+	rec := get(t, NewHandler(ui, nil), "/")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }
 
 func TestDashboardMissing(t *testing.T) {
-	rec := get(t, NewHandler(fstest.MapFS{}), "/")
+	rec := get(t, NewHandler(fstest.MapFS{}, nil), "/")
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
 	}

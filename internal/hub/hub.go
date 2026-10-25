@@ -104,7 +104,7 @@ func (h *Hub) Close() error {
 // Serve serves HTTP on ln until ctx is cancelled, then shuts down gracefully.
 func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 	srv := &http.Server{
-		Handler:           NewHandler(h.ui),
+		Handler:           NewHandler(h.ui, h),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -177,13 +177,22 @@ func (h *Hub) startBuiltinAgent(ctx context.Context) (stop func(), err error) {
 	}, nil
 }
 
-// NewHandler returns the hub HTTP handler. The dashboard is served from ui.
-func NewHandler(ui fs.FS) http.Handler {
+// StaleAfter is how long an agent may stay silent before it is reported as
+// stale: two heartbeat intervals, so one lost heartbeat is tolerated.
+func (h *Hub) StaleAfter() time.Duration {
+	return 2 * h.agents.heartbeatInterval
+}
+
+// NewHandler returns the hub HTTP handler. The dashboard is served from ui and
+// the agents API from agents, which may be nil (the list is then empty).
+func NewHandler(ui fs.FS, agents AgentSource) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = fmt.Fprintln(w, "ok")
 	})
+
+	mux.HandleFunc("GET /api/agents", agentsHandler(agents))
 
 	files := http.FileServerFS(ui)
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {

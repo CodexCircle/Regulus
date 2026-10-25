@@ -94,6 +94,10 @@ With `builtin_agent` enabled (the default) the hub runs an agent for its own ser
 
 The hub stores its data in a SQLite database (`regulus.db`) inside `data_dir` and applies schema migrations automatically at startup.
 
+### HTTP API
+
+`GET /api/agents` returns the connected agents as JSON (id, version, system info, `status` of `connected` or `stale`, last heartbeat, uptime). It is read-only and has no authentication yet; the dashboard shows it on its home page. Do not expose the hub port to untrusted networks until authentication is in place.
+
 ## Repository layout
 
 ```
@@ -101,7 +105,7 @@ cmd/regulus/       single executable (role chosen with a subcommand)
 internal/config/   configuration (defaults, YAML file, environment, flags)
 internal/logging/  structured logging
 internal/storage/  SQLite database and migrations
-internal/hub/      hub: HTTP server and the agent service (registry of connected agents)
+internal/hub/      hub: HTTP server, agents API and the agent service (registry of connected agents)
 internal/agent/    agent runtime (client side of the contract), also used as the built-in agent
 internal/protocol/ protocol version of the agent-hub contract
 internal/inproc/   in-memory gRPC transport (used by the built-in agent)
@@ -188,6 +192,10 @@ L'hub legge, in ordine di priorità crescente: valori predefiniti, file YAML (`-
 Con `builtin_agent` attivo (predefinito) l'hub esegue un agent per il proprio server, che si collega con lo stesso contratto di qualsiasi altro agent (id `local`).
 
 L'hub salva i dati in un database SQLite (`regulus.db`) dentro `data_dir` e applica automaticamente le migrazioni dello schema all'avvio.
+
+### API HTTP
+
+`GET /api/agents` restituisce in JSON gli agent connessi (id, versione, info di sistema, `status` `connected` o `stale`, ultimo heartbeat, uptime). È in sola lettura e per ora senza autenticazione; la dashboard la mostra nella pagina iniziale. Non esporre la porta dell'hub su reti non fidate finché non c'è l'autenticazione.
 
 ## Contribuire
 
