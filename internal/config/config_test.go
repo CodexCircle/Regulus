@@ -177,3 +177,63 @@ func TestPackagedConfigIsValid(t *testing.T) {
 		t.Errorf("unexpected packaged defaults: %+v", cfg)
 	}
 }
+
+func TestAgentListen(t *testing.T) {
+	cfg, err := Load(nil, env(nil), io.Discard)
+	if err != nil || cfg.AgentListen != "" {
+		t.Fatalf("default = %q, %v; want remote agents off", cfg.AgentListen, err)
+	}
+	cfg, err = Load(nil, env(map[string]string{"REGULUS_AGENT_LISTEN": ":8443"}), io.Discard)
+	if err != nil || cfg.AgentListen != ":8443" {
+		t.Errorf("from env = %q, %v", cfg.AgentListen, err)
+	}
+	cfg, err = Load([]string{"--agent-listen", "127.0.0.1:9000"}, env(map[string]string{"REGULUS_AGENT_LISTEN": ":8443"}), io.Discard)
+	if err != nil || cfg.AgentListen != "127.0.0.1:9000" {
+		t.Errorf("flag over env = %q, %v", cfg.AgentListen, err)
+	}
+}
+
+func TestLoadAgent(t *testing.T) {
+	cfg, err := LoadAgent([]string{"--hub", "hub.example:8443"}, env(nil), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Hub != "hub.example:8443" || cfg.DataDir != "agent-data" || cfg.Log.Level != "info" {
+		t.Errorf("defaults = %+v", cfg)
+	}
+
+	file := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := os.WriteFile(file, []byte("hub: file.example:1\ndata_dir: /var/lib/regulus-agent\nca_fingerprint: sha256:abc\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadAgent([]string{"--config", file, "--token", "from-flag"}, env(map[string]string{
+		"REGULUS_AGENT_HUB":   "env.example:2",
+		"REGULUS_AGENT_TOKEN": "from-env",
+	}), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// file < env < flag
+	if cfg.Hub != "env.example:2" || cfg.Token != "from-flag" || cfg.DataDir != "/var/lib/regulus-agent" || cfg.CAFingerprint != "sha256:abc" {
+		t.Errorf("precedence = %+v", cfg)
+	}
+}
+
+func TestLoadAgentErrors(t *testing.T) {
+	for name, args := range map[string][]string{
+		"no hub":           {},
+		"hub without port": {"--hub", "hub.example"},
+		"empty data dir":   {"--hub", "h:1", "--data-dir", ""},
+		"bad log level":    {"--hub", "h:1", "--log-level", "loud"},
+		"unknown flag":     {"--hub", "h:1", "--nope"},
+	} {
+		if _, err := LoadAgent(args, env(nil), io.Discard); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
+	}
+	bad := filepath.Join(t.TempDir(), "bad.yaml")
+	_ = os.WriteFile(bad, []byte("hub: h:1\ntypo: x\n"), 0o600)
+	if _, err := LoadAgent([]string{"--config", bad}, env(nil), io.Discard); err == nil {
+		t.Error("an unknown key in the file must be rejected")
+	}
+}

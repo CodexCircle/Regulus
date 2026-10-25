@@ -139,6 +139,21 @@ Endpoints: `GET /api/auth/me`, `POST /api/auth/setup`, `POST /api/auth/login`, `
 - *The admin is locked out:* on the machine that runs the hub, as the user that owns the data directory, run `sudo -u regulus regulus hub reset-admin --config /etc/regulus/config.yaml` (with the package install; otherwise pass the same `--config` or `--data-dir` as the hub, and `--user NAME` if there are several admins). It prints a one-time reset link like the one above for that admin, enables the account if it was disabled and ends its sessions; the hub can keep running. Whoever can write to the data directory owns the hub anyway, so that access is the proof of ownership. The password is chosen in the browser, so it never shows up in the terminal or the shell history. The command is recorded in the audit log as `console`.
 - Two-factor codes and passkeys will be cleared by a reset when those features exist.
 
+### Remote agents
+
+Besides the built-in agent, a server can run `regulus agent` and be managed from the hub. The agent always connects **out** to the hub (gRPC over TLS 1.3), so the managed server needs no open port.
+
+1. **Turn on the listener.** Remote agents are off by default. Set `agent_listen: ":8443"` (or `--agent-listen`, `REGULUS_AGENT_LISTEN`) and restart the hub. Open that port in the firewall only towards the servers you manage.
+2. **Make a token.** An admin calls `POST /api/enrollment-tokens` (the dashboard flow comes with the multi-server work). It returns a one-time token valid for one hour, the port and the **CA fingerprint** of the hub.
+3. **Enroll the agent** on the other server, once:
+   ```sh
+   regulus agent --hub HUB_HOST:8443 --token TOKEN --ca-fingerprint sha256:... --data-dir /var/lib/regulus-agent
+   ```
+   The agent first checks that the hub's certificate is signed by a CA with that fingerprint (so the token is never sent to an impostor), creates its own key, and the hub signs its certificate. The key stays on the agent. From then on the agent only needs `--hub` and the saved credentials; the same options can go in a YAML file (`--config`: `hub`, `data_dir`, `log`) or in `REGULUS_AGENT_*` variables.
+4. **Revoke** an agent with `DELETE /api/agents/{id}`: its connection is closed and it can never connect again; the process stops with an error. To use that server again, delete its data directory and enroll with a new token.
+
+How it is protected: the hub creates its own certificate authority at the first start (`pki/` in the data directory, `ca.key` readable by the owner only). Tokens are random, stored only as a hash, single use, expire after an hour and are rate limited (10 wrong attempts per 15 minutes per address). Every connection needs the client certificate of an enrolled, not revoked agent, and the agent id comes from the certificate, not from what the agent says. Client certificates last five years; there is no renewal yet. Creating tokens and revoking agents are admin-only and go to the audit log.
+
 ### HTTP API
 
 `GET /api/agents` returns the connected agents as JSON (id, version, system info, `status` of `connected` or `stale`, last heartbeat, uptime). `GET /api/agents/{id}/metrics` returns the recent metrics of an agent (CPU, load, memory, swap, disks, network counters and rates, uptime), oldest first; `?since=<RFC 3339>` returns only newer points. The hub keeps the last hour of metrics in memory (up to 3600 reports per agent), so the history is lost when the hub restarts. `GET /api/agents/{id}` returns one agent. `GET /api/layout` and `PUT /api/layout` read and save the dashboard layout of the logged-in user (any JSON up to 64 KiB, stored per user). `GET /api/stream` upgrades to a **WebSocket** that pushes a `snapshot` of the agents and then `agent.connected`, `agent.disconnected`, `agent.heartbeat` and `agent.metrics` events as JSON; it needs the session cookie and refuses pages from other origins, and a client that reads too slowly is disconnected and should reconnect. All of this is described in [`internal/hub/openapi.yaml`](internal/hub/openapi.yaml), also served at `/api/openapi.yaml`; a test keeps the file in sync with the routes. The endpoints need a login and `GET`s are read-only; the dashboard shows the agents list on the **Servers** page.
@@ -289,6 +304,21 @@ Endpoint: `GET /api/auth/me`, `POST /api/auth/setup`, `POST /api/auth/login`, `P
 - *Un utente ha dimenticato la password:* un admin apre **Users**, sceglie **Reset password** e consegna il link all'utente (`POST /api/users/{username}/reset`). Il link è `http://<hub>/#/reset/<token>`: il token è casuale, salvato solo come hash, vale una volta sola, scade dopo un'ora e sostituisce ogni link precedente dello stesso account; sta nel frammento dell'URL, quindi non arriva mai nei log del server. L'utente lo apre, sceglie la nuova password (`POST /api/auth/reset`) e accede; l'admin non vede mai la password. Creare il link chiude tutte le sessioni dell'account, e lo stesso fa usarlo. Gli account disabilitati non si possono azzerare. I token sbagliati contano nello stesso limite dei login falliti (10 ogni 15 minuti per indirizzo), e ogni token sconosciuto, scaduto o già usato riceve la stessa risposta.
 - *L'admin è bloccato fuori:* sulla macchina che esegue l'hub, come l'utente proprietario della directory dati, esegui `sudo -u regulus regulus hub reset-admin --config /etc/regulus/config.yaml` (con l'installazione da pacchetto; altrimenti passa gli stessi `--config` o `--data-dir` dell'hub, e `--user NOME` se ci sono più admin). Stampa un link di reset monouso come sopra per quell'admin, riabilita l'account se era disabilitato e ne chiude le sessioni; l'hub può restare in esecuzione. Chi può scrivere nella directory dati è comunque il padrone dell'hub, quindi quell'accesso è la prova di proprietà. La password si sceglie nel browser, quindi non compare mai nel terminale né nella cronologia della shell. Il comando è registrato nell'audit come `console`.
 - Codici a due fattori e passkey saranno cancellati da un reset quando queste funzioni esisteranno.
+
+### Agent remoti
+
+Oltre all'agent integrato, un server può eseguire `regulus agent` ed essere gestito dall'hub. L'agent si collega sempre **in uscita** verso l'hub (gRPC su TLS 1.3), quindi il server gestito non deve aprire nessuna porta.
+
+1. **Attiva il listener.** Gli agent remoti sono spenti di default. Imposta `agent_listen: ":8443"` (oppure `--agent-listen`, `REGULUS_AGENT_LISTEN`) e riavvia l'hub. Apri quella porta nel firewall solo verso i server che gestisci.
+2. **Crea un token.** Un admin chiama `POST /api/enrollment-tokens` (il flusso dalla dashboard arriva con il lavoro multi-server). Restituisce un token monouso valido un'ora, la porta e la **fingerprint della CA** dell'hub.
+3. **Registra l'agent** sull'altro server, una volta sola:
+   ```sh
+   regulus agent --hub HOST_HUB:8443 --token TOKEN --ca-fingerprint sha256:... --data-dir /var/lib/regulus-agent
+   ```
+   L'agent controlla prima che il certificato dell'hub sia firmato da una CA con quella fingerprint (così il token non va mai a un impostore), crea la propria chiave e l'hub firma il suo certificato. La chiave resta sull'agent. Da quel momento servono solo `--hub` e le credenziali salvate; le stesse opzioni possono stare in un file YAML (`--config`: `hub`, `data_dir`, `log`) o nelle variabili `REGULUS_AGENT_*`.
+4. **Revoca** un agent con `DELETE /api/agents/{id}`: la connessione si chiude e non potrà più collegarsi; il processo si ferma con un errore. Per usare di nuovo quel server, cancella la sua directory dati e registralo con un nuovo token.
+
+Come è protetto: l'hub crea una propria autorità di certificazione al primo avvio (`pki/` nella directory dati, `ca.key` leggibile solo dal proprietario). I token sono casuali, salvati solo come hash, monouso, scadono dopo un'ora e hanno un limite di tentativi (10 errori ogni 15 minuti per indirizzo). Ogni connessione richiede il certificato client di un agent registrato e non revocato, e l'id dell'agent viene dal certificato, non da ciò che l'agent dichiara. I certificati client durano cinque anni; il rinnovo non c'è ancora. Creare token e revocare agent è riservato agli admin e finisce nell'audit.
 
 ### API HTTP
 

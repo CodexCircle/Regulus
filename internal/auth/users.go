@@ -195,3 +195,9 @@ func (s *Service) Audit(ctx context.Context, limit int) ([]AuditEntry, error) {
 }
 
 func usernameForAudit(u string) string { return strings.ToLower(clip(strings.TrimSpace(u), 64)) }
+
+// Record adds an event to the audit log on behalf of the other parts of the
+// hub. The remote address is taken from the context (see WithClient).
+func (s *Service) Record(ctx context.Context, actor, event, target, detail string) {
+	s.audit(ctx, actor, event, target, detail)
+}
