@@ -95,9 +95,20 @@ With `builtin_agent` enabled (the default) the hub runs an agent for its own ser
 
 The hub stores its data in a SQLite database (`regulus.db`) inside `data_dir` and applies schema migrations automatically at startup.
 
+### Authentication
+
+The hub has local accounts with two roles, `admin` and `viewer`. On first start, with no accounts, the hub logs a one-time **setup token** (the line "no accounts yet", field `setup_token`); the dashboard asks for it together with the username and password of the first admin, so only someone who can read the hub log can claim an unconfigured hub. A new token is generated at each start until the admin exists.
+
+- Passwords are hashed with argon2id (at least 10 characters). Login creates a session of 7 days stored in the database (only the SHA-256 of the token); the cookie is `HttpOnly`, `SameSite=Lax` and `Secure` when the request came over HTTPS (directly or via `X-Forwarded-Proto`). POST requests must be JSON from the same origin.
+- After 10 failed logins from the same client address in 15 minutes, further attempts get `429` for the rest of the window. Behind a reverse proxy all clients share the proxy address, so put rate limiting in the proxy as well.
+- Everything under `/api/` except `/api/auth/*` needs a login (`401` otherwise). The dashboard files and `/healthz` are public: they contain no data, and the page shows the login or setup form before anything else.
+- Serve the hub over HTTPS (a reverse proxy is fine) outside a trusted network: sessions and passwords travel in the clear otherwise.
+
+Endpoints: `GET /api/auth/me`, `POST /api/auth/setup`, `POST /api/auth/login`, `POST /api/auth/logout`.
+
 ### HTTP API
 
-`GET /api/agents` returns the connected agents as JSON (id, version, system info, `status` of `connected` or `stale`, last heartbeat, uptime). `GET /api/agents/{id}/metrics` returns the recent metrics of an agent (CPU, load, memory, swap, disks, network counters and rates, uptime), oldest first; `?since=<RFC 3339>` returns only newer points. The hub keeps the last hour of metrics in memory (up to 3600 reports per agent), so the history is lost when the hub restarts. Both endpoints are read-only and have no authentication yet; the dashboard shows the first on its home page. Do not expose the hub port to untrusted networks until authentication is in place.
+`GET /api/agents` returns the connected agents as JSON (id, version, system info, `status` of `connected` or `stale`, last heartbeat, uptime). `GET /api/agents/{id}/metrics` returns the recent metrics of an agent (CPU, load, memory, swap, disks, network counters and rates, uptime), oldest first; `?since=<RFC 3339>` returns only newer points. The hub keeps the last hour of metrics in memory (up to 3600 reports per agent), so the history is lost when the hub restarts. Both endpoints are read-only and need a login; the dashboard shows the first on its home page.
 
 ## Repository layout
 
@@ -106,6 +117,7 @@ cmd/regulus/       single executable (role chosen with a subcommand)
 internal/config/   configuration (defaults, YAML file, environment, flags)
 internal/logging/  structured logging
 internal/storage/  SQLite database and migrations
+internal/auth/     local accounts, sessions and the HTTP login endpoints
 internal/hub/      hub: HTTP server, agents API and the agent service (registry of connected agents)
 internal/agent/    agent runtime (client side of the contract) and Linux metrics collector, also used as the built-in agent
 internal/protocol/ protocol version of the agent-hub contract
@@ -194,9 +206,20 @@ Con `builtin_agent` attivo (predefinito) l'hub esegue un agent per il proprio se
 
 L'hub salva i dati in un database SQLite (`regulus.db`) dentro `data_dir` e applica automaticamente le migrazioni dello schema all'avvio.
 
+### Autenticazione
+
+L'hub ha account locali con due ruoli, `admin` e `viewer`. Al primo avvio, senza account, l'hub scrive nel log un **token di setup** monouso (la riga "no accounts yet", campo `setup_token`); la dashboard lo chiede insieme a nome utente e password del primo admin, così solo chi può leggere il log dell'hub può prendere possesso di un hub non configurato. A ogni avvio viene generato un nuovo token finché l'admin non esiste.
+
+- Le password usano argon2id (almeno 10 caratteri). Il login crea una sessione di 7 giorni salvata nel database (solo lo SHA-256 del token); il cookie è `HttpOnly`, `SameSite=Lax` e `Secure` se la richiesta è arrivata in HTTPS (direttamente o con `X-Forwarded-Proto`). Le richieste POST devono essere JSON dalla stessa origine.
+- Dopo 10 login falliti dallo stesso indirizzo in 15 minuti, i tentativi successivi ricevono `429` fino a fine finestra. Dietro un reverse proxy tutti i client condividono l'indirizzo del proxy, quindi limita le richieste anche nel proxy.
+- Tutto sotto `/api/` tranne `/api/auth/*` richiede il login (altrimenti `401`). I file della dashboard e `/healthz` sono pubblici: non contengono dati e la pagina mostra login o setup prima di tutto.
+- Fuori da una rete fidata servi l'hub in HTTPS (va bene un reverse proxy): altrimenti sessioni e password viaggiano in chiaro.
+
+Endpoint: `GET /api/auth/me`, `POST /api/auth/setup`, `POST /api/auth/login`, `POST /api/auth/logout`.
+
 ### API HTTP
 
-`GET /api/agents` restituisce in JSON gli agent connessi (id, versione, info di sistema, `status` `connected` o `stale`, ultimo heartbeat, uptime). `GET /api/agents/{id}/metrics` restituisce le metriche recenti di un agent (CPU, load, memoria, swap, dischi, contatori e velocità di rete, uptime), dalla più vecchia; `?since=<RFC 3339>` restituisce solo i punti più recenti. L'hub tiene in memoria l'ultima ora di metriche (fino a 3600 report per agent), quindi lo storico si perde al riavvio dell'hub. Entrambi gli endpoint sono in sola lettura e per ora senza autenticazione; la dashboard mostra il primo nella pagina iniziale. Non esporre la porta dell'hub su reti non fidate finché non c'è l'autenticazione.
+`GET /api/agents` restituisce in JSON gli agent connessi (id, versione, info di sistema, `status` `connected` o `stale`, ultimo heartbeat, uptime). `GET /api/agents/{id}/metrics` restituisce le metriche recenti di un agent (CPU, load, memoria, swap, dischi, contatori e velocità di rete, uptime), dalla più vecchia; `?since=<RFC 3339>` restituisce solo i punti più recenti. L'hub tiene in memoria l'ultima ora di metriche (fino a 3600 report per agent), quindi lo storico si perde al riavvio dell'hub. Entrambi gli endpoint sono in sola lettura e richiedono il login; la dashboard mostra il primo nella pagina iniziale.
 
 ## Contribuire
 

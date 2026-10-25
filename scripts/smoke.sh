@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # End-to-end smoke test of the built binary. It starts the hub with a temporary
 # data directory and checks the health endpoint, the embedded dashboard, that
-# the built-in agent connects (GET /api/agents) and that SIGTERM stops the hub
-# cleanly. Then it starts a hub with --builtin-agent=false and checks that no
-# agent shows up.
+# the API is closed without a login, the first-run setup of the admin, that the
+# built-in agent connects (GET /api/agents) and that SIGTERM stops the hub
+# cleanly. Then it starts a hub with --builtin-agent=false on the same data and
+# checks that, after logging in, no agent shows up.
 #
 # Usage: scripts/smoke.sh [path/to/regulus]   (default: bin/regulus)
 set -euo pipefail
@@ -13,6 +14,8 @@ tmp=$(mktemp -d)
 log=$tmp/hub.log
 pid=
 addr=
+jar=$tmp/cookies
+password='smoke-test-password'
 
 cleanup() {
 	if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then
@@ -72,10 +75,22 @@ curl -fsS -o /dev/null "$base$script" || fail "dashboard bundle $script is not s
 
 [[ -s $tmp/data/regulus.db ]] || fail "database file was not created"
 
+# The API is closed without a login; the first run asks for the admin, which
+# needs the one-time token from the log.
+code=$(curl -sS -o /dev/null -w '%{http_code}' "$base/api/agents") || fail "/api/agents request failed"
+[[ $code == 401 ]] || fail "/api/agents without a login answered $code, want 401"
+
+setup_token=$(sed -n 's/.*setup_token=\([^ ]*\).*/\1/p' "$log" | head -n1)
+[[ -n $setup_token ]] || fail "the hub did not log a setup token"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -c "$jar" -H 'Content-Type: application/json' \
+	-d "{\"setup_token\":\"$setup_token\",\"username\":\"admin\",\"password\":\"$password\"}" \
+	"$base/api/auth/setup") || fail "setup request failed"
+[[ $code == 200 ]] || fail "setup answered $code, want 200"
+
 # The built-in agent must connect through the contract and report a heartbeat.
 agents=
 for _ in $(seq 1 100); do
-	agents=$(curl -fsS "$base/api/agents") || fail "/api/agents request failed"
+	agents=$(curl -fsS -b "$jar" "$base/api/agents") || fail "/api/agents request failed"
 	if grep -q '"id":"local"' <<<"$agents" && ! grep -q '"last_heartbeat":null' <<<"$agents"; then
 		break
 	fi
@@ -89,8 +104,12 @@ stop_hub
 
 # With the built-in agent disabled no agent must appear.
 start_hub --builtin-agent=false
+rm -f "$jar"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -c "$jar" -H 'Content-Type: application/json' \
+	-d "{\"username\":\"admin\",\"password\":\"$password\"}" "http://$addr/api/auth/login") || fail "login request failed"
+[[ $code == 200 ]] || fail "login answered $code, want 200"
 sleep 1
-agents=$(curl -fsS "http://$addr/api/agents") || fail "/api/agents request failed"
+agents=$(curl -fsS -b "$jar" "http://$addr/api/agents") || fail "/api/agents request failed"
 [[ $agents == '[]' ]] || fail "expected no agents with --builtin-agent=false, got: $agents"
 stop_hub
 

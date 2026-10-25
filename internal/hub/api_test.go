@@ -3,6 +3,8 @@ package hub
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -28,7 +30,7 @@ func (f fakeSource) Metrics(id string) ([]MetricsSample, bool) {
 
 func getAgents(t *testing.T, src AgentSource) []agentJSON {
 	t.Helper()
-	rec := get(t, NewHandler(fstest.MapFS{}, src), "/api/agents")
+	rec := get(t, NewHandler(fstest.MapFS{}, src, nil), "/api/agents")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
@@ -44,7 +46,7 @@ func getAgents(t *testing.T, src AgentSource) []agentJSON {
 
 func TestAgentsEndpointEmptyIsAnArray(t *testing.T) {
 	for name, src := range map[string]AgentSource{"nil source": nil, "no agents": fakeSource{}} {
-		rec := get(t, NewHandler(fstest.MapFS{}, src), "/api/agents")
+		rec := get(t, NewHandler(fstest.MapFS{}, src, nil), "/api/agents")
 		if got := rec.Body.String(); got != "[]\n" {
 			t.Errorf("%s: body = %q, want %q", name, got, "[]\n")
 		}
@@ -116,5 +118,50 @@ func TestAgentsEndpointListsBuiltinAgent(t *testing.T) {
 	}
 	if agents[0].LastHeartbeat == nil || agents[0].UptimeSeconds == nil {
 		t.Fatalf("missing heartbeat or uptime: %+v", agents[0])
+	}
+}
+
+func TestAPIRequiresLogin(t *testing.T) {
+	h := startHubWithConfig(t, config.Default())
+	handler := NewHandler(fstest.MapFS{"index.html": {Data: []byte("<div id=\"root\"></div>")}}, h, h.auth)
+
+	do := func(method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		if body != "" {
+			r.Header.Set("Content-Type", "application/json")
+		}
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, r)
+		return rec
+	}
+
+	for _, path := range []string{"/api/agents", "/api/agents/" + BuiltinAgentID + "/metrics", "/api/nothing"} {
+		if rec := do("GET", path, "", nil); rec.Code != http.StatusUnauthorized {
+			t.Errorf("GET %s without a login: status = %d, want 401", path, rec.Code)
+		}
+	}
+	// The dashboard files and the health check stay public.
+	for _, path := range []string{"/", "/healthz", "/api/auth/me"} {
+		if rec := do("GET", path, "", nil); rec.Code != http.StatusOK {
+			t.Errorf("GET %s: status = %d, want 200", path, rec.Code)
+		}
+	}
+
+	body := `{"username":"admin","password":"correct horse battery","setup_token":"` + h.auth.SetupToken() + `"}`
+	rec := do("POST", "/api/auth/setup", body, nil)
+	if rec.Code != http.StatusOK || len(rec.Result().Cookies()) == 0 {
+		t.Fatalf("setup: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	session := rec.Result().Cookies()[0]
+
+	waitFor(t, "built-in agent", func() bool { return len(h.Agents()) == 1 })
+	if rec := do("GET", "/api/agents", "", session); rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/agents with a login: status = %d", rec.Code)
+	}
+	if rec := do("GET", "/api/agents/"+BuiltinAgentID+"/metrics", "", session); rec.Code != http.StatusOK {
+		t.Fatalf("GET metrics with a login: status = %d", rec.Code)
 	}
 }
