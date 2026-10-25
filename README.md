@@ -98,11 +98,15 @@ internal/config/   configuration (defaults, YAML file, environment, flags)
 internal/logging/  structured logging
 internal/storage/  SQLite database and migrations
 internal/hub/      hub HTTP server
+internal/protocol/ protocol version of the agent-hub contract
+internal/inproc/   in-memory gRPC transport (used by the built-in agent)
+internal/gen/      generated Go code for proto/ (do not edit)
 internal/webui/    embeds the compiled dashboard
 dashboard/         React + TypeScript dashboard
+proto/             Protobuf contract between agents and the hub
 ```
 
-Planned: `proto/` (shared contract), `plugins/` (internal plugins), `packaging/` (systemd, `.deb`).
+Planned: `plugins/` (internal plugins), `packaging/` (systemd, `.deb`).
 
 ## License
 
