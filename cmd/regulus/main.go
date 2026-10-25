@@ -69,7 +69,7 @@ func runHub(args []string) int {
 	defer stop()
 
 	log.Info("starting hub", "version", version)
-	h, err := hub.New(ctx, cfg, log, webui.FS())
+	h, err := hub.New(ctx, cfg, log, webui.FS(), hub.WithVersion(version))
 	if err != nil {
 		log.Error("cannot start hub", "err", err)
 		return 1
