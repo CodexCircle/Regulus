@@ -3,14 +3,22 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountPage } from "./AccountPage";
 import { App } from "./App";
-import type { AuditEntry, SessionInfo, User } from "./api";
+import type { AuditEntry, RoleInfo, SessionInfo, User } from "./api";
 import { ResetPage } from "./ResetPage";
 import { SessionContext } from "./session";
 import { UsersPage } from "./UsersPage";
+import { ADMIN_PERMISSIONS, CATALOGUE, VIEWER_PERMISSIONS } from "./test-users";
 
 const now = new Date().toISOString();
-const admin: User = { username: "admin", role: "admin", created_at: now, disabled: false, two_factor: false };
-const viewer: User = { username: "eve", role: "viewer", created_at: now, disabled: false, two_factor: false };
+const admin: User = { username: "admin", role: "admin", permissions: ADMIN_PERMISSIONS, created_at: now, disabled: false, two_factor: false };
+const viewer: User = { username: "eve", role: "viewer", permissions: VIEWER_PERMISSIONS, created_at: now, disabled: false, two_factor: false };
+
+const builtinRoles: RoleInfo[] = [
+  { name: "admin", description: "", builtin: true, permissions: ADMIN_PERMISSIONS, users: 1 },
+  { name: "operator", description: "", builtin: true, permissions: ["servers.read", "servers.manage", "layout.edit"], users: 0 },
+  { name: "viewer", description: "", builtin: true, permissions: VIEWER_PERMISSIONS, users: 1 },
+];
+const helpdesk: RoleInfo = { name: "helpdesk", description: "Answers users", builtin: false, permissions: ["servers.read", "users.manage"], users: 0 };
 
 interface Call {
   method: string;
@@ -24,6 +32,7 @@ function mockHub(given: Record<string, () => { status?: number; data?: unknown }
   const calls: Call[] = [];
   // Parts of the pages these tests do not look at.
   const handlers: Record<string, () => { status?: number; data?: unknown }> = {
+    "GET /api/roles": () => ({ data: { roles: builtinRoles, permissions: CATALOGUE } }),
     "GET /api/settings/security": () => ({ data: { two_factor_policy: "off", two_factor_available: true } }),
     "GET /api/account/two-factor": () => ({ data: { enabled: false, mandatory: false, policy: "off", recovery_codes_left: 0 } }),
     ...given,
@@ -60,8 +69,92 @@ describe("UsersPage", () => {
   it("is closed to viewers without asking the hub", () => {
     const calls = mockHub({});
     renderAs(viewer, <UsersPage />);
-    expect(screen.getByRole("alert")).toHaveTextContent("Only administrators");
+    expect(screen.getByRole("alert")).toHaveTextContent("not allowed");
     expect(calls).toHaveLength(0);
+  });
+
+  it("shows each part to those who hold its permission", async () => {
+    const auditor: User = { ...viewer, username: "ada", role: "auditor", permissions: ["audit.read"] };
+    const audit: AuditEntry[] = [{ id: 1, at: now, actor: "admin", event: "user_created", target: "eve", remote: "10.0.0.2", detail: "" }];
+    const calls = mockHub({ "GET /api/audit?limit=100": () => ({ data: audit }) });
+    renderAs(auditor, <UsersPage />);
+    expect(await screen.findByText("user created")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add user" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Roles" })).not.toBeInTheDocument();
+    expect(calls.map((c) => c.path)).toEqual(["/api/audit?limit=100"]);
+  });
+
+  it("offers the roles of the hub in the role selects", async () => {
+    mockHub({
+      "GET /api/users": () => ({ data: [admin, { ...viewer, role: "helpdesk" }] }),
+      "GET /api/audit?limit=100": () => ({ data: [] }),
+      "GET /api/roles": () => ({ data: { roles: [...builtinRoles, helpdesk], permissions: CATALOGUE } }),
+    });
+    renderAs(admin, <UsersPage />);
+    const select = await screen.findByRole("combobox", { name: "Role of eve" });
+    await waitFor(() => expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["admin", "operator", "viewer", "helpdesk"]));
+    expect(select).toHaveValue("helpdesk");
+  });
+
+  it("makes, edits and deletes a role", async () => {
+    let roles = builtinRoles;
+    const calls = mockHub({
+      "GET /api/users": () => ({ data: [admin] }),
+      "GET /api/audit?limit=100": () => ({ data: [] }),
+      "GET /api/roles": () => ({ data: { roles, permissions: CATALOGUE } }),
+      "POST /api/roles": () => {
+        roles = [...builtinRoles, helpdesk];
+        return { status: 201, data: helpdesk };
+      },
+      "PATCH /api/roles/helpdesk": () => ({ data: helpdesk }),
+      "DELETE /api/roles/helpdesk": () => {
+        roles = builtinRoles;
+        return { status: 204 };
+      },
+    });
+    renderAs(admin, <UsersPage />);
+    const user = userEvent.setup();
+    expect(await screen.findByRole("heading", { name: "Roles" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Edit (admin|viewer)/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add a role" }));
+    await user.type(screen.getByLabelText("Role name"), "helpdesk");
+    await user.type(screen.getByLabelText("Description"), "Answers users");
+    await user.click(screen.getByRole("checkbox", { name: /^users.manage/ }));
+    await user.click(screen.getByRole("checkbox", { name: /^servers.read/ }));
+    await user.click(screen.getByRole("button", { name: "Save role" }));
+    expect(await screen.findByRole("button", { name: "Edit helpdesk" })).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "POST" && c.path === "/api/roles")?.body).toEqual({
+      name: "helpdesk",
+      description: "Answers users",
+      permissions: ["servers.read", "users.manage"],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Edit helpdesk" }));
+    expect(screen.getByRole("checkbox", { name: /^users.manage/ })).toBeChecked();
+    await user.click(screen.getByRole("checkbox", { name: /^users.manage/ }));
+    await user.click(screen.getByRole("button", { name: "Save role" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ name: "helpdesk", description: "Answers users", permissions: ["servers.read"] }),
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Delete role helpdesk" }));
+    await waitFor(() => expect(calls).toContainEqual({ method: "DELETE", path: "/api/roles/helpdesk", body: {} }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Edit helpdesk" })).not.toBeInTheDocument());
+  });
+
+  it("shows the hub's refusal when a role asks for too much", async () => {
+    mockHub({
+      "GET /api/users": () => ({ data: [admin] }),
+      "GET /api/audit?limit=100": () => ({ data: [] }),
+      "POST /api/roles": () => ({ status: 403, data: { error: "you are not allowed to do this: the role has permissions you do not have" } }),
+    });
+    renderAs(admin, <UsersPage />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Add a role" }));
+    await user.type(screen.getByLabelText("Role name"), "boss");
+    await user.click(screen.getByRole("button", { name: "Save role" }));
+    expect(await screen.findByText(/permissions you do not have/)).toBeInTheDocument();
   });
 
   it("lists accounts and activity, and protects the own account", async () => {

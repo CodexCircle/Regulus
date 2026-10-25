@@ -16,12 +16,12 @@ const twoFactorPath = "/api/account/two-factor"
 //	POST   /api/account/two-factor/enable          confirm with a code: turns it on, returns the recovery codes
 //	POST   /api/account/two-factor/disable         turn it off (password and code)
 //	POST   /api/account/two-factor/recovery-codes  make new recovery codes (password and code)
-//	DELETE /api/users/{username}/two-factor        remove the second factor of a user (admin)
-//	GET    /api/settings/security                  who must use two-factor (admin)
-//	PUT    /api/settings/security                  change that (admin)
+//	DELETE /api/users/{username}/two-factor        remove the second factor of a user
+//	GET    /api/settings/security                  who must use two-factor
+//	PUT    /api/settings/security                  change that
 func twoFactorRoutes(s *Service) []Route {
-	admin := func(h http.HandlerFunc) http.Handler { return RequireRole(RoleAdmin, h) }
-	adminJSON := func(h http.HandlerFunc) http.Handler { return RequireRole(RoleAdmin, RequireJSON(h)) }
+	admin := func(h http.HandlerFunc) http.Handler { return RequirePermission(PermUsersManage, h) }
+	adminJSON := func(h http.HandlerFunc) http.Handler { return RequirePermission(PermUsersManage, RequireJSON(h)) }
 	return []Route{
 		{"GET " + twoFactorPath, http.HandlerFunc(s.handleTwoFactorStatus)},
 		{"POST " + twoFactorPath + "/setup", RequireJSON(http.HandlerFunc(s.handleTwoFactorSetup))},

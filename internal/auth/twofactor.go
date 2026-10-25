@@ -112,20 +112,22 @@ func (s *Service) loadPolicy(ctx context.Context) error {
 }
 
 // Mandatory reports whether the policy requires the user to have two-factor.
-func (s *Service) Mandatory(u User) bool {
+// "admins" means whoever can manage users or roles.
+func (s *Service) Mandatory(ctx context.Context, u User) bool {
 	switch s.Policy() {
 	case PolicyAll:
 		return true
 	case PolicyAdmins:
-		return u.Role == RoleAdmin
+		p := s.permsOfUser(ctx, u)
+		return p.has(PermUsersManage) || p.has(PermRolesManage)
 	}
 	return false
 }
 
 // MustEnroll reports whether the user has to set up two-factor before doing
 // anything else.
-func (s *Service) MustEnroll(u User) bool {
-	return s.Mandatory(u) && !u.TwoFactor
+func (s *Service) MustEnroll(ctx context.Context, u User) bool {
+	return !u.TwoFactor && s.Mandatory(ctx, u)
 }
 
 // TwoFactorStatus is what the user sees about their own two-factor state.
@@ -138,7 +140,7 @@ type TwoFactorStatus struct {
 
 // TwoFactorStatus returns the two-factor state of the user.
 func (s *Service) TwoFactorStatus(ctx context.Context, u User) (TwoFactorStatus, error) {
-	st := TwoFactorStatus{Enabled: u.TwoFactor, Mandatory: s.Mandatory(u), Policy: s.Policy()}
+	st := TwoFactorStatus{Enabled: u.TwoFactor, Mandatory: s.Mandatory(ctx, u), Policy: s.Policy()}
 	if u.TwoFactor {
 		n, err := s.store.recoveryCodesLeft(ctx, u.ID)
 		if err != nil {
@@ -377,7 +379,7 @@ func (s *Service) DisableTwoFactor(ctx context.Context, u User, password, code s
 	if !u.TwoFactor {
 		return ErrTwoFactorOff
 	}
-	if s.Mandatory(u) {
+	if s.Mandatory(ctx, u) {
 		return ErrTwoFactorMandatory
 	}
 	if err := s.checkPassword(ctx, u, password); err != nil {
@@ -421,6 +423,9 @@ func (s *Service) RenewRecoveryCodes(ctx context.Context, u User, password, code
 func (s *Service) ResetTwoFactor(ctx context.Context, by User, username string) error {
 	target, err := s.userByName(ctx, username)
 	if err != nil {
+		return err
+	}
+	if err := s.mayManage(ctx, by, target); err != nil {
 		return err
 	}
 	if _, err := s.store.clearTwoFactor(ctx, target.ID); err != nil {

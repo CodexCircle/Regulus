@@ -6,10 +6,11 @@ import { LiveProvider } from "./LiveProvider";
 import { ServerPage } from "./ServerPage";
 import { agentCommand, installCommand, ServersPage } from "./ServersPage";
 import { SessionContext } from "./session";
+import { ADMIN_PERMISSIONS, VIEWER_PERMISSIONS } from "./test-users";
 
 const now = new Date().toISOString();
-const admin: User = { username: "admin", role: "admin", created_at: now, disabled: false, two_factor: false };
-const viewer: User = { username: "eve", role: "viewer", created_at: now, disabled: false, two_factor: false };
+const admin: User = { username: "admin", role: "admin", permissions: ADMIN_PERMISSIONS, created_at: now, disabled: false, two_factor: false };
+const viewer: User = { username: "eve", role: "viewer", permissions: VIEWER_PERMISSIONS, created_at: now, disabled: false, two_factor: false };
 
 const online: Agent = {
   id: "web1",

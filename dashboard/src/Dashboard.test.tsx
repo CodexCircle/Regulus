@@ -2,7 +2,9 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "./Dashboard";
+import type { User } from "./api";
 import type { DashboardLayout } from "./layout";
+import { SessionContext } from "./session";
 import { WidgetRegistry } from "./widgets/registry";
 
 function note() {
@@ -18,6 +20,23 @@ function makeRegistry() {
   r.register({ id: "note", title: "Note", description: "A note.", defaultSize: { w: 6, h: 2 }, inDefaultLayout: true, component: note });
   r.register({ id: "boom", title: "Boom", description: "Always fails.", defaultSize: { w: 6, h: 2 }, component: boom });
   return r;
+}
+
+const operator: User = {
+  username: "olivia",
+  role: "operator",
+  permissions: ["layout.edit", "servers.read"],
+  created_at: "",
+  disabled: false,
+  two_factor: false,
+};
+
+function renderDashboard(user: User = operator) {
+  return render(
+    <SessionContext.Provider value={{ user, signOut: () => Promise.resolve(), expired: vi.fn() }}>
+      <Dashboard registry={makeRegistry()} saveDelayMs={0} />
+    </SessionContext.Provider>,
+  );
 }
 
 interface Hub {
@@ -65,9 +84,16 @@ afterEach(() => {
 });
 
 describe("Dashboard", () => {
+  it("does not offer to customize without layout.edit", async () => {
+    mockHub({ stored });
+    renderDashboard({ ...operator, role: "viewer", permissions: ["servers.read"] });
+    expect(await screen.findByText("note body")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Customize" })).not.toBeInTheDocument();
+  });
+
   it("shows the default layout to a user who never saved one", async () => {
     mockHub();
-    render(<Dashboard registry={makeRegistry()} saveDelayMs={0} />);
+    renderDashboard();
     expect(await screen.findByRole("article", { name: "Note" })).toBeInTheDocument();
     expect(screen.getByText("note body")).toBeInTheDocument();
     expect(screen.queryByRole("article", { name: "Boom" })).not.toBeInTheDocument();
@@ -75,7 +101,7 @@ describe("Dashboard", () => {
 
   it("shows the saved layout, isolates a failing widget and flags an unknown one", async () => {
     mockHub({ stored });
-    render(<Dashboard registry={makeRegistry()} saveDelayMs={0} />);
+    renderDashboard();
 
     expect(await screen.findByText("note body")).toBeInTheDocument();
     expect(await screen.findByText(/This widget failed: kaput/)).toBeInTheDocument();
@@ -84,14 +110,14 @@ describe("Dashboard", () => {
 
   it("falls back to the default layout when the stored one is invalid", async () => {
     mockHub({ stored: { version: 99 } });
-    render(<Dashboard registry={makeRegistry()} saveDelayMs={0} />);
+    renderDashboard();
     expect(await screen.findByText("note body")).toBeInTheDocument();
   });
 
   it("adds a widget and saves the layout", async () => {
     const hub = mockHub({ stored: { version: 1, widgets: [] } });
     const user = userEvent.setup();
-    render(<Dashboard registry={makeRegistry()} saveDelayMs={0} />);
+    renderDashboard();
 
     expect(await screen.findByText(/dashboard is empty/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Customize" }));
@@ -109,7 +135,7 @@ describe("Dashboard", () => {
   it("removes a widget and saves", async () => {
     const hub = mockHub({ stored: { version: 1, widgets: [stored.widgets[0]] } });
     const user = userEvent.setup();
-    render(<Dashboard registry={makeRegistry()} saveDelayMs={0} />);
+    renderDashboard();
 
     await screen.findByText("note body");
     expect(screen.queryByRole("button", { name: "Remove Note" })).not.toBeInTheDocument(); // only while customizing
@@ -123,7 +149,7 @@ describe("Dashboard", () => {
   it("resets to the default layout after a confirmation", async () => {
     const hub = mockHub({ stored: { version: 1, widgets: [] } });
     const user = userEvent.setup();
-    render(<Dashboard registry={makeRegistry()} saveDelayMs={0} />);
+    renderDashboard();
 
     await screen.findByText(/dashboard is empty/);
     await user.click(screen.getByRole("button", { name: "Customize" }));
@@ -138,7 +164,7 @@ describe("Dashboard", () => {
   it("reports a layout that could not be saved", async () => {
     mockHub({ stored: { version: 1, widgets: [] }, putStatus: 500 });
     const user = userEvent.setup();
-    render(<Dashboard registry={makeRegistry()} saveDelayMs={0} />);
+    renderDashboard();
 
     await screen.findByText(/dashboard is empty/);
     await user.click(screen.getByRole("button", { name: "Customize" }));
@@ -149,7 +175,7 @@ describe("Dashboard", () => {
 
   it("shows an error when the layout cannot be loaded", async () => {
     mockHub({ getStatus: 500 });
-    render(<Dashboard registry={makeRegistry()} saveDelayMs={0} />);
+    renderDashboard();
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the dashboard");
   });
 });

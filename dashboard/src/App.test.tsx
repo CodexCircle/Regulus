@@ -4,8 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { Agent, Me, User } from "./api";
 import { FakeSocket } from "./fake-socket";
+import { ADMIN_PERMISSIONS, VIEWER_PERMISSIONS } from "./test-users";
 
-const admin: User = { username: "admin", role: "admin", created_at: new Date().toISOString(), disabled: false, two_factor: false };
+const admin: User = { username: "admin", role: "admin", permissions: ADMIN_PERMISSIONS, created_at: new Date().toISOString(), disabled: false, two_factor: false };
 
 const agent: Agent = {
   id: "local",
@@ -108,13 +109,13 @@ describe("App", () => {
     });
   });
 
-  it("shows the Users page to administrators only", async () => {
+  it("shows the Users page only to those who may manage users", async () => {
     mockHub({ me: { setup_required: false, user: admin }, agents: [] });
     const first = render(<App />);
     expect(await screen.findByRole("link", { name: "Users" })).toBeInTheDocument();
     first.unmount();
 
-    const viewer: User = { ...admin, username: "eve", role: "viewer" };
+    const viewer: User = { ...admin, username: "eve", role: "viewer", permissions: VIEWER_PERMISSIONS };
     mockHub({ me: { setup_required: false, user: viewer }, agents: [] });
     render(<App />);
     expect(await screen.findByRole("link", { name: /eve/ })).toBeInTheDocument();

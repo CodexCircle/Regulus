@@ -3,13 +3,15 @@ import { Dashboard } from "./Dashboard";
 import { ServerPage } from "./ServerPage";
 import { ServersPage } from "./ServersPage";
 import { useRoute, type Route } from "./route";
+import { can } from "./api";
 import type { Session } from "./session";
 import { UsersPage } from "./UsersPage";
 
-const nav: { route: Route; label: string; adminOnly?: boolean }[] = [
+// A page with permissions is shown to anyone who holds one of them.
+const nav: { route: Route; label: string; permissions?: string[] }[] = [
   { route: "/", label: "Dashboard" },
   { route: "/servers", label: "Servers" },
-  { route: "/users", label: "Users", adminOnly: true },
+  { route: "/users", label: "Users", permissions: ["users.manage", "roles.manage", "audit.read"] },
 ];
 
 function Page({ route }: { route: Route }) {
@@ -38,7 +40,7 @@ export function Shell({ user, signOut }: Session) {
           Regulus
         </a>
         <nav aria-label="Main">
-          {nav.filter((n) => !n.adminOnly || user.role === "admin").map((n) => (
+          {nav.filter((n) => !n.permissions || n.permissions.some((p) => can(user, p))).map((n) => (
             <a key={n.route} href={`#${n.route}`} aria-current={route === n.route || (n.route === "/servers" && route === "/server") ? "page" : undefined}>
               {n.label}
             </a>

@@ -45,8 +45,6 @@ func (s *Service) Users(ctx context.Context) ([]User, error) {
 	return s.store.listUsers(ctx)
 }
 
-func validRole(r Role) bool { return r == RoleAdmin || r == RoleViewer }
-
 // CreateUser adds an account with an initial password. The caller must be an
 // admin; that is checked by the HTTP layer.
 func (s *Service) CreateUser(ctx context.Context, by User, username, password string, role Role) (User, error) {
@@ -54,8 +52,9 @@ func (s *Service) CreateUser(ctx context.Context, by User, username, password st
 	if err := validateCredentials(username, password); err != nil {
 		return User{}, err
 	}
-	if !validRole(role) {
-		return User{}, &inputError{`role must be "admin" or "viewer"`}
+	role = Role(strings.ToLower(strings.TrimSpace(string(role))))
+	if err := s.mayGrant(ctx, by, role); err != nil {
+		return User{}, err
 	}
 	hash, err := HashPassword(password)
 	if err != nil {
@@ -83,9 +82,14 @@ func (s *Service) UpdateUser(ctx context.Context, by User, username string, ch U
 	if err != nil {
 		return User{}, err
 	}
+	if err := s.mayManage(ctx, by, target); err != nil {
+		return User{}, err
+	}
 	if ch.Role != nil {
-		if !validRole(*ch.Role) {
-			return User{}, &inputError{`role must be "admin" or "viewer"`}
+		next := Role(strings.ToLower(strings.TrimSpace(string(*ch.Role))))
+		ch.Role = &next
+		if err := s.mayGrant(ctx, by, next); err != nil {
+			return User{}, err
 		}
 		if *ch.Role != target.Role {
 			if err := s.store.setRole(ctx, target.ID, *ch.Role); err != nil {
@@ -117,6 +121,9 @@ func (s *Service) UpdateUser(ctx context.Context, by User, username string, ch U
 func (s *Service) DeleteUser(ctx context.Context, by User, username string) error {
 	target, err := s.userByName(ctx, username)
 	if err != nil {
+		return err
+	}
+	if err := s.mayManage(ctx, by, target); err != nil {
 		return err
 	}
 	if err := s.store.deleteUser(ctx, target.ID); err != nil {

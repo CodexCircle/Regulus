@@ -3,7 +3,7 @@ import ReactGridLayout, { useContainerWidth, type Layout } from "react-grid-layo
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { addWidget, applyPositions, GRID_COLS, removeWidget, setWidgetConfig, type DashboardLayout, type WidgetInstance } from "./layout";
-import { useSession } from "./session";
+import { useCan, useSession } from "./session";
 import { useDashboardLayout, type SaveState } from "./useDashboardLayout";
 import { registry as defaultRegistry } from "./widgets";
 import type { WidgetRegistry } from "./widgets/registry";
@@ -19,6 +19,7 @@ interface Props {
 // the layout is saved on the hub.
 export function Dashboard({ registry = defaultRegistry, saveDelayMs }: Props) {
   const session = useSession();
+  const canEdit = useCan("layout.edit");
   const { loaded, saveState, update, reset } = useDashboardLayout(registry, {
     saveDelayMs,
     onUnauthorized: session?.expired,
@@ -34,14 +35,16 @@ export function Dashboard({ registry = defaultRegistry, saveDelayMs }: Props) {
   return (
     <section aria-label="Dashboard">
       <div className="toolbar">
-        <button type="button" aria-pressed={editing} onClick={() => {
-          setEditing(!editing);
-          setPicking(false);
-          setConfirmingReset(false);
-        }}>
-          {editing ? "Done" : "Customize"}
-        </button>
-        {editing && (
+        {canEdit && (
+          <button type="button" aria-pressed={editing} onClick={() => {
+            setEditing(!editing);
+            setPicking(false);
+            setConfirmingReset(false);
+          }}>
+            {editing ? "Done" : "Customize"}
+          </button>
+        )}
+        {editing && canEdit && (
           <>
             <button type="button" aria-expanded={picking} onClick={() => setPicking(!picking)}>
               Add widget

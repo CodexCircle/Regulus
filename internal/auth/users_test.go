@@ -81,6 +81,7 @@ func TestTheLastAdminIsProtected(t *testing.T) {
 	if _, err := s.UpdateUser(ctx, admin, viewer.Username, UserChange{Role: &adminRole}); err != nil {
 		t.Fatal(err)
 	}
+	viewer.Role = adminRole // the actor of the next calls is the promoted user
 	if _, err := s.UpdateUser(ctx, admin, "admin", UserChange{Role: &viewerRole}); err != nil {
 		t.Fatalf("demote with another admin around: %v", err)
 	}

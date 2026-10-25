@@ -63,7 +63,7 @@ func (s *Service) Require(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, ErrUnauthenticated.Error())
 			return
 		}
-		if s.MustEnroll(user) && !strings.HasPrefix(r.URL.Path, twoFactorPath) {
+		if s.MustEnroll(r.Context(), user) && !strings.HasPrefix(r.URL.Path, twoFactorPath) {
 			writeJSON(w, http.StatusForbidden, map[string]string{
 				"error": "the hub requires two-factor authentication: set it up before doing anything else",
 				"code":  "two_factor_setup_required",
@@ -104,7 +104,7 @@ func (s *Service) handleMe(w http.ResponseWriter, r *http.Request) {
 	}{SetupRequired: s.SetupRequired()}
 	if u, err := s.userOf(r); err == nil {
 		resp.User = &u
-		resp.TwoFactorSetupRequired = s.MustEnroll(u)
+		resp.TwoFactorSetupRequired = s.MustEnroll(r.Context(), u)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

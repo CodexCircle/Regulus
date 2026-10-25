@@ -7,6 +7,7 @@ import { LiveProvider } from "../LiveProvider";
 import { CpuWidget, DiskWidget, MemoryWidget, NetworkWidget, SystemWidget, UptimeWidget } from "./BaseWidgets";
 import { registry } from "./index";
 import type { WidgetProps } from "./registry";
+import { ADMIN_PERMISSIONS } from "../test-users";
 
 const GIB = 1024 ** 3;
 const T0 = Date.parse("2026-01-01T12:00:00Z");
@@ -261,7 +262,7 @@ describe("live updates", () => {
     const expired = vi.fn();
     const { SessionContext } = await import("../session");
     render(
-      <SessionContext.Provider value={{ user: { username: "a", role: "admin", created_at: "", disabled: false, two_factor: false }, signOut: () => Promise.resolve(), expired }}>
+      <SessionContext.Provider value={{ user: { username: "a", role: "admin", permissions: ADMIN_PERMISSIONS, created_at: "", disabled: false, two_factor: false }, signOut: () => Promise.resolve(), expired }}>
         <LiveProvider>
           <CpuWidget {...props()} />
         </LiveProvider>

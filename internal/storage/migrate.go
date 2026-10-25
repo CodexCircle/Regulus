@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"sort"
@@ -108,8 +109,34 @@ func apply(ctx context.Context, db *sql.DB, migrations []migration) error {
 	return nil
 }
 
-func applyOne(ctx context.Context, db *sql.DB, m migration) error {
-	tx, err := db.BeginTx(ctx, nil)
+// noForeignKeys marks a migration that rebuilds a table other tables refer to.
+// SQLite cannot change a CHECK constraint in place, so such a migration creates
+// the new table, copies the rows, drops the old one and renames the new one;
+// with foreign keys on, dropping the old table would delete the rows that
+// refer to it. The pragma cannot change inside a transaction, so the migration
+// runs with foreign keys off, and the references are checked before it commits.
+const noForeignKeys = "-- regulus:no-foreign-keys"
+
+func applyOne(ctx context.Context, db *sql.DB, m migration) (err error) {
+	// One connection for the pragma and the transaction.
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+
+	if strings.HasPrefix(m.sql, noForeignKeys) {
+		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+			return err
+		}
+		defer func() {
+			if _, perr := conn.ExecContext(context.WithoutCancel(ctx), `PRAGMA foreign_keys = ON`); perr != nil && err == nil {
+				err = perr
+			}
+		}()
+	}
+
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -117,6 +144,16 @@ func applyOne(ctx context.Context, db *sql.DB, m migration) error {
 
 	if _, err := tx.ExecContext(ctx, m.sql); err != nil {
 		return err
+	}
+	if strings.HasPrefix(m.sql, noForeignKeys) {
+		var table sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT "table" FROM pragma_foreign_key_check LIMIT 1`).Scan(&table)
+		if err == nil {
+			return fmt.Errorf("the migration left rows that refer to missing rows in %s", table.String)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, name) VALUES (?, ?)`, m.version, m.name); err != nil {
 		return err

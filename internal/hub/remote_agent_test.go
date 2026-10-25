@@ -398,3 +398,52 @@ func TestRenameIsAdminOnly(t *testing.T) {
 		t.Errorf("status = %d, want 403", rec.Code)
 	}
 }
+
+// The API checks permissions, not role names: an operator may manage servers,
+// a role with nothing may only use what any signed-in user may.
+func TestAPIChecksPermissions(t *testing.T) {
+	h := startRemoteHub(t)
+	ctx := context.Background()
+	admin, _, _, err := h.auth.Setup(ctx, h.auth.SetupToken(), "admin", "correct horse battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.auth.CreateRole(ctx, admin, "nothing", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	as := func(username string, role auth.Role) *api {
+		t.Helper()
+		if _, err := h.auth.CreateUser(ctx, admin, username, "correct horse battery", role); err != nil {
+			t.Fatal(err)
+		}
+		_, session, _, err := h.auth.Login(ctx, "1.1.1.1", username, "correct horse battery")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &api{
+			t:       t,
+			handler: NewHandler(Deps{UI: fstest.MapFS{}, Agents: h, Layouts: h, Log: quiet(), Auth: h.auth, Fleet: h}),
+			cookie:  &http.Cookie{Name: auth.CookieName, Value: session},
+		}
+	}
+	for _, tc := range []struct {
+		who          *api
+		method, path string
+		body         any
+		want         int
+	}{
+		{as("olivia", auth.RoleOperator), "GET", "/api/agents", nil, http.StatusOK},
+		{as("olivia2", auth.RoleOperator), "POST", "/api/enrollment-tokens", map[string]string{}, http.StatusCreated},
+		{as("olivia3", auth.RoleOperator), "PUT", "/api/layout", map[string]any{"layout": map[string]any{}}, http.StatusNoContent},
+		{as("nora", "nothing"), "GET", "/api/agents", nil, http.StatusForbidden},
+		{as("nora2", "nothing"), "GET", "/api/agents/local/metrics", nil, http.StatusForbidden},
+		{as("nora3", "nothing"), "PUT", "/api/layout", map[string]any{"layout": map[string]any{}}, http.StatusForbidden},
+		{as("nora4", "nothing"), "GET", "/api/layout", nil, http.StatusOK},
+		{as("vic", auth.RoleViewer), "POST", "/api/enrollment-tokens", map[string]string{}, http.StatusForbidden},
+		{as("vic2", auth.RoleViewer), "PATCH", "/api/agents/local", map[string]string{"name": "x"}, http.StatusForbidden},
+	} {
+		if rec := tc.who.do(tc.method, tc.path, tc.body); rec.Code != tc.want {
+			t.Errorf("%s %s: status = %d, want %d (%s)", tc.method, tc.path, rec.Code, tc.want, rec.Body)
+		}
+	}
+}

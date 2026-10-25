@@ -31,12 +31,15 @@ var ErrInvalidReset = errors.New("this reset link is invalid or has expired")
 // a new password, and ends all the sessions of the account, since its
 // credentials can no longer be trusted. The admin never learns the password.
 // The caller must be an admin; that is checked by the HTTP layer.
-func (s *Service) CreateReset(ctx context.Context, by, username string) (string, time.Time, error) {
+func (s *Service) CreateReset(ctx context.Context, by User, username string) (string, time.Time, error) {
 	target, err := s.userByName(ctx, username)
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	return s.issueReset(ctx, by, target, "")
+	if err := s.mayManage(ctx, by, target); err != nil {
+		return "", time.Time{}, err
+	}
+	return s.issueReset(ctx, by.Username, target, "")
 }
 
 func (s *Service) issueReset(ctx context.Context, by string, target User, detail string) (string, time.Time, error) {
