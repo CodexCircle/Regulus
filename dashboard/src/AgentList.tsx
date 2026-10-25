@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, fetchAgents, type Agent } from "./api";
 import { formatAgo, formatDuration } from "./format";
+import { useSession } from "./session";
 
 const REFRESH_MS = 5000;
 
@@ -11,11 +12,15 @@ type State =
 
 interface Props {
   refreshMs?: number;
+  // Show the "Agents" heading; a widget has its own title.
+  heading?: boolean;
   // Called when the hub answers 401: the session has ended.
   onUnauthorized?: () => void;
 }
 
-export function AgentList({ refreshMs = REFRESH_MS, onUnauthorized }: Props) {
+export function AgentList({ refreshMs = REFRESH_MS, heading = true, onUnauthorized: onUnauthorizedProp }: Props) {
+  const session = useSession();
+  const onUnauthorized = onUnauthorizedProp ?? session?.expired;
   const [state, setState] = useState<State>({ kind: "loading" });
 
   useEffect(() => {
@@ -43,7 +48,7 @@ export function AgentList({ refreshMs = REFRESH_MS, onUnauthorized }: Props) {
 
   return (
     <section aria-labelledby="agents-heading">
-      <h2 id="agents-heading">Agents</h2>
+      {heading ? <h2 id="agents-heading">Agents</h2> : <h2 id="agents-heading" className="visually-hidden">Agents</h2>}
       {state.kind === "loading" && <p>Loading…</p>}
       {state.kind === "error" && <p role="alert">Could not load agents: {state.message}</p>}
       {state.kind === "ready" && state.agents.length === 0 && <p>No agents connected.</p>}

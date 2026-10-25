@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { ApiError, fetchMe, login, logout, setupAdmin, type User } from "./api";
-
-export interface Session {
-  user: User;
-  // signOut ends the session on the hub; expired is called when the hub says
-  // the session is gone (HTTP 401) and only returns to the login page.
-  signOut: () => Promise<void>;
-  expired: () => void;
-}
+import { SessionContext, type Session } from "./session";
 
 type State =
   | { kind: "loading" }
@@ -36,15 +29,15 @@ export function AuthGate({ children }: { children: (session: Session) => ReactNo
 
   switch (state.kind) {
     case "loading":
-      return <p>Loading…</p>;
+      return <AuthFrame><p>Loading…</p></AuthFrame>;
     case "error":
-      return <p role="alert">Could not reach the hub: {state.message}</p>;
+      return <AuthFrame><p role="alert">Could not reach the hub: {state.message}</p></AuthFrame>;
     case "setup":
-      return <SetupForm onDone={(user) => setState({ kind: "ready", user })} />;
+      return <AuthFrame><SetupForm onDone={(user) => setState({ kind: "ready", user })} /></AuthFrame>;
     case "login":
-      return <LoginForm onDone={(user) => setState({ kind: "ready", user })} />;
-    case "ready":
-      return children({
+      return <AuthFrame><LoginForm onDone={(user) => setState({ kind: "ready", user })} /></AuthFrame>;
+    case "ready": {
+      const session: Session = {
         user: state.user,
         signOut: async () => {
           try {
@@ -54,8 +47,23 @@ export function AuthGate({ children }: { children: (session: Session) => ReactNo
           }
         },
         expired,
-      });
+      };
+      return <SessionContext value={session}>{children(session)}</SessionContext>;
+    }
   }
+}
+
+// AuthFrame is the centred card around the setup and login pages.
+function AuthFrame({ children }: { children: ReactNode }) {
+  return (
+    <main className="auth">
+      <header>
+        <h1>Regulus</h1>
+        <p>CodexCircle Server Manager</p>
+      </header>
+      {children}
+    </main>
+  );
 }
 
 function useSubmit(action: () => Promise<User>, onDone: (user: User) => void) {

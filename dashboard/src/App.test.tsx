@@ -56,6 +56,7 @@ function mockHub(hub: Omit<Hub, "calls">): Hub {
         return reply(204);
       }
       if (path === "/api/agents") return reply(state.agentsStatus ?? 200, state.agents ?? []);
+      if (path === "/api/layout") return init?.method === "PUT" ? reply(204) : reply(200, { layout: null, updated_at: null });
       return reply(404, { error: "not found" });
     }),
   );
@@ -148,6 +149,22 @@ describe("App", () => {
     expect(screen.getByText("admin")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Sign out" }));
     expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+  });
+
+  it("navigates between the dashboard and the servers page", async () => {
+    mockHub({ me: { setup_required: false, user: admin }, agents: [agent] });
+    const user = userEvent.setup();
+    window.location.hash = "";
+    render(<App />);
+
+    expect(await screen.findByRole("article", { name: "Servers" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("aria-current", "page");
+
+    await user.click(screen.getByRole("link", { name: "Servers" }));
+    expect(await screen.findByRole("heading", { name: "Agents" })).toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "Servers" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Servers" })).toHaveAttribute("aria-current", "page");
+    window.location.hash = "";
   });
 
   it("returns to the login page when the session ends", async () => {
