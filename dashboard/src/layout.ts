@@ -46,14 +46,22 @@ export function parseLayout(raw: unknown): DashboardLayout | null {
   return { version: LAYOUT_VERSION, widgets: valid };
 }
 
-function bottom(layout: DashboardLayout): number {
-  return layout.widgets.reduce((max, w) => Math.max(max, w.y + w.h), 0);
+// findSpot returns the first free place, scanning rows from the top and each
+// row from the left, where a widget of the given size fits.
+function findSpot(layout: DashboardLayout, w: number, h: number): { x: number; y: number } {
+  const free = (x: number, y: number) =>
+    layout.widgets.every((o) => x + w <= o.x || o.x + o.w <= x || y + h <= o.y || o.y + o.h <= y);
+  for (let y = 0; ; y++) {
+    for (let x = 0; x + w <= GRID_COLS; x++) {
+      if (free(x, y)) return { x, y };
+    }
+  }
 }
 
 let counter = 0;
 const defaultNewId = (type: string) => `${type}-${Date.now().toString(36)}${(counter++).toString(36)}`;
 
-// addWidget places a new widget of the given type below the existing ones.
+// addWidget places a new widget of the given type in the first free spot.
 export function addWidget(
   layout: DashboardLayout,
   type: string,
@@ -61,12 +69,17 @@ export function addWidget(
   newId: (type: string) => string = defaultNewId,
 ): DashboardLayout {
   const w = Math.min(size.w, GRID_COLS);
-  const widget: WidgetInstance = { i: newId(type), type, x: 0, y: bottom(layout), w, h: size.h };
+  const widget: WidgetInstance = { i: newId(type), type, ...findSpot(layout, w, size.h), w, h: size.h };
   return { ...layout, widgets: [...layout.widgets, widget] };
 }
 
 export function removeWidget(layout: DashboardLayout, i: string): DashboardLayout {
   return { ...layout, widgets: layout.widgets.filter((w) => w.i !== i) };
+}
+
+// setWidgetConfig replaces the settings saved with one widget.
+export function setWidgetConfig(layout: DashboardLayout, i: string, config: Record<string, unknown>): DashboardLayout {
+  return { ...layout, widgets: layout.widgets.map((w) => (w.i === i ? { ...w, config } : w)) };
 }
 
 // applyPositions copies positions and sizes from the grid (which may have
@@ -88,7 +101,7 @@ export function applyPositions(
 }
 
 // defaultLayout is what a user without a saved layout sees: the widgets that
-// are marked for it, stacked in registration order.
+// are marked for it, placed in registration order.
 export function defaultLayout(registry: WidgetRegistry): DashboardLayout {
   let layout: DashboardLayout = { version: LAYOUT_VERSION, widgets: [] };
   for (const def of registry.list()) {

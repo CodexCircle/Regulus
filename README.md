@@ -114,6 +114,8 @@ Endpoints: `GET /api/auth/me`, `POST /api/auth/setup`, `POST /api/auth/login`, `
 
 After the login the dashboard shows a header with the sections **Dashboard** and **Servers** and the account menu. The **Dashboard** page is a grid of widgets: **Customize** unlocks dragging and resizing, **Add widget** picks from the registered widgets, and **Reset to default** restores the initial layout. The layout is saved per user through `/api/layout` (with debouncing, and flushed when leaving the page). Widgets are registered in `dashboard/src/widgets/` with `registerWidget` (id, title, default size, component); a widget that crashes only breaks its own frame, and a layout that refers to an unknown widget (for example from a removed plugin) shows a placeholder that can be removed.
 
+The base installation ships these widgets, fed live by the hub (the dashboard follows `/api/stream` and reconnects by itself if the connection drops): **System** (host, OS, kernel, memory, load, uptime), **CPU** and **Memory** (current value plus a chart of the last 10 minutes), **Network** (received and sent rate, in total and per interface), **Disk usage** (one bar per mounted filesystem), **Uptime**, and **Servers**. The first five (without Uptime) are in the default layout. When several agents are connected, each widget has a selector and remembers the choice; by default it shows the hub's built-in agent.
+
 ## Repository layout
 
 ```
@@ -228,6 +230,8 @@ Endpoint: `GET /api/auth/me`, `POST /api/auth/setup`, `POST /api/auth/login`, `P
 ### Dashboard
 
 Dopo il login la dashboard mostra un'intestazione con le sezioni **Dashboard** e **Servers** e il menu dell'account. La pagina **Dashboard** è una griglia di widget: **Customize** abilita trascinamento e ridimensionamento, **Add widget** sceglie tra i widget registrati e **Reset to default** ripristina il layout iniziale. Il layout è salvato per utente tramite `/api/layout` (con debounce, e salvato anche quando si lascia la pagina). I widget si registrano in `dashboard/src/widgets/` con `registerWidget` (id, titolo, dimensione predefinita, componente); un widget che va in errore rompe solo il proprio riquadro, e un layout che cita un widget sconosciuto (ad esempio di un plugin rimosso) mostra un segnaposto che si può rimuovere.
+
+L'installazione base include questi widget, alimentati in tempo reale dall'hub (la dashboard segue `/api/stream` e si riconnette da sola se la connessione cade): **System** (host, sistema operativo, kernel, memoria, load, uptime), **CPU** e **Memory** (valore attuale e grafico degli ultimi 10 minuti), **Network** (velocità in ricezione e invio, totale e per interfaccia), **Disk usage** (una barra per filesystem montato), **Uptime** e **Servers**. Tutti tranne Uptime sono nel layout predefinito. Con più agent collegati ogni widget ha un selettore e ricorda la scelta; di default mostra l'agent integrato dell'hub.
 
 ## Contribuire
 

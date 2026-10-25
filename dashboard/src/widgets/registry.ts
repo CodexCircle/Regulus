@@ -7,6 +7,8 @@ export interface WidgetProps {
   instanceId: string;
   // Settings saved with the widget in the layout; the shape is up to the widget.
   config: Record<string, unknown>;
+  // Saves new settings for this widget in the layout.
+  setConfig: (config: Record<string, unknown>) => void;
 }
 
 // WidgetDefinition describes a kind of widget. Built-in widgets and, later,

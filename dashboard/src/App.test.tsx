@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { Agent, Me, User } from "./api";
+import { FakeSocket } from "./fake-socket";
 
 const admin: User = { username: "admin", role: "admin", created_at: new Date().toISOString() };
 
@@ -63,8 +64,14 @@ function mockHub(hub: Omit<Hub, "calls">): Hub {
   return state;
 }
 
+// Most tests look at the servers page; the dashboard has its own tests.
+beforeEach(() => {
+  window.location.hash = "#/servers";
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  window.location.hash = "";
 });
 
 describe("App", () => {
@@ -164,7 +171,18 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "Agents" })).toBeInTheDocument();
     expect(screen.queryByRole("article", { name: "Servers" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Servers" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("fills the default dashboard with live data of the hub's server", async () => {
+    mockHub({ me: { setup_required: false, user: admin }, agents: [agent] });
     window.location.hash = "";
+    render(<App />);
+
+    for (const name of ["System", "CPU", "Memory", "Network", "Disk usage", "Servers"]) {
+      expect(await screen.findByRole("article", { name })).toBeInTheDocument();
+    }
+    expect(FakeSocket.last.url).toMatch(/\/api\/stream$/);
+    expect(await within(screen.getByRole("article", { name: "System" })).findByText("srv1 (local)")).toBeInTheDocument();
   });
 
   it("returns to the login page when the session ends", async () => {
