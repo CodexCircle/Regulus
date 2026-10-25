@@ -1,0 +1,171 @@
+syntax = "proto3";
+
+// Contract between agents and the hub.
+//
+// An agent opens one long-lived bidirectional stream (Connect) towards the
+// hub. The built-in agent of the hub uses exactly the same contract through
+// an in-process transport, so remote agents need no separate protocol.
+//
+// Compatibility rules (see also docs in the design): fields are only added,
+// never renumbered or reused; a breaking change bumps protocol_version and is
+// negotiated in the Hello/Welcome exchange.
+package regulus.agent.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+service AgentService {
+  // Connect is the only RPC: a persistent stream carrying everything that
+  // flows between an agent and its hub.
+  //
+  // Flow: the agent sends Hello; the hub answers Welcome or Reject (and ends
+  // the stream on Reject). After Welcome the agent sends Heartbeat and
+  // MetricsReport messages on the intervals set by the hub, and the hub may
+  // send Command messages at any time; each Command is answered by a
+  // CommandResult.
+  rpc Connect(stream AgentMessage) returns (stream HubMessage);
+}
+
+// Messages sent by the agent.
+message AgentMessage {
+  oneof payload {
+    Hello hello = 1;
+    Heartbeat heartbeat = 2;
+    MetricsReport metrics = 3;
+    CommandResult command_result = 4;
+  }
+}
+
+// Messages sent by the hub.
+message HubMessage {
+  oneof payload {
+    Welcome welcome = 1;
+    Reject reject = 2;
+    Command command = 3;
+  }
+}
+
+// Hello is the first message of every stream: it registers the agent.
+message Hello {
+  // Highest protocol version the agent speaks (see internal/protocol).
+  uint32 protocol_version = 1;
+  // Release version of the agent, for display and update decisions.
+  string agent_version = 2;
+  // Stable identifier of the agent. Empty on the very first connection, when
+  // the hub assigns one in Welcome.
+  string agent_id = 3;
+  SystemInfo system = 4;
+}
+
+// SystemInfo describes the machine the agent runs on. It rarely changes.
+message SystemInfo {
+  string hostname = 1;
+  string os = 2;          // for example "linux"
+  string os_version = 3;  // for example "Ubuntu 24.04.1 LTS"
+  string kernel = 4;
+  string arch = 5;        // for example "amd64", "arm64"
+  uint32 cpu_count = 6;
+  uint64 memory_total_bytes = 7;
+}
+
+// Welcome accepts the agent and configures the stream.
+message Welcome {
+  // Protocol version negotiated for this stream.
+  uint32 protocol_version = 1;
+  string hub_version = 2;
+  // Identifier of the agent; equals Hello.agent_id when it was provided.
+  string agent_id = 3;
+  // How often the agent must send a Heartbeat.
+  google.protobuf.Duration heartbeat_interval = 4;
+  // How often the agent must send a MetricsReport.
+  google.protobuf.Duration metrics_interval = 5;
+}
+
+// Reject refuses the agent; the hub closes the stream right after.
+message Reject {
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    REASON_UNSUPPORTED_PROTOCOL_VERSION = 1;
+    REASON_UNAUTHORIZED = 2;
+  }
+  Reason reason = 1;
+  // Human readable explanation, safe to show in the dashboard.
+  string message = 2;
+  // Protocol versions the hub accepts, to help the operator upgrade.
+  uint32 min_protocol_version = 3;
+  uint32 max_protocol_version = 4;
+}
+
+// Heartbeat tells the hub the agent is alive.
+message Heartbeat {
+  google.protobuf.Timestamp sent_at = 1;
+}
+
+// MetricsReport is a snapshot of the machine state.
+message MetricsReport {
+  google.protobuf.Timestamp collected_at = 1;
+  CpuMetrics cpu = 2;
+  MemoryMetrics memory = 3;
+  repeated DiskMetrics disks = 4;
+  repeated NetworkMetrics networks = 5;
+  uint64 uptime_seconds = 6;
+}
+
+message CpuMetrics {
+  // Utilisation over the last interval, 0 to 100, across all cores.
+  double usage_percent = 1;
+  double load_1 = 2;
+  double load_5 = 3;
+  double load_15 = 4;
+}
+
+message MemoryMetrics {
+  uint64 total_bytes = 1;
+  uint64 used_bytes = 2;
+  uint64 available_bytes = 3;
+  uint64 swap_total_bytes = 4;
+  uint64 swap_used_bytes = 5;
+}
+
+message DiskMetrics {
+  string mount_point = 1;
+  string filesystem = 2;
+  uint64 total_bytes = 3;
+  uint64 used_bytes = 4;
+}
+
+message NetworkMetrics {
+  string interface = 1;
+  // Monotonic counters since boot; the hub computes rates.
+  uint64 rx_bytes = 2;
+  uint64 tx_bytes = 3;
+}
+
+// Command is an instruction from the hub. Plugins will add their own command
+// kinds in a later version of the contract.
+message Command {
+  // Unique per stream; echoed back in CommandResult.
+  string id = 1;
+  oneof kind {
+    Ping ping = 2;
+    SetIntervals set_intervals = 3;
+  }
+}
+
+// Ping asks the agent to answer with a successful CommandResult.
+message Ping {}
+
+// SetIntervals changes the reporting intervals. A zero value keeps the
+// current one.
+message SetIntervals {
+  google.protobuf.Duration heartbeat_interval = 1;
+  google.protobuf.Duration metrics_interval = 2;
+}
+
+// CommandResult is the agent's answer to a Command.
+message CommandResult {
+  string command_id = 1;
+  bool success = 2;
+  // Set when success is false.
+  string error = 3;
+}
