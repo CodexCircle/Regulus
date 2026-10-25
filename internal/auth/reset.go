@@ -120,6 +120,9 @@ type Recovery struct {
 	Expires  time.Time
 	// Reenabled is true if the account was disabled and is enabled now.
 	Reenabled bool
+	// TwoFactorCleared is true if the account had two-factor authentication,
+	// which was removed so that the admin can sign in with the new password.
+	TwoFactorCleared bool
 }
 
 // RecoverAdmin gives back access to a hub whose admin cannot log in. It runs
@@ -166,6 +169,15 @@ func RecoverAdmin(ctx context.Context, db *sql.DB, username string, log *slog.Lo
 		target.Disabled = false
 		rec.Reenabled = true
 		s.audit(ctx, ConsoleActor, EventUserEnabled, target.Username, "reset-admin command")
+	}
+	// Console access is trusted: a locked-out admin may have lost the app and
+	// the recovery codes too, and would otherwise stay locked out.
+	if target.TwoFactor {
+		if _, err := s.store.clearTwoFactor(ctx, target.ID); err != nil {
+			return Recovery{}, err
+		}
+		rec.TwoFactorCleared = true
+		s.audit(ctx, ConsoleActor, EventTwoFactorReset, target.Username, "reset-admin command")
 	}
 	rec.Token, rec.Expires, err = s.issueReset(ctx, ConsoleActor, target, "(reset-admin command)")
 	return rec, err

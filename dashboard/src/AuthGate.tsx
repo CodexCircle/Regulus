@@ -1,13 +1,34 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { ApiError, fetchMe, login, logout, setupAdmin, type User } from "./api";
+import {
+  ApiError,
+  fetchMe,
+  isPending,
+  login,
+  loginTwoFactor,
+  logout,
+  setupAdmin,
+  TWO_FACTOR_REQUIRED_EVENT,
+  type LoginResult,
+  type Me,
+  type User,
+} from "./api";
 import { SessionContext, type Session } from "./session";
+import { TwoFactor } from "./TwoFactor";
 
 type State =
   | { kind: "loading" }
   | { kind: "error"; message: string }
   | { kind: "setup" }
   | { kind: "login" }
-  | { kind: "ready"; user: User };
+  // mustEnroll: the hub requires two-factor authentication and the user has
+  // not set it up, so nothing else works yet. recoveryLeft is set when the
+  // user signed in with a recovery code.
+  | { kind: "ready"; user: User; mustEnroll: boolean; recoveryLeft?: number };
+
+const stateOf = (me: Me): State =>
+  me.user
+    ? { kind: "ready", user: me.user, mustEnroll: me.two_factor_setup_required === true }
+    : { kind: me.setup_required ? "setup" : "login" };
 
 // AuthGate shows the first-run setup or the login page until there is a
 // session, then renders children.
@@ -15,17 +36,36 @@ export function AuthGate({ children }: { children: (session: Session) => ReactNo
   const [state, setState] = useState<State>({ kind: "loading" });
   const expired = useCallback(() => setState({ kind: "login" }), []);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    fetchMe(controller.signal).then(
-      (me) => setState(me.user ? { kind: "ready", user: me.user } : { kind: me.setup_required ? "setup" : "login" }),
+  // loadMe asks who is signed in, for the start and after a login (to learn
+  // whether the user still has to set up two-factor authentication).
+  const loadMe = useCallback((signal?: AbortSignal, keep?: Pick<Extract<State, { kind: "ready" }>, "recoveryLeft">) => {
+    fetchMe(signal).then(
+      (me) => {
+        const next = stateOf(me);
+        setState(next.kind === "ready" && keep ? { ...next, ...keep } : next);
+      },
       (err: unknown) => {
-        if (controller.signal.aborted) return;
+        if (signal?.aborted) return;
         setState({ kind: "error", message: err instanceof Error ? err.message : String(err) });
       },
     );
-    return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadMe(controller.signal);
+    return () => controller.abort();
+  }, [loadMe]);
+
+  // The hub can start requiring two-factor while someone is signed in.
+  useEffect(() => {
+    const onRequired = () => loadMe();
+    window.addEventListener(TWO_FACTOR_REQUIRED_EVENT, onRequired);
+    return () => window.removeEventListener(TWO_FACTOR_REQUIRED_EVENT, onRequired);
+  }, [loadMe]);
+
+  const signedIn = (result: LoginResult) =>
+    loadMe(undefined, result.recovery_code_used ? { recoveryLeft: result.recovery_codes_left ?? 0 } : undefined);
 
   switch (state.kind) {
     case "loading":
@@ -33,9 +73,9 @@ export function AuthGate({ children }: { children: (session: Session) => ReactNo
     case "error":
       return <AuthFrame><p role="alert">Could not reach the hub: {state.message}</p></AuthFrame>;
     case "setup":
-      return <AuthFrame><SetupForm onDone={(user) => setState({ kind: "ready", user })} /></AuthFrame>;
+      return <AuthFrame><SetupForm onDone={signedIn} /></AuthFrame>;
     case "login":
-      return <AuthFrame><LoginForm onDone={(user) => setState({ kind: "ready", user })} /></AuthFrame>;
+      return <AuthFrame><LoginForm onDone={signedIn} /></AuthFrame>;
     case "ready": {
       const session: Session = {
         user: state.user,
@@ -48,7 +88,33 @@ export function AuthGate({ children }: { children: (session: Session) => ReactNo
         },
         expired,
       };
-      return <SessionContext value={session}>{children(session)}</SessionContext>;
+      if (state.mustEnroll) {
+        return (
+          <SessionContext value={session}>
+            <AuthFrame>
+              <h2>Set up two-factor authentication</h2>
+              <p>This hub requires two-factor authentication. You can use Regulus once it is on.</p>
+              <TwoFactor onChange={() => loadMe()} />
+              <p>
+                <button type="button" onClick={() => void session.signOut()}>
+                  Sign out
+                </button>
+              </p>
+            </AuthFrame>
+          </SessionContext>
+        );
+      }
+      return (
+        <SessionContext value={session}>
+          {state.recoveryLeft !== undefined && (
+            <RecoveryNotice
+              left={state.recoveryLeft}
+              onClose={() => setState({ kind: "ready", user: state.user, mustEnroll: false })}
+            />
+          )}
+          {children(session)}
+        </SessionContext>
+      );
     }
   }
 }
@@ -66,7 +132,7 @@ export function AuthFrame({ children }: { children: ReactNode }) {
   );
 }
 
-function useSubmit(action: () => Promise<User>, onDone: (user: User) => void) {
+function useSubmit<T>(action: () => Promise<T>, onDone: (result: T) => void) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const submit = (e: FormEvent) => {
@@ -81,11 +147,22 @@ function useSubmit(action: () => Promise<User>, onDone: (user: User) => void) {
   return { error, busy, submit };
 }
 
-function LoginForm({ onDone }: { onDone: (user: User) => void }) {
+function LoginForm({ onDone }: { onDone: (result: LoginResult) => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const { error, busy, submit } = useSubmit(() => login(username, password), onDone);
+  // Set once the password was right and the account asks for a code.
+  const [pending, setPending] = useState<string | null>(null);
+  const { error, busy, submit } = useSubmit(
+    () => login(username, password),
+    (result) => {
+      if (isPending(result)) setPending(result.pending_token);
+      else onDone(result);
+    },
+  );
 
+  if (pending) {
+    return <CodeForm pending={pending} onDone={onDone} onBack={() => setPending(null)} />;
+  }
   return (
     <form onSubmit={submit} aria-labelledby="login-heading">
       <h2 id="login-heading">Sign in</h2>
@@ -112,7 +189,50 @@ function LoginForm({ onDone }: { onDone: (user: User) => void }) {
   );
 }
 
-function SetupForm({ onDone }: { onDone: (user: User) => void }) {
+// CodeForm is the second step of a login: the code of the authenticator app,
+// or a recovery code.
+function CodeForm({ pending, onDone, onBack }: { pending: string; onDone: (r: LoginResult) => void; onBack: () => void }) {
+  const [code, setCode] = useState("");
+  const { error, busy, submit } = useSubmit(() => loginTwoFactor(pending, code), onDone);
+  return (
+    <form onSubmit={submit} aria-labelledby="code-heading">
+      <h2 id="code-heading">Two-factor authentication</h2>
+      <label>
+        Authentication code
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          autoComplete="one-time-code"
+          inputMode="text"
+          autoFocus
+          required
+        />
+      </label>
+      <p className="hint">Enter the 6-digit code from your authenticator app, or one of your recovery codes.</p>
+      {error && <p role="alert">{error}</p>}
+      <p className="row-actions">
+        <button type="submit" disabled={busy}>
+          Verify
+        </button>
+        <button type="button" onClick={onBack}>
+          Back
+        </button>
+      </p>
+    </form>
+  );
+}
+
+// RecoveryNotice warns that a recovery code was used and how many are left.
+function RecoveryNotice({ left, onClose }: { left: number; onClose: () => void }) {
+  return (
+    <p role="status" className="note warn">
+      You signed in with a recovery code; {left} {left === 1 ? "is" : "are"} left. If this was not you, change your password. Make new codes on the
+      Account page. <button type="button" onClick={onClose}>Dismiss</button>
+    </p>
+  );
+}
+
+function SetupForm({ onDone }: { onDone: (result: LoginResult) => void }) {
   const [token, setToken] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");

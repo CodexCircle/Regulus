@@ -25,7 +25,12 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 	// Disabled accounts cannot log in and have no sessions.
 	Disabled bool `json:"disabled"`
+	// TwoFactor is true when the user confirmed a second factor (TOTP).
+	TwoFactor bool `json:"two_factor"`
 }
+
+// hasTwoFactor is the SQL expression for User.TwoFactor, for a query on users.
+const hasTwoFactor = `EXISTS (SELECT 1 FROM user_totp t WHERE t.user_id = users.id AND t.confirmed_at IS NOT NULL)`
 
 // Errors returned by the store and the service.
 var (
@@ -85,8 +90,8 @@ func (s store) userByName(ctx context.Context, username string) (User, string, e
 		created string
 	)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, username, role, created_at, disabled, password_hash FROM users WHERE username = ?`, username).
-		Scan(&u.ID, &u.Username, &u.Role, &created, &u.Disabled, &hash)
+		`SELECT id, username, role, created_at, disabled, `+hasTwoFactor+`, password_hash FROM users WHERE username = ?`, username).
+		Scan(&u.ID, &u.Username, &u.Role, &created, &u.Disabled, &u.TwoFactor, &hash)
 	if err != nil {
 		return User{}, "", err
 	}
@@ -113,9 +118,9 @@ func (s store) sessionUser(ctx context.Context, tokenHash string, now time.Time)
 		created, expires string
 	)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT u.id, u.username, u.role, u.created_at, s.expires_at
-		 FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND u.disabled = 0`, tokenHash).
-		Scan(&u.ID, &u.Username, &u.Role, &created, &expires)
+		`SELECT users.id, users.username, users.role, users.created_at, s.expires_at, `+hasTwoFactor+`
+		 FROM sessions s JOIN users ON users.id = s.user_id WHERE s.token_hash = ? AND users.disabled = 0`, tokenHash).
+		Scan(&u.ID, &u.Username, &u.Role, &created, &expires, &u.TwoFactor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrUnauthenticated
 	}

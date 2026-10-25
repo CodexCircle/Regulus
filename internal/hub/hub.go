@@ -73,7 +73,12 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, ui fs.FS, opt
 	}
 	log.Info("database ready", "dir", cfg.DataDir)
 
-	authn, err := auth.New(ctx, db, log)
+	secret, err := auth.LoadOrCreateSecret(cfg.DataDir)
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("hub secret: %w", err)
+	}
+	authn, err := auth.New(ctx, db, log, auth.WithSecret(secret))
 	if err != nil {
 		_ = db.Close()
 		return nil, err

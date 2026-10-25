@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -90,5 +92,19 @@ func TestDashboardOnlyAnswersGet(t *testing.T) {
 	NewHandler(Deps{UI: ui}).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
 	if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") == "" {
 		t.Fatalf("status = %d, Allow = %q; want 405 with Allow", rec.Code, rec.Header().Get("Allow"))
+	}
+}
+
+func TestHubKeepsItsSecretOutsideTheDatabase(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	h, err := New(context.Background(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), fstest.MapFS{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = h.Close() }()
+	fi, err := os.Stat(filepath.Join(cfg.DataDir, "secret.key"))
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("secret.key: %v, %v", fi, err)
 	}
 }

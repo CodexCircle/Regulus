@@ -28,7 +28,8 @@ func UserFrom(ctx context.Context) (User, bool) {
 //
 //	GET  /api/auth/me      who is logged in, and whether the first-run setup is pending
 //	POST /api/auth/setup   create the first admin (needs the one-time setup token)
-//	POST /api/auth/login   start a session
+//	POST /api/auth/login   start a session, or answer that a second factor is needed
+//	POST /api/auth/login/two-factor  finish such a login with a code
 //	POST /api/auth/logout  end the session
 //	POST /api/auth/reset   choose a new password with a one-time reset token
 //
@@ -38,6 +39,7 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/auth/me", s.handleMe)
 	mux.Handle("POST /api/auth/setup", RequireJSON(http.HandlerFunc(s.handleSetup)))
 	mux.Handle("POST /api/auth/login", RequireJSON(http.HandlerFunc(s.handleLogin)))
+	mux.Handle("POST /api/auth/login/two-factor", RequireJSON(http.HandlerFunc(s.handleLoginTwoFactor)))
 	mux.Handle("POST /api/auth/logout", RequireJSON(http.HandlerFunc(s.handleLogout)))
 	mux.Handle("POST /api/auth/reset", RequireJSON(http.HandlerFunc(s.handleResetPassword)))
 }
@@ -47,6 +49,7 @@ var Routes = []string{
 	"GET /api/auth/me",
 	"POST /api/auth/setup",
 	"POST /api/auth/login",
+	"POST /api/auth/login/two-factor",
 	"POST /api/auth/logout",
 	"POST /api/auth/reset",
 }
@@ -58,6 +61,13 @@ func (s *Service) Require(next http.Handler) http.Handler {
 		user, err := s.userOf(r)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, ErrUnauthenticated.Error())
+			return
+		}
+		if s.MustEnroll(user) && !strings.HasPrefix(r.URL.Path, twoFactorPath) {
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error": "the hub requires two-factor authentication: set it up before doing anything else",
+				"code":  "two_factor_setup_required",
+			})
 			return
 		}
 		ctx := context.WithValue(withRequestClient(r), ctxKey{}, user)
@@ -88,9 +98,13 @@ func (s *Service) handleMe(w http.ResponseWriter, r *http.Request) {
 	resp := struct {
 		SetupRequired bool  `json:"setup_required"`
 		User          *User `json:"user"`
+		// TwoFactorSetupRequired is true when the hub requires two-factor
+		// authentication from this user, who has not set it up yet.
+		TwoFactorSetupRequired bool `json:"two_factor_setup_required"`
 	}{SetupRequired: s.SetupRequired()}
 	if u, err := s.userOf(r); err == nil {
 		resp.User = &u
+		resp.TwoFactorSetupRequired = s.MustEnroll(u)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -110,21 +124,61 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, token, expires, err := s.Login(withRequestClient(r), remoteIP(r), c.Username, c.Password)
+	var need *TwoFactorRequiredError
+	if errors.As(err, &need) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"two_factor_required": true,
+			"pending_token":       need.Pending,
+			"expires_at":          need.Expires,
+		})
+		return
+	}
 	s.finishLogin(w, r, user, token, expires, err)
+}
+
+// loginResponse is the user, plus a note when a recovery code was used.
+type loginResponse struct {
+	User
+	RecoveryCodeUsed  bool `json:"recovery_code_used,omitempty"`
+	RecoveryCodesLeft int  `json:"recovery_codes_left,omitempty"`
+}
+
+func (s *Service) handleLoginTwoFactor(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Pending string `json:"pending_token"`
+		Code    string `json:"code"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	res, err := s.CompleteLogin(withRequestClient(r), remoteIP(r), req.Pending, req.Code)
+	switch {
+	case err == nil:
+		s.setSessionCookie(w, r, res.Token, res.Expires)
+		writeJSON(w, http.StatusOK, loginResponse{User: res.User, RecoveryCodeUsed: res.RecoveryUsed, RecoveryCodesLeft: res.RecoveryLeft})
+	case errors.Is(err, ErrInvalidCode), errors.Is(err, ErrLoginExpired):
+		writeError(w, http.StatusUnauthorized, err.Error())
+	default:
+		s.fail(w, err)
+	}
+}
+
+func (s *Service) setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expires time.Time) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     CookieName,
+		Value:    token,
+		Path:     "/",
+		Expires:  expires,
+		HttpOnly: true,
+		Secure:   isHTTPS(r),
+		SameSite: http.SameSiteLaxMode,
+	})
 }
 
 func (s *Service) finishLogin(w http.ResponseWriter, r *http.Request, user User, token string, expires time.Time, err error) {
 	switch {
 	case err == nil:
-		http.SetCookie(w, &http.Cookie{
-			Name:     CookieName,
-			Value:    token,
-			Path:     "/",
-			Expires:  expires,
-			HttpOnly: true,
-			Secure:   isHTTPS(r),
-			SameSite: http.SameSiteLaxMode,
-		})
+		s.setSessionCookie(w, r, token, expires)
 		writeJSON(w, http.StatusOK, user)
 	case errors.Is(err, ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, err.Error())

@@ -1,14 +1,16 @@
 import { useCallback, useState, type FormEvent } from "react";
 import { changePassword, fetchSessions, revokeSession, type SessionInfo } from "./api";
 import { formatAgo } from "./format";
+import { TwoFactor } from "./TwoFactor";
 import { errorMessage, useApiList } from "./useApiList";
 
-// AccountPage is where users change their password and end their sessions.
+// AccountPage is where users change their password, set up two-factor authentication and end their sessions.
 export function AccountPage() {
   return (
     <section aria-labelledby="account-heading">
       <h2 id="account-heading">Account</h2>
       <PasswordForm />
+      <TwoFactor />
       <Sessions />
     </section>
   );

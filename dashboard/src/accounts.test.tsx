@@ -9,8 +9,8 @@ import { SessionContext } from "./session";
 import { UsersPage } from "./UsersPage";
 
 const now = new Date().toISOString();
-const admin: User = { username: "admin", role: "admin", created_at: now, disabled: false };
-const viewer: User = { username: "eve", role: "viewer", created_at: now, disabled: false };
+const admin: User = { username: "admin", role: "admin", created_at: now, disabled: false, two_factor: false };
+const viewer: User = { username: "eve", role: "viewer", created_at: now, disabled: false, two_factor: false };
 
 interface Call {
   method: string;
@@ -20,8 +20,14 @@ interface Call {
 
 // mockHub answers the account endpoints from handlers keyed by "METHOD path";
 // status 4xx answers carry the error text.
-function mockHub(handlers: Record<string, () => { status?: number; data?: unknown }>): Call[] {
+function mockHub(given: Record<string, () => { status?: number; data?: unknown }>): Call[] {
   const calls: Call[] = [];
+  // Parts of the pages these tests do not look at.
+  const handlers: Record<string, () => { status?: number; data?: unknown }> = {
+    "GET /api/settings/security": () => ({ data: { two_factor_policy: "off", two_factor_available: true } }),
+    "GET /api/account/two-factor": () => ({ data: { enabled: false, mandatory: false, policy: "off", recovery_codes_left: 0 } }),
+    ...given,
+  };
   vi.stubGlobal(
     "fetch",
     vi.fn((path: string, init?: RequestInit) => {

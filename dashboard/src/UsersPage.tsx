@@ -1,13 +1,18 @@
-import { useCallback, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   createReset,
   createUser,
   deleteUser,
   fetchAudit,
+  fetchSecurity,
   fetchUsers,
+  resetUserTwoFactor,
+  saveSecurity,
   updateUser,
   type PasswordReset,
   type Role,
+  type SecuritySettings,
+  type TwoFactorPolicy,
   type User,
 } from "./api";
 import { formatAgo } from "./format";
@@ -29,6 +34,7 @@ export function UsersPage() {
     <section aria-labelledby="users-heading">
       <h2 id="users-heading">Users</h2>
       <UserTable self={session.user.username} />
+      <Security />
       <Audit />
     </section>
   );
@@ -63,6 +69,7 @@ function UserTable({ self }: { self: string }) {
               <th>User</th>
               <th>Role</th>
               <th>Status</th>
+              <th>Two-factor</th>
               <th>Created</th>
               <th>
                 <span className="visually-hidden">Actions</span>
@@ -88,6 +95,7 @@ function UserTable({ self }: { self: string }) {
                   </select>
                 </td>
                 <td>{u.disabled ? "disabled" : "active"}</td>
+                <td>{u.two_factor ? "on" : "off"}</td>
                 <td>{formatAgo(u.created_at)}</td>
                 <td className="row-actions">
                   <button
@@ -108,6 +116,18 @@ function UserTable({ self }: { self: string }) {
                   >
                     Reset password of {u.username}
                   </button>
+                  {u.two_factor && u.username !== self && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm(`Remove the two-factor authentication of ${u.username}? ${u.username} is signed out everywhere and can sign in with the password alone.`)) {
+                          void run(() => resetUserTwoFactor(u.username));
+                        }
+                      }}
+                    >
+                      Reset two-factor of {u.username}
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={u.username === self}
@@ -159,6 +179,51 @@ function ResetLink({ reset, onClose }: { reset: PasswordReset; onClose: () => vo
         </button>
       </p>
     </div>
+  );
+}
+
+// Security is where admins choose who must use two-factor authentication.
+function Security() {
+  const [settings, setSettings] = useState<SecuritySettings | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchSecurity(controller.signal).then(setSettings, (err: unknown) => {
+      if (!controller.signal.aborted) setError(errorMessage(err));
+    });
+    return () => controller.abort();
+  }, []);
+
+  const change = async (policy: TwoFactorPolicy) => {
+    setError("");
+    try {
+      setSettings(await saveSecurity(policy));
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
+  return (
+    <section aria-labelledby="security-heading" className="panel">
+      <h3 id="security-heading">Security</h3>
+      {error && <p role="alert">{error}</p>}
+      {settings && (
+        <label>
+          Who must use two-factor authentication
+          <select
+            value={settings.two_factor_policy}
+            disabled={!settings.two_factor_available}
+            onChange={(e) => void change(e.target.value as TwoFactorPolicy)}
+          >
+            <option value="off">nobody (optional for everyone)</option>
+            <option value="admins">administrators</option>
+            <option value="all">everyone</option>
+          </select>
+        </label>
+      )}
+      <p className="hint">Users it applies to set it up the next time they use Regulus, before anything else.</p>
+    </section>
   );
 }
 
