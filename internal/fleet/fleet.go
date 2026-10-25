@@ -35,6 +35,7 @@ const (
 	EventAgentEnrolled = "agent_enrolled"
 	EventEnrollFailed  = "agent_enroll_failed"
 	EventAgentRevoked  = "agent_revoked"
+	EventAgentRenamed  = "agent_renamed"
 )
 
 // Errors returned by the service.
@@ -59,8 +60,11 @@ type Agent struct {
 	ID         string
 	Name       string
 	Hostname   string
+	Version    string
+	OSVersion  string
 	CreatedAt  time.Time
-	EnrolledAt string // the address it enrolled from
+	EnrolledAt string    // the address it enrolled from
+	LastSeen   time.Time // zero if it never connected
 	Revoked    bool
 	RevokedAt  time.Time
 }
@@ -271,7 +275,7 @@ func (s *Service) Revoke(ctx context.Context, by, id string) error {
 // Agents lists the enrolled agents, oldest first.
 func (s *Service) Agents(ctx context.Context) ([]Agent, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, hostname, created_at, enrolled_from, revoked_at FROM agents ORDER BY created_at, id`)
+		`SELECT id, name, hostname, version, os_version, created_at, enrolled_from, last_seen_at, revoked_at FROM agents ORDER BY created_at, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -281,18 +285,51 @@ func (s *Service) Agents(ctx context.Context) ([]Agent, error) {
 		var (
 			a       Agent
 			created string
+			seen    sql.NullString
 			revoked sql.NullString
 		)
-		if err := rows.Scan(&a.ID, &a.Name, &a.Hostname, &created, &a.EnrolledAt, &revoked); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &a.Hostname, &a.Version, &a.OSVersion, &created, &a.EnrolledAt, &seen, &revoked); err != nil {
 			return nil, err
 		}
 		a.CreatedAt = parseTS(created)
+		if seen.Valid {
+			a.LastSeen = parseTS(seen.String)
+		}
 		if revoked.Valid {
 			a.Revoked, a.RevokedAt = true, parseTS(revoked.String)
 		}
 		list = append(list, a)
 	}
 	return list, rows.Err()
+}
+
+// Seen records that the agent is connected, or was just now, with what it
+// reported about itself. An id that is not an enrolled agent (the built-in
+// agent) is ignored.
+func (s *Service) Seen(ctx context.Context, id, version, hostname, osVersion string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE agents SET last_seen_at = ?, version = ?, hostname = CASE WHEN ? <> '' THEN ? ELSE hostname END,
+		 os_version = CASE WHEN ? <> '' THEN ? ELSE os_version END WHERE id = ?`,
+		ts(at), version, hostname, hostname, osVersion, osVersion, id)
+	return err
+}
+
+// Rename sets the name shown for an agent; an empty name goes back to the
+// host name.
+func (s *Service) Rename(ctx context.Context, by, id, name string) error {
+	name, err := cleanName(name)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE agents SET name = ? WHERE id = ?`, name, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	s.record(ctx, by, EventAgentRenamed, id, name)
+	return nil
 }
 
 func (s *Service) limited(remote string) bool {

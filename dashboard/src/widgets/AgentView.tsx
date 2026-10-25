@@ -20,7 +20,7 @@ export function AgentView({ config, setConfig, children }: Props) {
   const { agents, agent, stale, connection } = view;
   return (
     <div className="agent-view">
-      {agents.length > 1 && (
+      {agents.length > 1 && !config.fixed && (
         <select
           aria-label="Server"
           value={agent.id}
@@ -28,7 +28,7 @@ export function AgentView({ config, setConfig, children }: Props) {
         >
           {agents.map((a) => (
             <option key={a.id} value={a.id}>
-              {a.hostname ? `${a.hostname} (${a.id})` : a.id}
+              {a.name || a.hostname ? `${a.name || a.hostname} (${a.id})` : a.id}
             </option>
           ))}
         </select>

@@ -56,7 +56,7 @@ function mockHub(hub: Omit<Hub, "calls">): Hub {
         state.me = { setup_required: false, user: null };
         return reply(204);
       }
-      if (path === "/api/agents") return reply(state.agentsStatus ?? 200, state.agents ?? []);
+      if (path.split("?")[0] === "/api/agents") return reply(state.agentsStatus ?? 200, state.agents ?? []);
       if (path === "/api/layout") return init?.method === "PUT" ? reply(204) : reply(200, { layout: null, updated_at: null });
       return reply(404, { error: "not found" });
     }),
@@ -98,10 +98,9 @@ describe("App", () => {
     await user.type(screen.getByLabelText("Password"), "correct horse battery");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
-    expect(await screen.findByText("local")).toBeInTheDocument();
-    expect(screen.getByText("srv1")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "srv1" })).toHaveAttribute("href", "#/servers/local");
     expect(screen.getByText("Ubuntu 24.04 amd64")).toBeInTheDocument();
-    expect(screen.getByText("connected")).toBeInTheDocument();
+    expect(screen.getByText("online")).toBeInTheDocument();
     expect(screen.getByText("1h 1m")).toBeInTheDocument();
     expect(hub.calls.find((c) => c.path === "/api/auth/login")?.body).toEqual({
       username: "admin",
@@ -152,7 +151,7 @@ describe("App", () => {
     await user.type(screen.getByLabelText("Repeat the password"), "correct horse battery");
     await user.click(screen.getByRole("button", { name: "Create the admin" }));
 
-    expect(await screen.findByText("No agents connected.")).toBeInTheDocument();
+    expect(await screen.findByText("No servers yet.")).toBeInTheDocument();
     expect(hub.calls.find((c) => c.path === "/api/auth/setup")?.body).toEqual({
       setup_token: "tok123",
       username: "admin",
@@ -165,7 +164,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(await screen.findByText("No agents connected.")).toBeInTheDocument();
+    expect(await screen.findByText("No servers yet.")).toBeInTheDocument();
     expect(screen.getByText("admin")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Sign out" }));
     expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();

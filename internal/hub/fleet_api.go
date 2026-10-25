@@ -31,6 +31,7 @@ type Enrollment struct {
 type FleetControl interface {
 	CreateEnrollment(ctx context.Context, by, name string) (Enrollment, error)
 	RevokeAgent(ctx context.Context, by, id string) error
+	RenameAgent(ctx context.Context, by, id, name string) error
 }
 
 // CreateEnrollment makes a one-time enrollment token.
@@ -61,6 +62,16 @@ func (h *Hub) RevokeAgent(ctx context.Context, by, id string) error {
 	}
 	h.agents.disconnect(id)
 	return nil
+}
+
+// RenameAgent sets the name shown for an enrolled agent.
+func (h *Hub) RenameAgent(ctx context.Context, by, id, name string) error {
+	return h.fleet.Rename(ctx, by, id, name)
+}
+
+// Registry lists the enrolled agents, connected or not.
+func (h *Hub) Registry(ctx context.Context) ([]fleet.Agent, error) {
+	return h.fleet.Agents(ctx)
 }
 
 type fleetHandlers struct {
@@ -130,4 +141,30 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 		return false
 	}
 	return true
+}
+
+func (f fleetHandlers) rename(w http.ResponseWriter, r *http.Request) {
+	if f.fleet == nil {
+		http.NotFound(w, r)
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	by, _ := auth.UserFrom(r.Context())
+	err := f.fleet.RenameAgent(r.Context(), by.Username, r.PathValue("id"), req.Name)
+	var nameErr *fleet.NameError
+	switch {
+	case errors.Is(err, fleet.ErrNotFound):
+		writeJSONError(w, http.StatusNotFound, "no enrolled agent with this id")
+	case errors.As(err, &nameErr):
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+	case err != nil:
+		writeJSONError(w, http.StatusInternalServerError, "internal error")
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
 }

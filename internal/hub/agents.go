@@ -59,6 +59,9 @@ type agentServer struct {
 	metrics *metricsStore
 	events  *broker
 
+	// seen, if set, is told when an agent connects and when it goes away.
+	seen func(info AgentInfo, at time.Time)
+
 	mu       sync.Mutex
 	sessions map[string]*session
 }
@@ -281,6 +284,9 @@ func (s *agentServer) register(id string, hello *agentv1.Hello) *session {
 		close(old.replaced)
 	}
 	s.events.publish(agentEvent{Type: "agent.connected", Agent: toAgentJSON(sess.info, time.Now(), s.staleAfter())})
+	if s.seen != nil {
+		s.seen(sess.info, time.Now())
+	}
 	return sess
 }
 
@@ -309,6 +315,12 @@ func (s *agentServer) unregister(sess *session) {
 	}
 	s.mu.Unlock()
 	s.log.Info("agent disconnected", "agent", sess.info.ID)
+	if s.seen != nil {
+		s.mu.Lock()
+		info := sess.info
+		s.mu.Unlock()
+		s.seen(info, time.Now())
+	}
 	if gone { // a replaced connection leaves the agent connected through the new one
 		s.events.publish(goneEvent{Type: "agent.disconnected", ID: sess.info.ID})
 	}

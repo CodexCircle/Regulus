@@ -95,6 +95,12 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, ui fs.FS, opt
 		agents:    newAgentServer(log),
 		transport: inproc.New(),
 	}
+	h.agents.seen = func(info AgentInfo, at time.Time) {
+		sys := info.System
+		if err := h.fleet.Seen(context.Background(), info.ID, info.Version, sys.GetHostname(), sys.GetOsVersion(), at); err != nil {
+			log.Warn("recording when an agent was seen", "agent", info.ID, "err", err)
+		}
+	}
 	if cfg.MetricsInterval > 0 {
 		h.agents.metricsInterval = cfg.MetricsInterval
 	}
@@ -300,6 +306,7 @@ func apiRoutes(d Deps) []route {
 		{pattern: "PUT /api/layout", handler: auth.RequireJSON(http.HandlerFunc(h.put))},
 		{pattern: "GET /api/stream", handler: streamHandler(d.Agents)},
 		{pattern: "POST /api/enrollment-tokens", handler: admin(auth.RequireJSON(http.HandlerFunc(f.createToken))), needsAuth: true},
+		{pattern: "PATCH /api/agents/{id}", handler: admin(auth.RequireJSON(http.HandlerFunc(f.rename))), needsAuth: true},
 		{pattern: "DELETE /api/agents/{id}", handler: admin(auth.RequireJSON(http.HandlerFunc(f.revoke))), needsAuth: true},
 		{pattern: "GET /api/openapi.yaml", handler: http.HandlerFunc(serveOpenAPI)},
 	}
