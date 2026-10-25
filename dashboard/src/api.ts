@@ -73,3 +73,13 @@ export const setupAdmin = (setupToken: string, username: string, password: strin
   request<User>("POST", "/api/auth/setup", { setup_token: setupToken, username, password });
 
 export const logout = () => request<void>("POST", "/api/auth/logout", {});
+
+export interface LayoutResponse {
+  // Whatever the dashboard saved, or null if nothing yet.
+  layout: unknown;
+  updated_at: string | null;
+}
+
+export const fetchLayout = (signal?: AbortSignal) => request<LayoutResponse>("GET", "/api/layout", undefined, signal);
+
+export const saveLayout = (layout: unknown) => request<void>("PUT", "/api/layout", { layout });
