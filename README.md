@@ -60,10 +60,22 @@ Requirements: Go 1.26+, Node.js 22+.
 ```sh
 make build            # builds the dashboard, then bin/regulus
 ./bin/regulus hub     # serves the dashboard on :8080
-make test             # go vet, go test, dashboard typecheck
+make test             # go vet, go test -race, dashboard typecheck and tests
+make lint             # golangci-lint and ESLint
 ```
 
 For dashboard work, run `npm run dev` in `dashboard/` (proxies `/api` to the hub on `:8080`).
+
+### Releases
+
+Pushing a tag `vX.Y.Z` runs the release workflow (GoReleaser): it publishes a GitHub Release with `tar.gz` archives, `.deb` and `.rpm` packages (linux amd64 and arm64), SBOMs and `checksums.txt`, whose Sigstore signature is `checksums.txt.sigstore.json`. Tags with a suffix (`vX.Y.Z-beta.1`) are published as pre-releases (beta channel). To verify a download:
+
+```sh
+cosign verify-blob --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp 'https://github.com/CodexCircle/Regulus/.github/workflows/release.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
+sha256sum --check --ignore-missing checksums.txt
+```
 
 ### Configuration
 
@@ -145,10 +157,15 @@ Requisiti: Go 1.26+, Node.js 22+.
 ```sh
 make build            # compila la dashboard, poi bin/regulus
 ./bin/regulus hub     # serve la dashboard su :8080
-make test             # go vet, go test, typecheck della dashboard
+make test             # go vet, go test -race, typecheck e test della dashboard
+make lint             # golangci-lint ed ESLint
 ```
 
 Per lavorare sulla dashboard, esegui `npm run dev` in `dashboard/` (inoltra `/api` all'hub su `:8080`).
+
+### Rilasci
+
+Il push di un tag `vX.Y.Z` avvia il workflow di release (GoReleaser): pubblica una GitHub Release con archivi `tar.gz`, pacchetti `.deb` e `.rpm` (linux amd64 e arm64), SBOM e `checksums.txt`, la cui firma Sigstore è `checksums.txt.sigstore.json`. I tag con suffisso (`vX.Y.Z-beta.1`) sono pubblicati come pre-release (canale beta). Per verificare un download usa i comandi riportati nella sezione inglese.
 
 ### Configurazione
 

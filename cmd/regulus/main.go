@@ -74,7 +74,11 @@ func runHub(args []string) int {
 		log.Error("cannot start hub", "err", err)
 		return 1
 	}
-	defer h.Close()
+	defer func() {
+		if err := h.Close(); err != nil {
+			log.Error("closing hub", "err", err)
+		}
+	}()
 
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {

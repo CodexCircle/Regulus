@@ -1,0 +1,73 @@
+version: 2
+
+project_name: regulus
+
+before:
+  hooks:
+    # The dashboard is embedded in the binary, so it must be built first.
+    - make dashboard
+
+builds:
+  - id: regulus
+    main: ./cmd/regulus
+    binary: regulus
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: regulus
+    formats: [tar.gz]
+    name_template: "regulus_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+nfpms:
+  - id: regulus
+    package_name: regulus
+    vendor: CodexCircle
+    homepage: https://github.com/CodexCircle/Regulus
+    maintainer: CodexCircle <noreply@codexcircle.invalid>
+    description: CodexCircle Server Manager (Regulus)
+    license: Apache-2.0
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    # systemd unit, configuration and maintainer scripts are added with the
+    # installer work (issue #10).
+
+checksum:
+  name_template: checksums.txt
+
+# Keyless signature (Sigstore) of the checksums file, made with the GitHub
+# Actions identity of the release workflow. Verify with:
+#   cosign verify-blob --bundle checksums.txt.sigstore.json \
+#     --certificate-identity-regexp 'https://github.com/CodexCircle/Regulus/.github/workflows/release.yml@.*' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - --yes
+      - --bundle=${signature}
+      - ${artifact}
+
+sboms:
+  - artifacts: archive
+
+release:
+  # Tags such as v1.2.0-beta.1 are published as pre-releases (beta channel).
+  prerelease: auto
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
