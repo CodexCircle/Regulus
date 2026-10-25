@@ -24,7 +24,7 @@ func TestAdminResetsAUser(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	token, expires, err := s.CreateReset(ctx, admin.Username, "Dana")
+	token, expires, err := s.CreateReset(ctx, admin, "Dana")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,8 +67,8 @@ func TestResetTokenRules(t *testing.T) {
 	addUser(t, s, admin, "erin", RoleViewer)
 
 	// A new token replaces the earlier one of the same account.
-	first, _, _ := s.CreateReset(ctx, admin.Username, "dana")
-	second, _, _ := s.CreateReset(ctx, admin.Username, "dana")
+	first, _, _ := s.CreateReset(ctx, admin, "dana")
+	second, _, _ := s.CreateReset(ctx, admin, "dana")
 	if err := s.ResetPassword(ctx, "r", first, resetPassword); !errors.Is(err, ErrInvalidReset) {
 		t.Errorf("replaced token: err = %v, want ErrInvalidReset", err)
 	}
@@ -96,13 +96,13 @@ func TestResetTokenRules(t *testing.T) {
 	}
 
 	// Unknown accounts and disabled accounts.
-	if _, _, err := s.CreateReset(ctx, admin.Username, "nobody"); !errors.Is(err, ErrUserNotFound) {
+	if _, _, err := s.CreateReset(ctx, admin, "nobody"); !errors.Is(err, ErrUserNotFound) {
 		t.Errorf("unknown account: err = %v, want ErrUserNotFound", err)
 	}
 	if _, err := s.UpdateUser(ctx, admin, "erin", UserChange{Disabled: ptr(true)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.CreateReset(ctx, admin.Username, "erin"); !isInputError(err) {
+	if _, _, err := s.CreateReset(ctx, admin, "erin"); !isInputError(err) {
 		t.Errorf("disabled account: err = %v, want an input error", err)
 	}
 }
@@ -112,7 +112,7 @@ func TestDeletingAnAccountDropsItsReset(t *testing.T) {
 	ctx := context.Background()
 	admin, _ := setup(t, s)
 	addUser(t, s, admin, "dana", RoleViewer)
-	token, _, _ := s.CreateReset(ctx, admin.Username, "dana")
+	token, _, _ := s.CreateReset(ctx, admin, "dana")
 	if err := s.DeleteUser(ctx, admin, "dana"); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestGuessingResetTokensIsRateLimited(t *testing.T) {
 	ctx := context.Background()
 	admin, _ := setup(t, s)
 	addUser(t, s, admin, "dana", RoleViewer)
-	token, _, _ := s.CreateReset(ctx, admin.Username, "dana")
+	token, _, _ := s.CreateReset(ctx, admin, "dana")
 
 	for range maxFailures {
 		if err := s.ResetPassword(ctx, "9.9.9.9", "guess", resetPassword); !errors.Is(err, ErrInvalidReset) {
@@ -146,7 +146,7 @@ func TestResetsAreAudited(t *testing.T) {
 	ctx := context.Background()
 	admin, _ := setup(t, s)
 	addUser(t, s, admin, "dana", RoleViewer)
-	token, _, _ := s.CreateReset(ctx, admin.Username, "dana")
+	token, _, _ := s.CreateReset(ctx, admin, "dana")
 	_ = s.ResetPassword(ctx, "r", token, resetPassword)
 
 	entries, _ := s.Audit(ctx, 3)

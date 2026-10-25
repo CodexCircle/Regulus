@@ -1,17 +1,17 @@
 import { useState } from "react";
 import { AgentList } from "./AgentList";
 import { createEnrollment, type Enrollment } from "./api";
-import { useSession } from "./session";
+import { useCan } from "./session";
 import { errorMessage } from "./useApiList";
 
-// ServersPage lists the servers and, for admins, adds new ones.
+// ServersPage lists the servers and, for those who may manage servers, adds new ones.
 export function ServersPage() {
-  const session = useSession();
+  const canManage = useCan("servers.manage");
   const [reload, setReload] = useState(0);
   return (
     <>
       <AgentList all reloadKey={reload} />
-      {session?.user.role === "admin" && <AddServer onAdded={() => setReload((n) => n + 1)} />}
+      {canManage && <AddServer onAdded={() => setReload((n) => n + 1)} />}
     </>
   );
 }

@@ -218,7 +218,7 @@ paths:
   /api/enrollment-tokens:
     post:
       tags: [agents]
-      summary: Make a one-time token to enroll a remote agent (admin only)
+      summary: Make a one-time token to enroll a remote agent (needs servers.manage)
       description: |
         The token works once and expires after an hour; it is shown only in this
         answer. The agent needs the token, the address of the agent listener
@@ -299,7 +299,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     patch:
       tags: [agents]
-      summary: Rename a remote agent (admin only)
+      summary: Rename a remote agent (needs servers.manage)
       description: An empty name goes back to showing the host name. The built-in agent cannot be renamed (404).
       parameters:
         - $ref: "#/components/parameters/AgentID"
@@ -322,7 +322,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [agents]
-      summary: Revoke a remote agent (admin only)
+      summary: Revoke a remote agent (needs servers.manage)
       description: |
         The agent can no longer connect, and its open connection is closed. Its
         certificate is not valid again; to use the server again, enroll it with a
@@ -429,7 +429,7 @@ paths:
   /api/users:
     get:
       tags: [accounts]
-      summary: List the accounts (admin only)
+      summary: List the accounts (needs users.manage)
       responses:
         "200":
           description: All accounts, ordered by name.
@@ -442,7 +442,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
       tags: [accounts]
-      summary: Create an account with an initial password (admin only)
+      summary: Create an account with an initial password (needs users.manage)
       requestBody:
         required: true
         content:
@@ -454,7 +454,7 @@ paths:
               properties:
                 username: { type: string, minLength: 3, maxLength: 32 }
                 password: { type: string, minLength: 10, maxLength: 128 }
-                role: { type: string, enum: [admin, viewer] }
+                role: { type: string, description: "Name of a built-in role (admin, operator, viewer) or of a custom role." }
       responses:
         "201":
           description: The account was created.
@@ -472,7 +472,7 @@ paths:
   /api/users/{username}:
     patch:
       tags: [accounts]
-      summary: Change the role of an account or disable or enable it (admin only)
+      summary: Change the role of an account or disable or enable it (needs users.manage)
       description: |
         Fields that are left out stay as they are. Disabling an account ends its
         sessions. The last enabled admin cannot be demoted or disabled (409).
@@ -486,7 +486,7 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                role: { type: string, enum: [admin, viewer] }
+                role: { type: string, description: "Name of a built-in role (admin, operator, viewer) or of a custom role." }
                 disabled: { type: boolean }
       responses:
         "200":
@@ -505,7 +505,7 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
     delete:
       tags: [accounts]
-      summary: Delete an account and its sessions (admin only)
+      summary: Delete an account and its sessions (needs users.manage)
       description: |
         The request needs a JSON body (`{}`) like every other request that changes
         something. The last enabled admin cannot be deleted (409).
@@ -530,7 +530,7 @@ paths:
   /api/users/{username}/reset:
     post:
       tags: [accounts]
-      summary: Make a one-time password reset token for an account (admin only)
+      summary: Make a one-time password reset token for an account (needs users.manage)
       description: |
         The admin hands the token (or the link `/#/reset/<token>`) to the user, who
         chooses the new password; the admin never sees it. The token is shown only
@@ -563,7 +563,7 @@ paths:
   /api/audit:
     get:
       tags: [accounts]
-      summary: Recent account events, newest first (admin only)
+      summary: Recent account events, newest first (needs audit.read)
       description: The hub keeps the last 10000 events.
       parameters:
         - name: limit
@@ -801,7 +801,7 @@ paths:
   /api/users/{username}/two-factor:
     delete:
       tags: [accounts]
-      summary: Remove the second factor of a user (admin)
+      summary: Remove the second factor of a user (needs users.manage)
       description: For someone who lost the app and the recovery codes. Ends the user's sessions and is audited.
       parameters:
         - $ref: "#/components/parameters/Username"
@@ -819,7 +819,7 @@ paths:
   /api/settings/security:
     get:
       tags: [accounts]
-      summary: Who must use two-factor authentication (admin)
+      summary: Who must use two-factor authentication (needs users.manage)
       responses:
         "200":
           description: The policy.
@@ -830,7 +830,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
     put:
       tags: [accounts]
-      summary: Change who must use two-factor authentication (admin)
+      summary: Change who must use two-factor authentication (needs users.manage)
       description: |
         `off`, `admins` or `all`. Users it applies to, and who have not set up
         two-factor, can use only the two-factor endpoints until they do; the
@@ -859,6 +859,120 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/roles:
+    get:
+      tags: [accounts]
+      summary: The roles and the permissions that exist (needs users.manage or roles.manage)
+      description: The built-in roles first (admin, operator, viewer), then the custom ones.
+      responses:
+        "200":
+          description: The roles with their permissions and number of users, and every permission with its description.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roles, permissions]
+                properties:
+                  roles:
+                    type: array
+                    items: { $ref: "#/components/schemas/RoleInfo" }
+                  permissions:
+                    type: array
+                    items: { $ref: "#/components/schemas/PermissionInfo" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [accounts]
+      summary: Create a custom role (needs roles.manage)
+      description: You can give a role only permissions you hold yourself.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: { type: string, pattern: "^[a-z][a-z0-9_-]{1,31}$" }
+                description: { type: string, maxLength: 200 }
+                permissions:
+                  type: array
+                  items: { type: string }
+      responses:
+        "201":
+          description: The role was created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoleInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: A role with this name exists.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/roles/{name}:
+    patch:
+      tags: [accounts]
+      summary: Rename a custom role or change its description or permissions (needs roles.manage)
+      parameters:
+        - $ref: "#/components/parameters/RoleName"
+      description: |
+        The users that have the role follow a rename and get changed permissions
+        at their next request. You must hold every permission the role had and
+        will have. The built-in roles cannot be changed (409).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: { type: string }
+                description: { type: string, maxLength: 200 }
+                permissions:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: The role as it is now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoleInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: A built-in role, or the new name is taken.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [accounts]
+      summary: Delete a custom role (needs roles.manage)
+      parameters:
+        - $ref: "#/components/parameters/RoleName"
+      description: Refused (409) while users still have it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "204":
+          description: The role was deleted.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: A built-in role, or users still have it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/openapi.yaml:
     get:
       summary: This document
@@ -881,6 +995,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    RoleName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string }
     AgentID:
       name: id
       in: path
@@ -898,7 +1017,8 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     Forbidden:
-      description: The logged-in user is not an admin.
+      description: |
+        The logged-in user lacks the permission the endpoint needs, or the action involves an account or a role with permissions the user does not have (nobody can touch or hand out more than they hold).
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -925,10 +1045,31 @@ components:
       required: [username, role, created_at, disabled]
       properties:
         username: { type: string }
-        role: { type: string, enum: [admin, viewer] }
+        role: { type: string, description: "Name of a built-in role (admin, operator, viewer) or of a custom role." }
         created_at: { type: string, format: date-time }
         disabled: { type: boolean, description: Disabled accounts cannot log in. }
         two_factor: { type: boolean, description: The user confirmed a second factor. }
+        permissions:
+          type: array
+          items: { type: string }
+          description: What the role allows. Only present for the logged-in user (`/api/auth/me`).
+    PermissionInfo:
+      type: object
+      required: [id, description]
+      properties:
+        id: { type: string, example: servers.manage }
+        description: { type: string }
+    RoleInfo:
+      type: object
+      required: [name, description, builtin, permissions, users]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        builtin: { type: boolean, description: Built-in roles cannot be changed or deleted. }
+        permissions:
+          type: array
+          items: { type: string }
+        users: { type: integer, description: How many accounts have the role. }
     TwoFactorPending:
       type: object
       required: [two_factor_required, pending_token, expires_at]

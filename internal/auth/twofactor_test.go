@@ -478,7 +478,7 @@ func TestPolicy(t *testing.T) {
 	admin, _ := setup(t, s)
 	viewer := addUser(t, s, admin, "eve", RoleViewer)
 
-	if s.Policy() != PolicyOff || s.MustEnroll(admin) {
+	if s.Policy() != PolicyOff || s.MustEnroll(ctx, admin) {
 		t.Fatal("two-factor must be optional by default")
 	}
 	if err := s.SetPolicy(ctx, admin, "sometimes"); !isInputError(err) {
@@ -487,13 +487,13 @@ func TestPolicy(t *testing.T) {
 	if err := s.SetPolicy(ctx, admin, PolicyAdmins); err != nil {
 		t.Fatal(err)
 	}
-	if !s.MustEnroll(admin) || s.MustEnroll(viewer) {
-		t.Fatalf("admins policy: admin %v, viewer %v", s.MustEnroll(admin), s.MustEnroll(viewer))
+	if !s.MustEnroll(ctx, admin) || s.MustEnroll(ctx, viewer) {
+		t.Fatalf("admins policy: admin %v, viewer %v", s.MustEnroll(ctx, admin), s.MustEnroll(ctx, viewer))
 	}
 	if err := s.SetPolicy(ctx, admin, PolicyAll); err != nil {
 		t.Fatal(err)
 	}
-	if !s.MustEnroll(viewer) {
+	if !s.MustEnroll(ctx, viewer) {
 		t.Fatal("the all policy must reach viewers")
 	}
 
@@ -540,7 +540,10 @@ func TestAdminResetsTwoFactor(t *testing.T) {
 	if err := s.ResetTwoFactor(ctx, e.user, "nobody"); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("unknown user: %v", err)
 	}
-	if err := s.ResetTwoFactor(ctx, other, e.user.Username); err != nil { // the HTTP layer checks the role
+	if err := s.ResetTwoFactor(ctx, other, e.user.Username); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("a viewer reset the two-factor of an admin: %v", err)
+	}
+	if err := s.ResetTwoFactor(ctx, e.user, e.user.Username); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Authenticate(ctx, e.session); !errors.Is(err, ErrUnauthenticated) {
@@ -550,7 +553,7 @@ func TestAdminResetsTwoFactor(t *testing.T) {
 		t.Fatalf("login with the password alone after the reset: %v", err)
 	}
 	entries, _ := s.Audit(ctx, 10)
-	if !hasEvent(entries, EventTwoFactorReset, "eve", "admin") {
+	if !hasEvent(entries, EventTwoFactorReset, "admin", "admin") {
 		t.Errorf("audit = %+v", entries)
 	}
 }

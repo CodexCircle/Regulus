@@ -25,13 +25,20 @@ export interface Agent {
 export interface User {
   username: string;
   role: Role;
+  // What the role allows (see PERMISSIONS in internal/auth); use can().
+  permissions?: string[];
   created_at: string;
   disabled: boolean;
   // The user confirmed a second factor (TOTP).
   two_factor: boolean;
 }
 
-export type Role = "admin" | "viewer";
+// A role is built in (admin, operator, viewer) or made by an administrator.
+export type Role = string;
+
+// can tells whether the user's role holds a permission. The hub checks again
+// on every request; this only decides what to show.
+export const can = (user: User | undefined, permission: string): boolean => user?.permissions?.includes(permission) ?? false;
 
 export interface Me {
   setup_required: boolean;
@@ -225,6 +232,35 @@ export const updateUser = (username: string, change: { role?: Role; disabled?: b
   request<User>("PATCH", `/api/users/${encodeURIComponent(username)}`, change);
 
 export const deleteUser = (username: string) => request<void>("DELETE", `/api/users/${encodeURIComponent(username)}`, {});
+
+// A permission and a role as listed by GET /api/roles.
+export interface PermissionInfo {
+  id: string;
+  description: string;
+}
+
+export interface RoleInfo {
+  name: Role;
+  description: string;
+  builtin: boolean;
+  permissions: string[];
+  users: number;
+}
+
+export interface RoleList {
+  roles: RoleInfo[];
+  permissions: PermissionInfo[];
+}
+
+export const fetchRoles = (signal?: AbortSignal) => request<RoleList>("GET", "/api/roles", undefined, signal);
+
+export const createRole = (name: string, description: string, permissions: string[]) =>
+  request<RoleInfo>("POST", "/api/roles", { name, description, permissions });
+
+export const updateRole = (name: Role, change: { name?: string; description?: string; permissions?: string[] }) =>
+  request<RoleInfo>("PATCH", `/api/roles/${encodeURIComponent(name)}`, change);
+
+export const deleteRole = (name: Role) => request<void>("DELETE", `/api/roles/${encodeURIComponent(name)}`, {});
 
 export const fetchAudit = (limit = 100, signal?: AbortSignal) =>
   request<AuditEntry[]>("GET", `/api/audit?limit=${limit}`, undefined, signal);

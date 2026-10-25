@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { displayName, lastContact, statusLabel } from "./AgentList";
-import { ApiError, fetchAgent, renameAgent, revokeAgent, type Agent } from "./api";
+import { ApiError, can, fetchAgent, renameAgent, revokeAgent, type Agent } from "./api";
 import { serverIdFromHash } from "./route";
 import { useSession } from "./session";
 import { errorMessage } from "./useApiList";
@@ -54,12 +54,12 @@ export function ServerPage({ id = serverIdFromHash(window.location.hash) }: { id
           <p>There is no server with this id.</p>
         </>
       )}
-      {state.kind === "ready" && <Details agent={state.agent} admin={session?.user.role === "admin"} onChanged={reload} />}
+      {state.kind === "ready" && <Details agent={state.agent} canManage={can(session?.user, "servers.manage")} onChanged={reload} />}
     </section>
   );
 }
 
-function Details({ agent, admin, onChanged }: { agent: Agent; admin: boolean; onChanged: () => void }) {
+function Details({ agent, canManage, onChanged }: { agent: Agent; canManage: boolean; onChanged: () => void }) {
   const online = agent.status === "connected" || agent.status === "stale";
   return (
     <>
@@ -88,7 +88,7 @@ function Details({ agent, admin, onChanged }: { agent: Agent; admin: boolean; on
           <dd>{lastContact(agent)}</dd>
         </div>
       </dl>
-      {admin && agent.id !== "local" && <Manage agent={agent} onChanged={onChanged} />}
+      {canManage && agent.id !== "local" && <Manage agent={agent} onChanged={onChanged} />}
       {online ? (
         <div className="server-grid">
           {WIDGETS.map((w) => {

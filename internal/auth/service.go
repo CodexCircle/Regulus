@@ -48,6 +48,7 @@ type Service struct {
 	setupToken string // empty once the first admin exists
 	failures   map[string]*failure
 	policy     Policy
+	rolePerms  map[string]cachedPerms // permissions per role, cleared when a role changes
 
 	dummyOnce sync.Once
 	dummyHash string
@@ -75,7 +76,7 @@ func WithSecret(secret []byte) Option {
 // generates a one-time setup token and logs it: whoever can read the hub log
 // can create the first admin, and nobody else.
 func New(ctx context.Context, db *sql.DB, log *slog.Logger, opts ...Option) (*Service, error) {
-	s := &Service{store: store{db}, log: log, now: time.Now, failures: map[string]*failure{}}
+	s := &Service{store: store{db}, log: log, now: time.Now, failures: map[string]*failure{}, rolePerms: map[string]cachedPerms{}}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -204,6 +205,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (User, error) 
 	user, err := s.store.sessionUser(ctx, hash, now)
 	if err == nil {
 		s.store.touchSession(ctx, hash, now)
+		user.Permissions = s.permsOfUser(ctx, user).list()
 	}
 	return user, err
 }

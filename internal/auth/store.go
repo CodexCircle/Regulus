@@ -8,14 +8,8 @@ import (
 	"time"
 )
 
-// Role is what a user may do. Admins can do everything; viewers can only read.
+// Role is the name of a built-in or custom role (see permissions.go).
 type Role string
-
-// The roles known to the hub.
-const (
-	RoleAdmin  Role = "admin"
-	RoleViewer Role = "viewer"
-)
 
 // User is a local account.
 type User struct {
@@ -27,6 +21,9 @@ type User struct {
 	Disabled bool `json:"disabled"`
 	// TwoFactor is true when the user confirmed a second factor (TOTP).
 	TwoFactor bool `json:"two_factor"`
+	// Permissions are what the role allows. Only users that come from a
+	// session carry them.
+	Permissions []string `json:"permissions,omitempty"`
 }
 
 // hasTwoFactor is the SQL expression for User.TwoFactor, for a query on users.

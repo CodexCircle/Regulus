@@ -612,3 +612,10 @@ label.check {
 label.check input {
   width: auto;
 }
+
+fieldset {
+  border: 1px solid var(--border, #ccc);
+  border-radius: 6px;
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+}

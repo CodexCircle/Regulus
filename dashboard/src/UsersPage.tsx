@@ -4,43 +4,86 @@ import {
   createUser,
   deleteUser,
   fetchAudit,
+  fetchRoles,
   fetchSecurity,
   fetchUsers,
   resetUserTwoFactor,
   saveSecurity,
   updateUser,
+  can,
   type PasswordReset,
   type Role,
+  type RoleInfo,
+  type RoleList,
   type SecuritySettings,
   type TwoFactorPolicy,
   type User,
 } from "./api";
 import { formatAgo } from "./format";
+import { RolesPanel } from "./RolesPanel";
 import { useSession } from "./session";
 import { errorMessage, useApiList } from "./useApiList";
 
-// UsersPage is where administrators manage accounts and read the audit log.
+// UsersPage is where accounts, roles and the audit log are managed; each part
+// shows to those who hold its permission (users.manage, roles.manage,
+// audit.read).
 export function UsersPage() {
   const session = useSession();
-  if (session?.user.role !== "admin") {
+  const user = session?.user;
+  const manageUsers = can(user, "users.manage");
+  const manageRoles = can(user, "roles.manage");
+  const readAudit = can(user, "audit.read");
+  if (!user || !(manageUsers || manageRoles || readAudit)) {
     return (
       <section aria-labelledby="users-heading">
         <h2 id="users-heading">Users</h2>
-        <p role="alert">Only administrators can manage users.</p>
+        <p role="alert">You are not allowed to manage users.</p>
       </section>
     );
   }
   return (
     <section aria-labelledby="users-heading">
       <h2 id="users-heading">Users</h2>
-      <UserTable self={session.user.username} />
-      <Security />
-      <Audit />
+      {(manageUsers || manageRoles) && <Accounts self={user.username} manageUsers={manageUsers} manageRoles={manageRoles} />}
+      {manageUsers && <Security />}
+      {readAudit && <Audit />}
     </section>
   );
 }
 
-function UserTable({ self }: { self: string }) {
+// Accounts loads the roles once for the account table, the new account form
+// and the roles panel.
+function Accounts({ self, manageUsers, manageRoles }: { self: string; manageUsers: boolean; manageRoles: boolean }) {
+  // The list state holds one item: the roles with the permission catalogue.
+  const load = useCallback(async (signal: AbortSignal) => [await fetchRoles(signal)], []);
+  const [loaded, reload] = useApiList<RoleList>(load);
+  const list = loaded.kind === "ready" ? loaded.items[0] : undefined;
+  return (
+    <>
+      {loaded.kind === "error" && <p role="alert">Could not load the roles: {loaded.message}</p>}
+      {manageUsers && <UserTable self={self} roles={list?.roles ?? []} />}
+      {manageRoles && list && <RolesPanel roles={list.roles} permissions={list.permissions} onChanged={reload} />}
+    </>
+  );
+}
+
+// RoleOptions lists the roles of an account's select, keeping a role that has
+// since been removed from the list so it still shows.
+function RoleOptions({ roles, current }: { roles: RoleInfo[]; current?: Role }) {
+  const names = roles.map((r) => r.name);
+  if (current && !names.includes(current)) names.push(current);
+  return (
+    <>
+      {names.map((n) => (
+        <option key={n} value={n}>
+          {n}
+        </option>
+      ))}
+    </>
+  );
+}
+
+function UserTable({ self, roles }: { self: string; roles: RoleInfo[] }) {
   const load = useCallback((signal: AbortSignal) => fetchUsers(signal), []);
   const [users, reload] = useApiList<User>(load);
   const [error, setError] = useState("");
@@ -90,8 +133,7 @@ function UserTable({ self }: { self: string }) {
                     disabled={u.username === self}
                     onChange={(e) => void run(() => updateUser(u.username, { role: e.target.value as Role }))}
                   >
-                    <option value="admin">admin</option>
-                    <option value="viewer">viewer</option>
+                    <RoleOptions roles={roles} current={u.role} />
                   </select>
                 </td>
                 <td>{u.disabled ? "disabled" : "active"}</td>
@@ -146,7 +188,7 @@ function UserTable({ self }: { self: string }) {
         </table>
       )}
       {reset && <ResetLink reset={reset} onClose={() => setReset(null)} />}
-      <NewUserForm onCreated={reload} />
+      <NewUserForm roles={roles} onCreated={reload} />
     </>
   );
 }
@@ -227,7 +269,7 @@ function Security() {
   );
 }
 
-function NewUserForm({ onCreated }: { onCreated: () => void }) {
+function NewUserForm({ roles, onCreated }: { roles: RoleInfo[]; onCreated: () => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("viewer");
@@ -265,8 +307,7 @@ function NewUserForm({ onCreated }: { onCreated: () => void }) {
       <label>
         Role
         <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
-          <option value="viewer">viewer (read only)</option>
-          <option value="admin">admin</option>
+          <RoleOptions roles={roles} current="viewer" />
         </select>
       </label>
       {error && <p role="alert">{error}</p>}

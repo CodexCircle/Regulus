@@ -302,17 +302,24 @@ type route struct {
 func apiRoutes(d Deps) []route {
 	h := layoutHandlers{layouts: d.Layouts, log: d.Log}
 	f := fleetHandlers{fleet: d.Fleet}
-	admin := func(next http.Handler) http.Handler { return auth.RequireRole(auth.RoleAdmin, next) }
+	// Without authentication (tests that exercise the handlers alone) there is
+	// no user to check.
+	need := func(permission string, next http.Handler) http.Handler {
+		if d.Auth == nil {
+			return next
+		}
+		return auth.RequirePermission(permission, next)
+	}
 	routes := []route{
-		{pattern: "GET /api/agents", handler: agentsHandler(d.Agents)},
-		{pattern: "GET /api/agents/{id}", handler: agentGetHandler(d.Agents)},
-		{pattern: "GET /api/agents/{id}/metrics", handler: metricsHandler(d.Agents)},
+		{pattern: "GET /api/agents", handler: need(auth.PermServersRead, agentsHandler(d.Agents))},
+		{pattern: "GET /api/agents/{id}", handler: need(auth.PermServersRead, agentGetHandler(d.Agents))},
+		{pattern: "GET /api/agents/{id}/metrics", handler: need(auth.PermServersRead, metricsHandler(d.Agents))},
 		{pattern: "GET /api/layout", handler: http.HandlerFunc(h.get)},
-		{pattern: "PUT /api/layout", handler: auth.RequireJSON(http.HandlerFunc(h.put))},
-		{pattern: "GET /api/stream", handler: streamHandler(d.Agents)},
-		{pattern: "POST /api/enrollment-tokens", handler: admin(auth.RequireJSON(http.HandlerFunc(f.createToken))), needsAuth: true},
-		{pattern: "PATCH /api/agents/{id}", handler: admin(auth.RequireJSON(http.HandlerFunc(f.rename))), needsAuth: true},
-		{pattern: "DELETE /api/agents/{id}", handler: admin(auth.RequireJSON(http.HandlerFunc(f.revoke))), needsAuth: true},
+		{pattern: "PUT /api/layout", handler: need(auth.PermLayoutEdit, auth.RequireJSON(http.HandlerFunc(h.put)))},
+		{pattern: "GET /api/stream", handler: need(auth.PermServersRead, streamHandler(d.Agents))},
+		{pattern: "POST /api/enrollment-tokens", handler: need(auth.PermServersManage, auth.RequireJSON(http.HandlerFunc(f.createToken))), needsAuth: true},
+		{pattern: "PATCH /api/agents/{id}", handler: need(auth.PermServersManage, auth.RequireJSON(http.HandlerFunc(f.rename))), needsAuth: true},
+		{pattern: "DELETE /api/agents/{id}", handler: need(auth.PermServersManage, auth.RequireJSON(http.HandlerFunc(f.revoke))), needsAuth: true},
 		{pattern: "GET /api/openapi.yaml", handler: http.HandlerFunc(serveOpenAPI)},
 	}
 	for _, r := range auth.APIRoutes(d.Auth) {

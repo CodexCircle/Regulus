@@ -158,3 +158,76 @@ func tableExists(t *testing.T, db *sql.DB, name string) bool {
 	}
 	return n == 1
 }
+
+func TestRoleMigrationKeepsEverythingThatRefersToUsers(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", dsn(filepath.Join(t.TempDir(), FileName)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	db.SetMaxOpenConns(1)
+
+	list, err := loadMigrations(migrationFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before, all []migration
+	for _, m := range list {
+		all = append(all, m)
+		if m.version < 9 {
+			before = append(before, m)
+		}
+	}
+	if len(before) != 8 || len(all) < 9 {
+		t.Fatalf("migrations: %d before the role migration, %d in all", len(before), len(all))
+	}
+	if err := apply(ctx, db, before); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO users (id, username, password_hash, role, created_at) VALUES (1, 'admin', 'h', 'admin', 't'), (2, 'Eve', 'h', 'viewer', 't')`,
+		`INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES ('s1', 1, 't', 't'), ('s2', 2, 't', 't')`,
+		`INSERT INTO user_totp (user_id, secret_enc, created_at) VALUES (2, 'x', 't')`,
+		`INSERT INTO recovery_codes (user_id, code_hash) VALUES (2, 'c')`,
+		`INSERT INTO dashboard_layouts (user_id, layout, updated_at) VALUES (1, '{}', 't')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+
+	if err := apply(ctx, db, all); err != nil {
+		t.Fatal(err)
+	}
+
+	count := func(table string) (n int) {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		return n
+	}
+	for table, want := range map[string]int{"users": 2, "sessions": 2, "user_totp": 1, "recovery_codes": 1, "dashboard_layouts": 1} {
+		if got := count(table); got != want {
+			t.Errorf("%s has %d rows after the migration, want %d", table, got, want)
+		}
+	}
+	// Roles other than admin and viewer can be stored now.
+	if _, err := db.Exec(`INSERT INTO roles (name, created_at) VALUES ('auditor', 't')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE users SET role = 'auditor' WHERE id = 2`); err != nil {
+		t.Errorf("a custom role is refused: %v", err)
+	}
+	// Foreign keys are on again, and the rebuilt table is the one they refer to.
+	var on int
+	if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&on); err != nil || on != 1 {
+		t.Errorf("foreign_keys = %d, %v; want 1", on, err)
+	}
+	if _, err := db.Exec(`DELETE FROM users WHERE id = 2`); err != nil {
+		t.Fatal(err)
+	}
+	if got := count("sessions"); got != 1 {
+		t.Errorf("deleting a user left %d sessions, want 1 (cascade)", got)
+	}
+}

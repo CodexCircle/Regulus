@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { User } from "./api";
+import { can, type User } from "./api";
 
 export interface Session {
   user: User;
@@ -14,4 +14,9 @@ export const SessionContext = createContext<Session | null>(null);
 // useSession returns the current session, or null outside a signed-in page.
 export function useSession(): Session | null {
   return useContext(SessionContext);
+}
+
+// useCan tells whether the signed-in user holds a permission.
+export function useCan(permission: string): boolean {
+  return can(useSession()?.user, permission);
 }
