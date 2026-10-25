@@ -15,7 +15,7 @@ func TestOpenCreatesAndMigrates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	var version int
 	if err := db.QueryRow(`SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil {
@@ -40,13 +40,15 @@ func TestOpenIsIdempotentAndKeepsData(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO settings (key, value) VALUES ('k', 'v')`); err != nil {
 		t.Fatal(err)
 	}
-	db.Close()
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	db, err = Open(ctx, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var v string
 	if err := db.QueryRow(`SELECT value FROM settings WHERE key = 'k'`).Scan(&v); err != nil || v != "v" {
 		t.Fatalf("value = %q, err = %v", v, err)
@@ -81,7 +83,9 @@ func TestRefusesNewerDatabase(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO schema_migrations (version, name) VALUES (9999, 'from_the_future')`); err != nil {
 		t.Fatal(err)
 	}
-	db.Close()
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := Open(ctx, dir); err == nil || !strings.Contains(err.Error(), "newer version") {
 		t.Fatalf("error = %v, want a 'newer version' error", err)
@@ -142,7 +146,7 @@ func memoryDB(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 

@@ -8,3 +8,4 @@ internal/webui/dist/*
 
 # Local hub data
 /data/
+/dist/

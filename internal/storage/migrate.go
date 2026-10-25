@@ -74,7 +74,7 @@ func apply(ctx context.Context, db *sql.DB, migrations []migration) error {
 	if err != nil {
 		return fmt.Errorf("read schema_migrations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var v int
 		if err := rows.Scan(&v); err != nil {
@@ -85,7 +85,7 @@ func apply(ctx context.Context, db *sql.DB, migrations []migration) error {
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("read schema_migrations: %w", err)
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	known := map[int]bool{}
 	for _, m := range migrations {
