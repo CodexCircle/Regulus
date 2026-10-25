@@ -11,4 +11,5 @@ esac
 
 if [ -d /run/systemd/system ]; then
 	systemctl disable --now regulus.service || true
+	systemctl disable --now regulus-agent.service || true
 fi

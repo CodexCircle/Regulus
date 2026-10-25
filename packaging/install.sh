@@ -1,12 +1,15 @@
 #!/bin/sh
-# Installs the Regulus hub on Ubuntu Server (22.04 or newer) or another
-# Debian-based system with systemd: it downloads the .deb of a release, checks
-# its checksum and signature, installs it and waits until the hub answers.
+# Installs Regulus on Ubuntu Server (22.04 or newer) or another Debian-based
+# system with systemd: it downloads the .deb of a release, checks its checksum
+# and signature and installs it. As the hub (the default) it waits until the
+# hub answers; as an agent (--role agent) it enrolls the server to a hub and
+# starts the agent.
 #
 #   curl -fsSL https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh | sh
 #
 # Options go after "sh -s --", for example:
 #   ... | sh -s -- --no-builtin-agent
+#   ... | sh -s -- --role agent --hub hub.example:8443 --token TOKEN --ca-fingerprint sha256:...
 #
 # Read the script before running it: it asks for root through sudo.
 
@@ -22,6 +25,12 @@ usage() {
 	cat <<'EOF'
 Usage: install.sh [options]
 
+  --role ROLE            hub (default) or agent: manage this server from a hub
+  --hub HOST:PORT        agent role: the hub's agent listener (port 8443 if omitted)
+  --token TOKEN          agent role: the one-time token made by the dashboard
+                         (or set REGULUS_AGENT_TOKEN, to keep it off the command line)
+  --ca-fingerprint FP    agent role: the hub's CA fingerprint, sha256:... as shown with
+                         the token; the agent sends the token only to a hub that has it
   --version VERSION      install this version, such as 0.2.0 or 0.3.0-beta.1
                          (default: the latest stable release)
   --beta                 install the latest pre-release (beta channel)
@@ -33,7 +42,7 @@ Usage: install.sh [options]
   -h, --help             show this help
 
 Without --builtin-agent or --no-builtin-agent the installer asks, when it has
-a terminal to ask on.
+a terminal to ask on. The agent role never asks anything.
 EOF
 }
 
@@ -140,6 +149,125 @@ verify_signature() {
 	say "Signature verified."
 }
 
+# normalize_hub prints host:port for the hub address given by the user: it
+# accepts a URL form (https://hub.example:8443/) and adds the default port.
+normalize_hub() {
+	addr=${1#https://}
+	addr=${addr#http://}
+	addr=${addr%%/*}
+	[ -n "$addr" ] || return 1
+	case "$addr" in
+		*[!]0-9A-Za-z.:_[-]*) return 1 ;;
+	esac
+	case "$addr" in
+		\[*\]) addr="$addr:8443" ;;
+		\[*\]:*) ;;
+		\[*) return 1 ;;
+		*:*:*) return 1 ;; # an IPv6 address needs brackets
+		*:*) ;;
+		*) addr="$addr:8443" ;;
+	esac
+	port=${addr##*:}
+	case "$port" in
+		"" | *[!0-9]*) return 1 ;;
+	esac
+	[ "$port" -ge 1 ] && [ "$port" -le 65535 ] || return 1
+	[ "${addr%:*}" != "" ] || return 1
+	echo "$addr"
+}
+
+# valid_token accepts what the hub makes: base64url text.
+valid_token() {
+	case "$1" in
+		*[!0-9A-Za-z_-]* | "") return 1 ;;
+	esac
+}
+
+# valid_fingerprint accepts sha256: followed by 64 hex digits.
+valid_fingerprint() {
+	case "$1" in
+		sha256:*) ;;
+		*) return 1 ;;
+	esac
+	hex=${1#sha256:}
+	[ "${#hex}" -eq 64 ] || return 1
+	case "$hex" in
+		*[!0-9a-fA-F]*) return 1 ;;
+	esac
+}
+
+# check_agent_args validates the options of the agent role and normalizes
+# $hub, so a typo is caught before anything is downloaded.
+check_agent_args() {
+	[ -n "$hub" ] || die "--hub is needed for the agent role: the address of the hub's agent listener, such as hub.example:8443"
+	hub=$(normalize_hub "$hub") || die "invalid --hub: use HOST:PORT, such as hub.example:8443"
+	[ -n "$token" ] || die "--token is needed for the agent role: make one in the dashboard, under Servers > Add a server"
+	valid_token "$token" || die "invalid --token: it has characters a token never has"
+	[ -n "$ca_fingerprint" ] || die "--ca-fingerprint is needed for the agent role: the dashboard shows it with the token. It lets this server check that it is talking to your hub before it sends the token"
+	valid_fingerprint "$ca_fingerprint" || die "invalid --ca-fingerprint: use sha256: followed by 64 hex digits"
+}
+
+# set_role records the role where the package scripts read it.
+set_role() {
+	if [ "$role" = agent ]; then
+		$SUDO mkdir -p "$CONFIG_DIR"
+		printf 'agent\n' | $SUDO tee "$CONFIG_DIR/role" >/dev/null
+	elif [ -f "$CONFIG_DIR/role" ]; then
+		$SUDO rm -f "$CONFIG_DIR/role"
+	fi
+}
+
+# as_service_user runs a command as the user the services run as.
+as_service_user() {
+	if [ "$(id -u)" -eq 0 ]; then
+		if have runuser; then
+			runuser -u regulus -- "$@"
+		else
+			su -s /bin/sh regulus -c "$(printf '%s ' "$@")"
+		fi
+	else
+		sudo -u regulus "$@"
+	fi
+}
+
+# setup_agent enrolls this server to the hub and starts the agent service.
+setup_agent() {
+	tmp_conf=$(mktemp)
+	printf 'hub: %s\ndata_dir: /var/lib/regulus-agent\n' "$hub" >"$tmp_conf"
+	$SUDO install -m 0640 -o root -g regulus "$tmp_conf" "$CONFIG_DIR/agent.yaml"
+	rm -f "$tmp_conf"
+
+	say "Enrolling with the hub at $hub..."
+	if ! as_service_user /usr/bin/regulus agent --config "$CONFIG_DIR/agent.yaml" \
+		--token "$token" --ca-fingerprint "$ca_fingerprint" --enroll-only; then
+		die "enrollment failed. Check the address, the fingerprint and that the token is unused and under an hour old; tokens work once, so make a new one in the dashboard and run this again"
+	fi
+
+	if [ -d /run/systemd/system ]; then
+		$SUDO systemctl enable --now regulus-agent.service || die "the agent service could not be started; see: journalctl -u regulus-agent"
+		i=0
+		while [ "$i" -lt 10 ]; do
+			systemctl is-active --quiet regulus-agent.service && break
+			i=$((i + 1))
+			sleep 1
+		done
+	else
+		warn "systemd is not running: start the agent with: regulus agent --config $CONFIG_DIR/agent.yaml"
+	fi
+}
+
+# report_agent tells the user how to check the result.
+report_agent() {
+	say ""
+	if [ -d /run/systemd/system ] && systemctl is-active --quiet regulus-agent.service; then
+		say "Regulus agent $version is installed, enrolled to $hub and running."
+		say "It shows as online under Servers in the dashboard within a few seconds."
+	else
+		warn "the agent is not running; see: journalctl -u regulus-agent"
+	fi
+	say "Logs: journalctl -u regulus-agent"
+}
+
 # ask_builtin_agent sets $builtin_agent to true or false, asking on the
 # terminal when the answer was not given and the user can be asked.
 ask_builtin_agent() {
@@ -222,6 +350,10 @@ main() {
 	version=
 	channel=stable
 	builtin_agent=
+	role=hub
+	hub=
+	token=
+	ca_fingerprint=
 	assume_yes=0
 	require_signature=${REGULUS_REQUIRE_SIGNATURE:-0}
 	base_url=$DEFAULT_BASE_URL
@@ -231,6 +363,26 @@ main() {
 			--version)
 				[ $# -ge 2 ] || die "--version needs a value"
 				version=${2#v}
+				shift
+				;;
+			--role)
+				[ $# -ge 2 ] || die "--role needs a value"
+				role=$2
+				shift
+				;;
+			--hub)
+				[ $# -ge 2 ] || die "--hub needs a value"
+				hub=$2
+				shift
+				;;
+			--token)
+				[ $# -ge 2 ] || die "--token needs a value"
+				token=$2
+				shift
+				;;
+			--ca-fingerprint)
+				[ $# -ge 2 ] || die "--ca-fingerprint needs a value"
+				ca_fingerprint=$2
 				shift
 				;;
 			--beta) channel=beta ;;
@@ -254,6 +406,18 @@ main() {
 		esac
 		shift
 	done
+
+	case "$role" in
+		hub)
+			[ -z "$hub$token$ca_fingerprint" ] || die "--hub, --token and --ca-fingerprint are for --role agent"
+			;;
+		agent)
+			[ -n "$token" ] || token=${REGULUS_AGENT_TOKEN:-}
+			[ -z "$builtin_agent" ] || die "--builtin-agent and --no-builtin-agent are for the hub role"
+			check_agent_args
+			;;
+		*) die "invalid --role $role: use hub or agent" ;;
+	esac
 
 	check_platform
 
@@ -279,8 +443,11 @@ main() {
 	say "Checksum verified."
 	verify_signature "$work"
 
-	ask_builtin_agent
-	write_settings
+	if [ "$role" = hub ]; then
+		ask_builtin_agent
+		write_settings
+	fi
+	set_role
 
 	say "Installing..."
 	# The package may be owned by the current user: apt (running as _apt)
@@ -289,7 +456,12 @@ main() {
 	chmod 0755 "$work"
 	$SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y "$work/$file"
 
-	report
+	if [ "$role" = agent ]; then
+		setup_agent
+		report_agent
+	else
+		report
+	fi
 }
 
 # Tests source this file with REGULUS_INSTALL_SOURCED=1 to call the functions.

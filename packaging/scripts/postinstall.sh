@@ -13,6 +13,17 @@ if [ -f "$env_file" ]; then
 	chmod 0640 "$env_file"
 fi
 
+# "agent" when the installer was asked for the agent role (install.sh --role
+# agent): then only the agent unit is used, and the installer starts it after
+# enrolling. The file holds no secret.
+role=hub
+if [ -r /etc/regulus/role ]; then
+	role=$(head -n 1 /etc/regulus/role)
+fi
+if [ "$role" = agent ]; then
+	install -d -o regulus -g regulus -m 0750 /var/lib/regulus-agent
+fi
+
 fresh=false
 case "$1" in
 	configure)
@@ -28,7 +39,9 @@ if [ ! -d /run/systemd/system ]; then
 fi
 
 systemctl daemon-reload || true
-if [ "$fresh" = true ]; then
+if [ "$fresh" = true ] && [ "$role" = agent ]; then
+	echo "Regulus agent is installed; the installer enrolls it and starts the service."
+elif [ "$fresh" = true ]; then
 	systemctl enable --now regulus.service || {
 		echo "Regulus: the service could not be started; see: journalctl -u regulus" >&2
 		exit 0
@@ -41,5 +54,5 @@ Regulus is installed and running.
 Open the dashboard and use the token to create the first admin account.
 MSG
 else
-	systemctl try-restart regulus.service || true
+	systemctl try-restart regulus.service regulus-agent.service || true
 fi

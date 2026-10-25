@@ -219,6 +219,17 @@ func TestLoadAgent(t *testing.T) {
 	}
 }
 
+func TestLoadAgentEnrollOnly(t *testing.T) {
+	cfg, err := LoadAgent([]string{"--hub", "hub.example:8443"}, env(nil), io.Discard)
+	if err != nil || cfg.EnrollOnly {
+		t.Fatalf("by default the agent also runs: %+v, %v", cfg, err)
+	}
+	cfg, err = LoadAgent([]string{"--hub", "hub.example:8443", "--enroll-only"}, env(nil), io.Discard)
+	if err != nil || !cfg.EnrollOnly {
+		t.Fatalf("--enroll-only: %+v, %v", cfg, err)
+	}
+}
+
 func TestLoadAgentErrors(t *testing.T) {
 	for name, args := range map[string][]string{
 		"no hub":           {},

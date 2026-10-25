@@ -16,15 +16,21 @@ export function ServersPage() {
   );
 }
 
-// installCommand is what to run on the new server.
+const INSTALL_SCRIPT_URL = "https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh";
+
+const enrollOptions = (grant: Enrollment, hubHost: string) =>
+  [`--hub ${hubHost}:${grant.agent_port}`, `--token ${grant.token}`, `--ca-fingerprint ${grant.ca_fingerprint}`].join(" ");
+
+// installCommand installs Regulus on a clean Ubuntu or Debian server as an
+// agent and enrolls it, in one go.
 export function installCommand(grant: Enrollment, hubHost: string): string {
-  return [
-    "regulus agent",
-    `--hub ${hubHost}:${grant.agent_port}`,
-    `--token ${grant.token}`,
-    `--ca-fingerprint ${grant.ca_fingerprint}`,
-    "--data-dir /var/lib/regulus-agent",
-  ].join(" ");
+  return `curl -fsSL ${INSTALL_SCRIPT_URL} | sh -s -- --role agent ${enrollOptions(grant, hubHost)}`;
+}
+
+// agentCommand enrolls and runs the agent on a server that already has the
+// regulus binary.
+export function agentCommand(grant: Enrollment, hubHost: string): string {
+  return `regulus agent ${enrollOptions(grant, hubHost)} --data-dir /var/lib/regulus-agent`;
 }
 
 function AddServer({ onAdded }: { onAdded: () => void }) {
@@ -32,7 +38,6 @@ function AddServer({ onAdded }: { onAdded: () => void }) {
   const [grant, setGrant] = useState<Enrollment | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +45,6 @@ function AddServer({ onAdded }: { onAdded: () => void }) {
     setBusy(true);
     try {
       setGrant(await createEnrollment(name.trim()));
-      setCopied(false);
       setName("");
       onAdded();
     } catch (err) {
@@ -51,7 +55,7 @@ function AddServer({ onAdded }: { onAdded: () => void }) {
     }
   };
 
-  const command = grant ? installCommand(grant, window.location.hostname) : "";
+  const host = window.location.hostname;
   return (
     <section className="panel" aria-labelledby="add-server-heading">
       <h3 id="add-server-heading">Add a server</h3>
@@ -68,29 +72,38 @@ function AddServer({ onAdded }: { onAdded: () => void }) {
       {grant && (
         <div role="status" aria-label="Enrollment token">
           <p>
-            Run this on the server you want to add, as a user that can write the data directory. The token works once and expires at{" "}
-            {new Date(grant.expires_at).toLocaleString()}. It is not shown again.
+            Run this on the server you want to add (Ubuntu or Debian, as a user that can use sudo). It installs Regulus, enrolls the server and starts the
+            agent. The token works once and expires at {new Date(grant.expires_at).toLocaleString()}. It is not shown again.
           </p>
-          <input readOnly value={command} aria-label="Command" onFocus={(e) => e.target.select()} />
+          <CommandBox label="Install command" command={installCommand(grant, host)} />
           <p className="muted">
-            Replace <code>{window.location.hostname}</code> if the server reaches the hub under another name. The fingerprint lets the server check that it is
-            talking to this hub before it sends the token.
+            Replace <code>{host}</code> if the server reaches the hub under another name. The fingerprint lets the server check that it is talking to this
+            hub before it sends the token.
           </p>
-          <p>
-            <button
-              type="button"
-              onClick={() => {
-                navigator.clipboard.writeText(command).then(
-                  () => setCopied(true),
-                  () => setCopied(false),
-                );
-              }}
-            >
-              {copied ? "Copied" : "Copy command"}
-            </button>
-          </p>
+          <p>Regulus already installed on that server? Enroll and run the agent with:</p>
+          <CommandBox label="Agent command" command={agentCommand(grant, host)} />
         </div>
       )}
     </section>
+  );
+}
+
+function CommandBox({ label, command }: { label: string; command: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <p>
+      <input readOnly value={command} aria-label={label} onFocus={(e) => e.target.select()} />{" "}
+      <button
+        type="button"
+        onClick={() => {
+          navigator.clipboard.writeText(command).then(
+            () => setCopied(true),
+            () => setCopied(false),
+          );
+        }}
+      >
+        {copied ? "Copied" : `Copy ${label.toLowerCase()}`}
+      </button>
+    </p>
   );
 }

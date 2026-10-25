@@ -1,0 +1,53 @@
+[Unit]
+Description=Regulus agent (CodexCircle Server Manager)
+Documentation=https://github.com/CodexCircle/Regulus
+After=network-online.target
+Wants=network-online.target
+# Installed by the package but started only on a server that was enrolled to a
+# hub: see `install.sh --role agent`.
+ConditionPathExists=/etc/regulus/agent.yaml
+
+[Service]
+Type=simple
+User=regulus
+Group=regulus
+EnvironmentFile=-/etc/regulus/agent.env
+ExecStart=/usr/bin/regulus agent --config /etc/regulus/agent.yaml
+Restart=on-failure
+RestartSec=5
+# No restart when the settings are wrong (2) or the hub revoked this agent (3):
+# retrying cannot help and would only fill the log.
+RestartPreventExitStatus=2 3
+
+# /var/lib/regulus-agent, owned by the service user and created by systemd.
+StateDirectory=regulus-agent
+StateDirectoryMode=0750
+UMask=0077
+
+# Same hardening as the hub: the agent reads /proc and statfs and needs no
+# privileges. See the privilege model in the README before loosening any of it.
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target
