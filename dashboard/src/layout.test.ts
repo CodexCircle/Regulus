@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addWidget, applyPositions, defaultLayout, parseLayout, removeWidget, type DashboardLayout } from "./layout";
+import { addWidget, applyPositions, defaultLayout, parseLayout, removeWidget, setWidgetConfig, type DashboardLayout } from "./layout";
 import { WidgetRegistry } from "./widgets/registry";
 
 const empty: DashboardLayout = { version: 1, widgets: [] };
@@ -54,6 +54,26 @@ describe("editing a layout", () => {
     expect(empty.widgets).toHaveLength(0); // the original is untouched
   });
 
+  it("fills free spots from the top left", () => {
+    let layout = addWidget(empty, "t", { w: 4, h: 4 }, () => "a");
+    layout = addWidget(layout, "t", { w: 4, h: 4 }, () => "b");
+    layout = addWidget(layout, "t", { w: 6, h: 2 }, () => "c"); // does not fit beside a and b
+    layout = addWidget(layout, "t", { w: 4, h: 2 }, () => "d"); // fits in the gap on the right
+    expect(layout.widgets.map((w) => [w.i, w.x, w.y])).toEqual([
+      ["a", 0, 0],
+      ["b", 4, 0],
+      ["c", 0, 4],
+      ["d", 8, 0],
+    ]);
+  });
+
+  it("sets the config of one widget", () => {
+    const layout = addWidget(addWidget(empty, "t", { w: 1, h: 1 }, () => "a"), "t", { w: 1, h: 1 }, () => "b");
+    const next = setWidgetConfig(layout, "b", { agentId: "x" });
+    expect(next.widgets.map((w) => w.config)).toEqual([undefined, { agentId: "x" }]);
+    expect(layout.widgets[1].config).toBeUndefined();
+  });
+
   it("limits the width to the grid and generates distinct ids", () => {
     const one = addWidget(empty, "t", { w: 40, h: 1 });
     const two = addWidget(one, "t", { w: 1, h: 1 });
@@ -75,7 +95,7 @@ describe("editing a layout", () => {
 });
 
 describe("defaultLayout", () => {
-  it("stacks the widgets marked for the default layout", () => {
+  it("places the widgets marked for the default layout", () => {
     const registry = new WidgetRegistry();
     const component = () => null;
     registry.register({ id: "one", title: "One", description: "", defaultSize: { w: 6, h: 2 }, inDefaultLayout: true, component });
@@ -83,7 +103,7 @@ describe("defaultLayout", () => {
     registry.register({ id: "two", title: "Two", description: "", defaultSize: { w: 6, h: 3 }, inDefaultLayout: true, component });
     expect(defaultLayout(registry).widgets).toEqual([
       { i: "one", type: "one", x: 0, y: 0, w: 6, h: 2 },
-      { i: "two", type: "two", x: 0, y: 2, w: 6, h: 3 },
+      { i: "two", type: "two", x: 6, y: 0, w: 6, h: 3 },
     ]);
   });
 });

@@ -1,10 +1,15 @@
 import { AuthGate } from "./AuthGate";
+import { LiveProvider } from "./LiveProvider";
 import { Shell } from "./Shell";
 
 export function App() {
   return (
     <AuthGate>
-      {(session) => <Shell {...session} />}
+      {(session) => (
+        <LiveProvider>
+          <Shell {...session} />
+        </LiveProvider>
+      )}
     </AuthGate>
   );
 }

@@ -17,3 +17,24 @@ export function formatAgo(iso: string | null, now: number = Date.now()): string 
   const seconds = (now - Date.parse(iso)) / 1000;
   return `${formatDuration(seconds)} ago`;
 }
+
+const BYTE_UNITS = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+
+// Bytes with binary units, such as "512 B", "1.5 KiB" or "15.3 GiB".
+export function formatBytes(bytes: number): string {
+  let value = Math.max(0, bytes);
+  let unit = 0;
+  while (value >= 1024 && unit < BYTE_UNITS.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  const digits = unit === 0 || value >= 100 ? 0 : 1;
+  return `${value.toFixed(digits)} ${BYTE_UNITS[unit]}`;
+}
+
+export const formatRate = (bytesPerSecond: number) => `${formatBytes(bytesPerSecond)}/s`;
+
+// A share between 0 and 100, with no decimals from 10 up.
+export function formatPercent(percent: number): string {
+  return `${percent >= 10 ? Math.round(percent) : percent.toFixed(1)}%`;
+}

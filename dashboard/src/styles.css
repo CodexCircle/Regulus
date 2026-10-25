@@ -10,6 +10,8 @@
   --danger: #c0352b;
   --ok: #1d7f4e;
   --warn: #a15c00;
+  --series-1: #2f6df6;
+  --series-2: #d9730d;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   line-height: 1.45;
 }
@@ -26,6 +28,8 @@
     --danger: #ff7b70;
     --ok: #4cc38a;
     --warn: #f0b04a;
+    --series-1: #6c97ff;
+    --series-2: #f0a04a;
   }
 }
 
@@ -259,6 +263,194 @@ label {
   flex: 1;
   overflow: auto;
   padding: 0.6rem 0.8rem;
+}
+
+/* widgets */
+.agent-view > select {
+  width: auto;
+  margin-bottom: 0.5rem;
+}
+
+.note {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.note.warn {
+  color: var(--warn);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 0.5rem;
+}
+
+.stat strong {
+  font-size: 1.8rem;
+  line-height: 1.2;
+}
+
+.stat span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.facts {
+  margin: 0;
+}
+
+.facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.disks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.disk-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+.disk-head span {
+  color: var(--muted);
+}
+
+.meter {
+  height: 0.6rem;
+  margin-top: 0.25rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.meter > div {
+  height: 100%;
+  background: var(--series-1);
+}
+
+.meter.full > div {
+  background: var(--danger);
+}
+
+/* charts */
+.chart {
+  margin: 0;
+}
+
+.chart-plot {
+  position: relative;
+  height: 7rem;
+  margin-left: 3.2rem;
+}
+
+.chart-plot svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-line {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+}
+
+.chart-area {
+  stroke: none;
+  opacity: 0.15;
+}
+
+.chart-series.s1 .chart-line {
+  stroke: var(--series-1);
+}
+
+.chart-series.s1 .chart-area {
+  fill: var(--series-1);
+}
+
+.chart-series.s2 .chart-line {
+  stroke: var(--series-2);
+}
+
+.chart-series.s2 .chart-area {
+  fill: var(--series-2);
+}
+
+.chart-max,
+.chart-min {
+  position: absolute;
+  right: 100%;
+  padding-right: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.chart-max {
+  top: 0;
+}
+
+.chart-min {
+  bottom: 0;
+}
+
+.chart figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 1rem;
+  margin: 0.3rem 0 0 3.2rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 2px;
+}
+
+.swatch.s1 {
+  background: var(--series-1);
+}
+
+.swatch.s2 {
+  background: var(--series-2);
+}
+
+.chart-empty {
+  color: var(--muted);
 }
 
 /* tables */

@@ -2,7 +2,7 @@ import { Component, useState, type ErrorInfo, type ReactNode } from "react";
 import ReactGridLayout, { useContainerWidth, type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
-import { addWidget, applyPositions, GRID_COLS, removeWidget, type DashboardLayout, type WidgetInstance } from "./layout";
+import { addWidget, applyPositions, GRID_COLS, removeWidget, setWidgetConfig, type DashboardLayout, type WidgetInstance } from "./layout";
 import { useSession } from "./session";
 import { useDashboardLayout, type SaveState } from "./useDashboardLayout";
 import { registry as defaultRegistry } from "./widgets";
@@ -157,6 +157,7 @@ function Grid({ layout, registry, editing, onChange }: GridProps) {
                 registry={registry}
                 editing={editing}
                 onRemove={() => onChange(removeWidget(layout, w.i))}
+                onConfig={(config) => onChange(setWidgetConfig(layout, w.i, config))}
               />
             </div>
           ))}
@@ -171,11 +172,12 @@ interface FrameProps {
   registry: WidgetRegistry;
   editing: boolean;
   onRemove: () => void;
+  onConfig: (config: Record<string, unknown>) => void;
 }
 
 // WidgetFrame draws the title bar and isolates failures: a widget that throws
 // shows an error in its own frame and leaves the rest of the dashboard alone.
-function WidgetFrame({ widget, registry, editing, onRemove }: FrameProps) {
+function WidgetFrame({ widget, registry, editing, onRemove, onConfig }: FrameProps) {
   const def = registry.get(widget.type);
   const title = def?.title ?? "Unavailable widget";
   return (
@@ -191,7 +193,7 @@ function WidgetFrame({ widget, registry, editing, onRemove }: FrameProps) {
       <div className="widget-body">
         {def ? (
           <WidgetBoundary key={widget.i} title={title}>
-            <def.component instanceId={widget.i} config={widget.config ?? {}} />
+            <def.component instanceId={widget.i} config={widget.config ?? {}} setConfig={onConfig} />
           </WidgetBoundary>
         ) : (
           <p>

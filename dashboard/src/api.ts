@@ -83,3 +83,50 @@ export interface LayoutResponse {
 export const fetchLayout = (signal?: AbortSignal) => request<LayoutResponse>("GET", "/api/layout", undefined, signal);
 
 export const saveLayout = (layout: unknown) => request<void>("PUT", "/api/layout", { layout });
+
+// One report of an agent as returned by GET /api/agents/{id}/metrics and
+// pushed in "agent.metrics" stream events (see internal/hub/api.go).
+export interface MetricsPoint {
+  at: string;
+  cpu_percent: number;
+  load_1: number;
+  load_5: number;
+  load_15: number;
+  memory_total_bytes: number;
+  memory_used_bytes: number;
+  memory_available_bytes: number;
+  swap_total_bytes: number;
+  swap_used_bytes: number;
+  uptime_seconds: number;
+  disks: DiskUsage[];
+  networks: NetworkUsage[];
+}
+
+export interface DiskUsage {
+  mount_point: string;
+  filesystem: string;
+  total_bytes: number;
+  used_bytes: number;
+}
+
+export interface NetworkUsage {
+  interface: string;
+  rx_bytes: number;
+  tx_bytes: number;
+  // null until two reports allow computing a rate.
+  rx_bytes_per_sec: number | null;
+  tx_bytes_per_sec: number | null;
+}
+
+// fetchMetrics returns the recent metrics of an agent, oldest first; with
+// since only the points received after that time.
+export async function fetchMetrics(id: string, since?: string, signal?: AbortSignal): Promise<MetricsPoint[]> {
+  const query = since ? `?since=${encodeURIComponent(since)}` : "";
+  const res = await request<{ agent: string; points: MetricsPoint[] }>(
+    "GET",
+    `/api/agents/${encodeURIComponent(id)}/metrics${query}`,
+    undefined,
+    signal,
+  );
+  return res.points;
+}
