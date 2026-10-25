@@ -30,6 +30,7 @@ func UserFrom(ctx context.Context) (User, bool) {
 //	POST /api/auth/setup   create the first admin (needs the one-time setup token)
 //	POST /api/auth/login   start a session
 //	POST /api/auth/logout  end the session
+//	POST /api/auth/reset   choose a new password with a one-time reset token
 //
 // The cookie is HttpOnly and SameSite=Lax, and POST requests must be JSON from
 // the same origin, which together rule out cross-site request forgery.
@@ -38,6 +39,7 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/auth/setup", RequireJSON(http.HandlerFunc(s.handleSetup)))
 	mux.Handle("POST /api/auth/login", RequireJSON(http.HandlerFunc(s.handleLogin)))
 	mux.Handle("POST /api/auth/logout", RequireJSON(http.HandlerFunc(s.handleLogout)))
+	mux.Handle("POST /api/auth/reset", RequireJSON(http.HandlerFunc(s.handleResetPassword)))
 }
 
 // Routes are the patterns Register adds to the mux.
@@ -46,6 +48,7 @@ var Routes = []string{
 	"POST /api/auth/setup",
 	"POST /api/auth/login",
 	"POST /api/auth/logout",
+	"POST /api/auth/reset",
 }
 
 // Require lets a request through only if it carries a valid session cookie;

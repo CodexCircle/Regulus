@@ -4,7 +4,8 @@
 # the API is closed without a login, the first-run setup of the admin, that the
 # built-in agent connects (GET /api/agents) and that SIGTERM stops the hub
 # cleanly. Then it starts a hub with --builtin-agent=false on the same data and
-# checks that, after logging in, no agent shows up.
+# checks that, after logging in, no agent shows up and that `hub reset-admin`
+# recovers the admin account.
 #
 # Usage: scripts/smoke.sh [path/to/regulus]   (default: bin/regulus)
 set -euo pipefail
@@ -111,6 +112,27 @@ code=$(curl -sS -o /dev/null -w '%{http_code}' -c "$jar" -H 'Content-Type: appli
 sleep 1
 agents=$(curl -fsS -b "$jar" "http://$addr/api/agents") || fail "/api/agents request failed"
 [[ $agents == '[]' ]] || fail "expected no agents with --builtin-agent=false, got: $agents"
+
+# A locked-out admin gets back in with the reset-admin command, while the hub
+# keeps running: the link ends the old session and sets a new password.
+link=$("$bin" hub reset-admin --data-dir "$tmp/data" 2>/dev/null) || fail "reset-admin failed"
+reset_token=${link##*/#/reset/}
+[[ -n $reset_token && $reset_token != "$link" ]] || fail "reset-admin printed an unexpected link: $link"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -b "$jar" "http://$addr/api/agents") || fail "request failed"
+[[ $code == 401 ]] || fail "the old session still works after reset-admin (status $code)"
+new_password='smoke-new-password'
+code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' \
+	-d "{\"token\":\"$reset_token\",\"new_password\":\"$new_password\"}" "http://$addr/api/auth/reset") || fail "reset request failed"
+[[ $code == 204 ]] || fail "reset answered $code, want 204"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' \
+	-d "{\"token\":\"$reset_token\",\"new_password\":\"$new_password\"}" "http://$addr/api/auth/reset") || fail "second reset request failed"
+[[ $code == 400 ]] || fail "reusing the reset link answered $code, want 400"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' \
+	-d "{\"username\":\"admin\",\"password\":\"$password\"}" "http://$addr/api/auth/login") || fail "login request failed"
+[[ $code == 401 ]] || fail "the old password still works after the reset (status $code)"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' \
+	-d "{\"username\":\"admin\",\"password\":\"$new_password\"}" "http://$addr/api/auth/login") || fail "login request failed"
+[[ $code == 200 ]] || fail "login with the new password answered $code, want 200"
 stop_hub
 
 echo "smoke test passed"

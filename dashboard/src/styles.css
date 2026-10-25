@@ -319,6 +319,12 @@ td.wrap {
   max-width: 24rem;
 }
 
+.hint {
+  margin: 1rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 /* widgets */
 .agent-view > select {
   width: auto;

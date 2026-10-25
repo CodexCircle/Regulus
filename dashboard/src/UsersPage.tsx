@@ -1,10 +1,12 @@
 import { useCallback, useState, type FormEvent } from "react";
 import {
+  createReset,
   createUser,
   deleteUser,
   fetchAudit,
   fetchUsers,
   updateUser,
+  type PasswordReset,
   type Role,
   type User,
 } from "./api";
@@ -36,6 +38,7 @@ function UserTable({ self }: { self: string }) {
   const load = useCallback((signal: AbortSignal) => fetchUsers(signal), []);
   const [users, reload] = useApiList<User>(load);
   const [error, setError] = useState("");
+  const [reset, setReset] = useState<PasswordReset | null>(null);
 
   // run performs a change, then shows the new list or the hub's refusal.
   const run = async (action: () => Promise<unknown>) => {
@@ -96,6 +99,17 @@ function UserTable({ self }: { self: string }) {
                   </button>
                   <button
                     type="button"
+                    disabled={u.username === self || u.disabled}
+                    onClick={() => {
+                      if (window.confirm(`Make a password reset link for ${u.username}? It signs ${u.username} out everywhere.`)) {
+                        void run(async () => setReset(await createReset(u.username)));
+                      }
+                    }}
+                  >
+                    Reset password of {u.username}
+                  </button>
+                  <button
+                    type="button"
                     disabled={u.username === self}
                     onClick={() => {
                       if (window.confirm(`Delete the account ${u.username}? This cannot be undone.`)) {
@@ -111,8 +125,40 @@ function UserTable({ self }: { self: string }) {
           </tbody>
         </table>
       )}
+      {reset && <ResetLink reset={reset} onClose={() => setReset(null)} />}
       <NewUserForm onCreated={reload} />
     </>
+  );
+}
+
+// ResetLink shows the link of a password reset once, for the admin to hand to
+// the user.
+function ResetLink({ reset, onClose }: { reset: PasswordReset; onClose: () => void }) {
+  const link = `${window.location.origin}${window.location.pathname}#/reset/${reset.token}`;
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(link).then(
+      () => setCopied(true),
+      () => setCopied(false),
+    );
+  };
+  return (
+    <div className="panel" role="status" aria-label={`Reset link for ${reset.username}`}>
+      <h3>Reset link for {reset.username}</h3>
+      <p>
+        Give this link to {reset.username}. It works once and expires at {new Date(reset.expires_at).toLocaleString()}. It is not shown
+        again, and you never see the new password.
+      </p>
+      <input readOnly value={link} aria-label="Reset link" onFocus={(e) => e.target.select()} />
+      <p className="row-actions">
+        <button type="button" onClick={copy}>
+          {copied ? "Copied" : "Copy link"}
+        </button>
+        <button type="button" onClick={onClose}>
+          Done
+        </button>
+      </p>
+    </div>
   );
 }
 

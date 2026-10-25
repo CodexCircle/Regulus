@@ -54,7 +54,7 @@ export function AuthGate({ children }: { children: (session: Session) => ReactNo
 }
 
 // AuthFrame is the centred card around the setup and login pages.
-function AuthFrame({ children }: { children: ReactNode }) {
+export function AuthFrame({ children }: { children: ReactNode }) {
   return (
     <main className="auth">
       <header>
@@ -107,6 +107,7 @@ function LoginForm({ onDone }: { onDone: (user: User) => void }) {
       <button type="submit" disabled={busy}>
         Sign in
       </button>
+      <p className="hint">Forgot your password? Ask an administrator for a reset link.</p>
     </form>
   );
 }

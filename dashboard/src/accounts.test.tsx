@@ -2,7 +2,9 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountPage } from "./AccountPage";
+import { App } from "./App";
 import type { AuditEntry, SessionInfo, User } from "./api";
+import { ResetPage } from "./ResetPage";
 import { SessionContext } from "./session";
 import { UsersPage } from "./UsersPage";
 
@@ -157,6 +159,35 @@ describe("UsersPage", () => {
     expect(await screen.findByText("there must be at least one active admin")).toBeInTheDocument();
   });
 
+  it("makes a reset link for a user and shows it once", async () => {
+    const calls = mockHub({
+      "GET /api/users": () => ({ data: [admin, viewer] }),
+      "GET /api/audit?limit=100": () => ({ data: [] }),
+      "POST /api/users/eve/reset": () => ({ status: 201, data: { username: "eve", token: "tok_123", expires_at: now } }),
+    });
+    renderAs(admin, <UsersPage />);
+    await screen.findByRole("combobox", { name: "Role of eve" });
+    expect(screen.getByRole("button", { name: "Reset password of admin" })).toBeDisabled();
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Reset password of eve" }));
+    const link = await screen.findByLabelText("Reset link");
+    expect(link).toHaveValue(`${window.location.origin}${window.location.pathname}#/reset/tok_123`);
+    expect(calls).toContainEqual({ method: "POST", path: "/api/users/eve/reset", body: {} });
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByLabelText("Reset link")).not.toBeInTheDocument();
+  });
+
+  it("cannot reset a disabled account", async () => {
+    mockHub({
+      "GET /api/users": () => ({ data: [admin, { ...viewer, disabled: true }] }),
+      "GET /api/audit?limit=100": () => ({ data: [] }),
+    });
+    renderAs(admin, <UsersPage />);
+    await screen.findByRole("combobox", { name: "Role of eve" });
+    expect(screen.getByRole("button", { name: "Reset password of eve" })).toBeDisabled();
+  });
+
   it("returns to the login page when the session is gone", async () => {
     mockHub({
       "GET /api/users": () => ({ status: 401, data: { error: "unauthorized" } }),
@@ -220,5 +251,52 @@ describe("AccountPage", () => {
     await userEvent.setup().click(within(row).getByRole("button", { name: "Sign out 10.0.0.9" }));
     await waitFor(() => expect(screen.queryByText("Safari")).not.toBeInTheDocument());
     expect(calls).toContainEqual({ method: "DELETE", path: "/api/account/sessions/bbb", body: {} });
+  });
+});
+
+describe("ResetPage", () => {
+  afterEach(() => {
+    window.location.hash = "";
+  });
+
+  it("sets the new password with the token of the link", async () => {
+    window.location.hash = "#/reset/tok_123";
+    const calls = mockHub({ "POST /api/auth/reset": () => ({ status: 204 }) });
+    render(<ResetPage />);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText(/^New password/), "a brand new password");
+    await user.type(screen.getByLabelText("Repeat the password"), "something different");
+    await user.click(screen.getByRole("button", { name: "Change password" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("do not match");
+    expect(calls).toHaveLength(0);
+
+    await user.clear(screen.getByLabelText("Repeat the password"));
+    await user.type(screen.getByLabelText("Repeat the password"), "a brand new password");
+    await user.click(screen.getByRole("button", { name: "Change password" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Your password was changed");
+    expect(calls).toEqual([{ method: "POST", path: "/api/auth/reset", body: { token: "tok_123", new_password: "a brand new password" } }]);
+    expect(window.location.hash).toBe(""); // the token is gone from the address
+    expect(screen.getByRole("link", { name: "Sign in" })).toBeInTheDocument();
+  });
+
+  it("shows why a link does not work", async () => {
+    window.location.hash = "#/reset/old";
+    mockHub({ "POST /api/auth/reset": () => ({ status: 400, data: { error: "this reset link is invalid or has expired" } }) });
+    render(<ResetPage />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/^New password/), "a brand new password");
+    await user.type(screen.getByLabelText("Repeat the password"), "a brand new password");
+    await user.click(screen.getByRole("button", { name: "Change password" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("invalid or has expired");
+  });
+
+  it("opens without a login", async () => {
+    window.location.hash = "#/reset/tok";
+    const calls = mockHub({});
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Choose a new password" })).toBeInTheDocument();
+    expect(calls).toHaveLength(0); // no /api/auth/me, no login page
   });
 });

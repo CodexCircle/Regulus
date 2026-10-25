@@ -125,6 +125,43 @@ paths:
       responses:
         "204":
           description: The session is closed and the cookie cleared.
+  /api/auth/reset:
+    post:
+      tags: [auth]
+      summary: Choose a new password with a one-time reset token
+      description: |
+        The token comes from an admin (`POST /api/users/{username}/reset`) or from
+        the `regulus hub reset-admin` command. It works once and expires after an
+        hour. A token that is unknown, expired or used gets the same 400 answer.
+        On success all sessions of the account are ended; the user then logs in
+        with the new password. After 10 failed attempts from one address the
+        endpoint answers 429 for a while.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, new_password]
+              properties:
+                token: { type: string }
+                new_password: { type: string, minLength: 10, maxLength: 128 }
+      responses:
+        "204":
+          description: The password was changed.
+        "400":
+          description: The token is invalid or expired, or the password is not acceptable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: Too many failed attempts from this address; see `Retry-After`.
+          headers:
+            Retry-After: { schema: { type: integer } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/agents:
     get:
       tags: [agents]
@@ -337,6 +374,39 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/users/{username}/reset:
+    post:
+      tags: [accounts]
+      summary: Make a one-time password reset token for an account (admin only)
+      description: |
+        The admin hands the token (or the link `/#/reset/<token>`) to the user, who
+        chooses the new password; the admin never sees it. The token is shown only
+        in this answer, works once and expires after an hour; a new one replaces
+        the earlier one. Creating it ends all sessions of the account. The request
+        needs a JSON body (`{}`). Disabled accounts cannot be reset (400).
+      parameters:
+        - $ref: "#/components/parameters/Username"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "201":
+          description: The reset token.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [username, token, expires_at]
+                properties:
+                  username: { type: string }
+                  token: { type: string }
+                  expires_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/audit:
     get:
       tags: [accounts]
