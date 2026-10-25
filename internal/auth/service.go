@@ -40,9 +40,14 @@ type Service struct {
 	log   *slog.Logger
 	now   func() time.Time
 
+	// box encrypts the TOTP secrets; nil when the hub has no secret key, which
+	// turns two-factor off.
+	box *sealer
+
 	mu         sync.Mutex
 	setupToken string // empty once the first admin exists
 	failures   map[string]*failure
+	policy     Policy
 
 	dummyOnce sync.Once
 	dummyHash string
@@ -53,11 +58,30 @@ type failure struct {
 	since time.Time
 }
 
+// Option customizes a Service.
+type Option func(*Service)
+
+// WithSecret sets the hub secret that protects the TOTP secrets (see
+// LoadOrCreateSecret). Without it two-factor authentication is unavailable.
+func WithSecret(secret []byte) Option {
+	return func(s *Service) {
+		if box, err := sealerFor(secret); err == nil {
+			s.box = box
+		}
+	}
+}
+
 // New returns the service for the hub database. If there is no user yet it
 // generates a one-time setup token and logs it: whoever can read the hub log
 // can create the first admin, and nobody else.
-func New(ctx context.Context, db *sql.DB, log *slog.Logger) (*Service, error) {
+func New(ctx context.Context, db *sql.DB, log *slog.Logger, opts ...Option) (*Service, error) {
 	s := &Service{store: store{db}, log: log, now: time.Now, failures: map[string]*failure{}}
+	for _, opt := range opts {
+		opt(s)
+	}
+	if err := s.loadPolicy(ctx); err != nil {
+		return nil, err
+	}
 	n, err := s.store.countUsers(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("count users: %w", err)
@@ -149,6 +173,15 @@ func (s *Service) Login(ctx context.Context, remote, username, password string) 
 		}
 		s.audit(ctx, usernameForAudit(username), EventLoginFailed, "", detail)
 		return User{}, "", time.Time{}, ErrInvalidCredentials
+	}
+	if user.TwoFactor {
+		// The password is right but the login is not done. Failures are not
+		// cleared yet: a wrong code must keep counting.
+		pending, err := s.beginPending(ctx, user.ID)
+		if err != nil {
+			return User{}, "", time.Time{}, err
+		}
+		return user, "", time.Time{}, pending
 	}
 	s.clearFailures(remote)
 

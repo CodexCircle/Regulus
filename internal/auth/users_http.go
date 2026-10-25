@@ -38,11 +38,13 @@ func RequireRole(role Role, next http.Handler) http.Handler {
 //	GET    /api/account/sessions       list the own sessions
 //	DELETE /api/account/sessions/{id}  end one of the own sessions
 //
+// The two-factor endpoints are listed at twoFactorRoutes.
+//
 // The Service may be nil to list the routes only.
 func APIRoutes(s *Service) []Route {
 	admin := func(h http.HandlerFunc) http.Handler { return RequireRole(RoleAdmin, h) }
 	adminJSON := func(h http.HandlerFunc) http.Handler { return RequireRole(RoleAdmin, RequireJSON(h)) }
-	return []Route{
+	routes := []Route{
 		{"GET /api/users", admin(s.handleListUsers)},
 		{"POST /api/users", adminJSON(s.handleCreateUser)},
 		{"PATCH /api/users/{username}", adminJSON(s.handleUpdateUser)},
@@ -53,9 +55,13 @@ func APIRoutes(s *Service) []Route {
 		{"GET /api/account/sessions", http.HandlerFunc(s.handleListSessions)},
 		{"DELETE /api/account/sessions/{id}", RequireJSON(http.HandlerFunc(s.handleRevokeSession))},
 	}
+	return append(routes, twoFactorRoutes(s)...)
 }
 
 func (s *Service) fail(w http.ResponseWriter, err error) {
+	if s.failTwoFactor(w, err) {
+		return
+	}
 	switch {
 	case isInputError(err):
 		writeError(w, http.StatusBadRequest, err.Error())

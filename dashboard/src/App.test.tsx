@@ -5,7 +5,7 @@ import { App } from "./App";
 import type { Agent, Me, User } from "./api";
 import { FakeSocket } from "./fake-socket";
 
-const admin: User = { username: "admin", role: "admin", created_at: new Date().toISOString(), disabled: false };
+const admin: User = { username: "admin", role: "admin", created_at: new Date().toISOString(), disabled: false, two_factor: false };
 
 const agent: Agent = {
   id: "local",

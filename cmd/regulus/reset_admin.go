@@ -83,6 +83,9 @@ Flags:
 		return 1
 	}
 
+	if rec.TwoFactorCleared {
+		_, _ = fmt.Fprintf(stderr, "Two-factor authentication of %q was removed; set it up again from the Account page.\n", rec.Username)
+	}
 	if rec.Reenabled {
 		_, _ = fmt.Fprintf(stderr, "The account %q was disabled and is enabled again.\n", rec.Username)
 	}

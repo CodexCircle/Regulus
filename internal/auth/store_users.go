@@ -16,7 +16,7 @@ const removesAnAdmin = `(users.role <> 'admin' OR users.disabled = 1 OR EXISTS (
 	SELECT 1 FROM users o WHERE o.id <> users.id AND o.role = 'admin' AND o.disabled = 0))`
 
 func (s store) listUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, username, role, created_at, disabled FROM users ORDER BY username`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, username, role, created_at, disabled, `+hasTwoFactor+` FROM users ORDER BY username`)
 	if err != nil {
 		return nil, err
 	}
@@ -27,7 +27,7 @@ func (s store) listUsers(ctx context.Context) ([]User, error) {
 			u       User
 			created string
 		)
-		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &created, &u.Disabled); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &created, &u.Disabled, &u.TwoFactor); err != nil {
 			return nil, err
 		}
 		u.CreatedAt, _ = time.Parse(timeLayout, created)

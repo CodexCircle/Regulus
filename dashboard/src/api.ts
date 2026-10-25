@@ -27,6 +27,8 @@ export interface User {
   role: Role;
   created_at: string;
   disabled: boolean;
+  // The user confirmed a second factor (TOTP).
+  two_factor: boolean;
 }
 
 export type Role = "admin" | "viewer";
@@ -34,19 +36,29 @@ export type Role = "admin" | "viewer";
 export interface Me {
   setup_required: boolean;
   user: User | null;
+  // The hub requires two-factor authentication from this user, who has not set
+  // it up: only the two-factor endpoints work until then.
+  two_factor_setup_required?: boolean;
 }
 
 // ApiError is thrown for any non-2xx answer; message is the hub's explanation
 // when it sent one.
 export class ApiError extends Error {
   readonly status: number;
+  // A machine-readable reason some answers carry, such as two_factor_setup_required.
+  readonly code?: string;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
 }
+
+// TWO_FACTOR_REQUIRED_EVENT is sent on window when the hub refuses a request
+// because the user must set up two-factor authentication first.
+export const TWO_FACTOR_REQUIRED_EVENT = "regulus:two-factor-required";
 
 async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(path, {
@@ -58,13 +70,18 @@ async function request<T>(method: string, path: string, body?: unknown, signal?:
   });
   if (!res.ok) {
     let message = `${method} ${path} failed: ${res.status}`;
+    let code: string | undefined;
     try {
-      const data = (await res.json()) as { error?: string };
+      const data = (await res.json()) as { error?: string; code?: string };
       if (data.error) message = data.error;
+      code = data.code;
     } catch {
       // keep the generic message
     }
-    throw new ApiError(res.status, message);
+    if (res.status === 403 && code === "two_factor_setup_required") {
+      window.dispatchEvent(new Event(TWO_FACTOR_REQUIRED_EVENT));
+    }
+    throw new ApiError(res.status, message, code);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -95,8 +112,25 @@ export const revokeAgent = (id: string) => request<void>("DELETE", `/api/agents/
 
 export const fetchMe = (signal?: AbortSignal) => request<Me>("GET", "/api/auth/me", undefined, signal);
 
+// The answer to a correct password when the account has two-factor on: no
+// session yet, only a token to send with a code to loginTwoFactor.
+export interface TwoFactorPending {
+  two_factor_required: true;
+  pending_token: string;
+  expires_at: string;
+}
+
+export const isPending = (r: User | TwoFactorPending): r is TwoFactorPending => "two_factor_required" in r;
+
 export const login = (username: string, password: string) =>
-  request<User>("POST", "/api/auth/login", { username, password });
+  request<User | TwoFactorPending>("POST", "/api/auth/login", { username, password });
+
+// What the hub says after a login with a recovery code.
+export type LoginResult = User & { recovery_code_used?: boolean; recovery_codes_left?: number };
+
+// loginTwoFactor finishes a login with a code from the app or a recovery code.
+export const loginTwoFactor = (pendingToken: string, code: string) =>
+  request<LoginResult>("POST", "/api/auth/login/two-factor", { pending_token: pendingToken, code });
 
 export const setupAdmin = (setupToken: string, username: string, password: string) =>
   request<User>("POST", "/api/auth/setup", { setup_token: setupToken, username, password });
@@ -216,3 +250,49 @@ export const createReset = (username: string) =>
 // resetPassword chooses a new password with a reset token; it does not log in.
 export const resetPassword = (token: string, newPassword: string) =>
   request<void>("POST", "/api/auth/reset", { token, new_password: newPassword });
+
+// Two-factor authentication of the signed-in user (see internal/auth).
+export interface TwoFactorStatus {
+  enabled: boolean;
+  // The hub requires two-factor from this user, so it cannot be turned off.
+  mandatory: boolean;
+  policy: TwoFactorPolicy;
+  recovery_codes_left: number;
+}
+
+export type TwoFactorPolicy = "off" | "admins" | "all";
+
+export interface TwoFactorSetup {
+  secret: string;
+  uri: string;
+  // The QR code as a PNG data URL.
+  qr: string;
+}
+
+export const fetchTwoFactor = (signal?: AbortSignal) =>
+  request<TwoFactorStatus>("GET", "/api/account/two-factor", undefined, signal);
+
+export const startTwoFactor = (password: string) =>
+  request<TwoFactorSetup>("POST", "/api/account/two-factor/setup", { password });
+
+export const enableTwoFactor = async (code: string) =>
+  (await request<{ recovery_codes: string[] }>("POST", "/api/account/two-factor/enable", { code })).recovery_codes;
+
+export const disableTwoFactor = (password: string, code: string) =>
+  request<void>("POST", "/api/account/two-factor/disable", { password, code });
+
+export const renewRecoveryCodes = async (password: string, code: string) =>
+  (await request<{ recovery_codes: string[] }>("POST", "/api/account/two-factor/recovery-codes", { password, code })).recovery_codes;
+
+export const resetUserTwoFactor = (username: string) =>
+  request<void>("DELETE", `/api/users/${encodeURIComponent(username)}/two-factor`, {});
+
+export interface SecuritySettings {
+  two_factor_policy: TwoFactorPolicy;
+  two_factor_available: boolean;
+}
+
+export const fetchSecurity = (signal?: AbortSignal) => request<SecuritySettings>("GET", "/api/settings/security", undefined, signal);
+
+export const saveSecurity = (policy: TwoFactorPolicy) =>
+  request<SecuritySettings>("PUT", "/api/settings/security", { two_factor_policy: policy });

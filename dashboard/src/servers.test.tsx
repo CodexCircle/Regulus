@@ -8,8 +8,8 @@ import { agentCommand, installCommand, ServersPage } from "./ServersPage";
 import { SessionContext } from "./session";
 
 const now = new Date().toISOString();
-const admin: User = { username: "admin", role: "admin", created_at: now, disabled: false };
-const viewer: User = { username: "eve", role: "viewer", created_at: now, disabled: false };
+const admin: User = { username: "admin", role: "admin", created_at: now, disabled: false, two_factor: false };
+const viewer: User = { username: "eve", role: "viewer", created_at: now, disabled: false, two_factor: false };
 
 const online: Agent = {
   id: "web1",

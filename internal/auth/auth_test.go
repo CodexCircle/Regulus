@@ -25,12 +25,15 @@ func newService(t *testing.T) *Service {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	s, err := New(context.Background(), db, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s, err := New(context.Background(), db, slog.New(slog.NewTextHandler(io.Discard, nil)), WithSecret(testSecret))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return s
 }
+
+// testSecret stands in for the hub secret.
+var testSecret = []byte("0123456789abcdef0123456789abcdef")
 
 func setup(t *testing.T, s *Service) (User, string) {
 	t.Helper()

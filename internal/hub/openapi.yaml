@@ -95,13 +95,66 @@ paths:
                 password: { type: string }
       responses:
         "200":
-          description: Logged in; the session cookie is set.
+          description: |
+            Logged in and the session cookie is set, or, for an account with
+            two-factor authentication, the password was right but no session exists
+            yet: the answer has `two_factor_required` and a `pending_token` to send,
+            with a code, to `/api/auth/login/two-factor`.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/User" }
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/User"
+                  - $ref: "#/components/schemas/TwoFactorPending"
         "400": { $ref: "#/components/responses/BadRequest" }
         "401":
           description: Wrong username or password.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: Too many failed attempts from this address; see `Retry-After`.
+          headers:
+            Retry-After: { schema: { type: integer } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/auth/login/two-factor:
+    post:
+      tags: [auth]
+      summary: Finish a login with the second factor
+      description: |
+        Takes the `pending_token` of `/api/auth/login` and a code: six digits from
+        the authenticator app, or a recovery code (which then stops working). A
+        pending login lasts five minutes and accepts five tries; wrong codes also
+        count toward the limit on failed attempts. A code of the app works once.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [pending_token, code]
+              properties:
+                pending_token: { type: string }
+                code: { type: string }
+      responses:
+        "200":
+          description: Logged in; the session cookie is set. After a recovery code the answer says so, with the codes left.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/User"
+                  - type: object
+                    properties:
+                      recovery_code_used: { type: boolean }
+                      recovery_codes_left: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: Wrong code, or the pending login expired or ran out of tries.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -595,6 +648,217 @@ paths:
           description: The session was ended.
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/account/two-factor:
+    get:
+      tags: [accounts]
+      summary: Two-factor state of the logged-in user
+      responses:
+        "200":
+          description: Whether it is on, whether the hub requires it, and the recovery codes left.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TwoFactorStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/account/two-factor/setup:
+    post:
+      tags: [accounts]
+      summary: Start setting up two-factor authentication
+      description: |
+        Needs the password. Makes a new secret (replacing one that was never
+        confirmed) and returns it with the QR code. Two-factor is not on until
+        `/enable` confirms it with a code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password]
+              properties:
+                password: { type: string }
+      responses:
+        "200":
+          description: The secret, the `otpauth://` URI and the QR code (PNG data URL).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TwoFactorSetup" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: The password is wrong.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Two-factor is already on.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503":
+          description: The hub has no secret key, so two-factor is unavailable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/account/two-factor/enable:
+    post:
+      tags: [accounts]
+      summary: Confirm the setup with a code and turn two-factor on
+      description: Returns the ten recovery codes. They are shown only this once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code]
+              properties:
+                code: { type: string }
+      responses:
+        "200":
+          description: Two-factor is on.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecoveryCodes" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: The code is not valid.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: The setup was not started, or two-factor is already on.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /api/account/two-factor/disable:
+    post:
+      tags: [accounts]
+      summary: Turn two-factor off
+      description: Needs the password and a code (or a recovery code). Refused while the hub requires two-factor for the user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password, code]
+              properties:
+                password: { type: string }
+                code: { type: string }
+      responses:
+        "204":
+          description: Two-factor is off.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: The password or the code is wrong.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Two-factor is not on, or the hub requires it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /api/account/two-factor/recovery-codes:
+    post:
+      tags: [accounts]
+      summary: Make new recovery codes
+      description: Needs the password and a code (or a recovery code). The old codes stop working.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password, code]
+              properties:
+                password: { type: string }
+                code: { type: string }
+      responses:
+        "200":
+          description: The new codes, shown only this once.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecoveryCodes" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: The password or the code is wrong.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Two-factor is not on.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /api/users/{username}/two-factor:
+    delete:
+      tags: [accounts]
+      summary: Remove the second factor of a user (admin)
+      description: For someone who lost the app and the recovery codes. Ends the user's sessions and is audited.
+      parameters:
+        - $ref: "#/components/parameters/Username"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "204":
+          description: The second factor was removed.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/settings/security:
+    get:
+      tags: [accounts]
+      summary: Who must use two-factor authentication (admin)
+      responses:
+        "200":
+          description: The policy.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecuritySettings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      tags: [accounts]
+      summary: Change who must use two-factor authentication (admin)
+      description: |
+        `off`, `admins` or `all`. Users it applies to, and who have not set up
+        two-factor, can use only the two-factor endpoints until they do; the
+        other endpoints answer 403 with `code: two_factor_setup_required`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [two_factor_policy]
+              properties:
+                two_factor_policy: { type: string, enum: [off, admins, all] }
+      responses:
+        "200":
+          description: The policy now in force.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecuritySettings" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503":
+          description: The hub has no secret key, so two-factor cannot be required.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/openapi.yaml:
     get:
       summary: This document
@@ -643,6 +907,13 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    TooManyRequests:
+      description: Too many wrong attempts; see `Retry-After`.
+      headers:
+        Retry-After: { schema: { type: integer } }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
   schemas:
     Error:
       type: object
@@ -657,6 +928,42 @@ components:
         role: { type: string, enum: [admin, viewer] }
         created_at: { type: string, format: date-time }
         disabled: { type: boolean, description: Disabled accounts cannot log in. }
+        two_factor: { type: boolean, description: The user confirmed a second factor. }
+    TwoFactorPending:
+      type: object
+      required: [two_factor_required, pending_token, expires_at]
+      properties:
+        two_factor_required: { type: boolean, enum: [true] }
+        pending_token: { type: string }
+        expires_at: { type: string, format: date-time }
+    TwoFactorStatus:
+      type: object
+      required: [enabled, mandatory, policy, recovery_codes_left]
+      properties:
+        enabled: { type: boolean }
+        mandatory: { type: boolean, description: The hub requires two-factor from this user. }
+        policy: { type: string, enum: [off, admins, all] }
+        recovery_codes_left: { type: integer }
+    TwoFactorSetup:
+      type: object
+      required: [secret, uri, qr]
+      properties:
+        secret: { type: string, description: The key to type into the app, in groups of four. }
+        uri: { type: string, description: The otpauth address the QR code holds. }
+        qr: { type: string, description: The QR code as a PNG data URL. }
+    RecoveryCodes:
+      type: object
+      required: [recovery_codes]
+      properties:
+        recovery_codes:
+          type: array
+          items: { type: string }
+    SecuritySettings:
+      type: object
+      required: [two_factor_policy, two_factor_available]
+      properties:
+        two_factor_policy: { type: string, enum: [off, admins, all] }
+        two_factor_available: { type: boolean }
     SessionInfo:
       type: object
       required: [id, remote_addr, user_agent, created_at, last_used_at, expires_at, current]
@@ -683,9 +990,12 @@ components:
         detail: { type: string }
     Me:
       type: object
-      required: [setup_required, user]
+      required: [setup_required, user, two_factor_setup_required]
       properties:
         setup_required: { type: boolean }
+        two_factor_setup_required:
+          type: boolean
+          description: The hub requires two-factor from this user, who has not set it up; only the two-factor endpoints work until then.
         user:
           oneOf:
             - $ref: "#/components/schemas/User"

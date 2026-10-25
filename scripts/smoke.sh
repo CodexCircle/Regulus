@@ -80,6 +80,7 @@ script=$(sed -n 's/.*<script[^>]*src="\([^"]*\)".*/\1/p' <<<"$page" | head -n1)
 curl -fsS -o /dev/null "$base$script" || fail "dashboard bundle $script is not served"
 
 [[ -s $tmp/data/regulus.db ]] || fail "database file was not created"
+[[ -s $tmp/data/secret.key && $(stat -c %a "$tmp/data/secret.key") == 600 ]] || fail "the hub secret was not created, or is not private"
 
 # The API is closed without a login; the first run asks for the admin, which
 # needs the one-time token from the log.

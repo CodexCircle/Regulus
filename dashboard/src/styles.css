@@ -583,3 +583,32 @@ th {
     flex-basis: 100%;
   }
 }
+
+.qr {
+  display: block;
+  background: #fff;
+  padding: 8px;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+}
+
+.recovery-codes {
+  columns: 2;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.75rem;
+}
+
+.recovery-codes li {
+  padding: 0.15rem 0;
+}
+
+label.check {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+label.check input {
+  width: auto;
+}

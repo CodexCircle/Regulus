@@ -53,8 +53,8 @@ func (s store) userByID(ctx context.Context, id int64) (User, error) {
 		created string
 	)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, username, role, created_at, disabled FROM users WHERE id = ?`, id).
-		Scan(&u.ID, &u.Username, &u.Role, &created, &u.Disabled)
+		`SELECT id, username, role, created_at, disabled, `+hasTwoFactor+` FROM users WHERE id = ?`, id).
+		Scan(&u.ID, &u.Username, &u.Role, &created, &u.Disabled, &u.TwoFactor)
 	if err != nil {
 		return User{}, err
 	}
