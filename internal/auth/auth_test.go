@@ -251,6 +251,9 @@ func newClient(t *testing.T, s *Service) *client {
 		u, _ := UserFrom(r.Context())
 		_, _ = io.WriteString(w, "hello "+u.Username)
 	})
+	for _, r := range APIRoutes(s) {
+		protected.Handle(r.Pattern, r.Handler)
+	}
 	mux.Handle("/api/", s.Require(protected))
 	return &client{t: t, handler: mux}
 }

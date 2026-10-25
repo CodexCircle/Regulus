@@ -1,8 +1,8 @@
 import { useSyncExternalStore } from "react";
 
-export type Route = "/" | "/servers";
+export type Route = "/" | "/servers" | "/users" | "/account";
 
-const known: readonly Route[] = ["/", "/servers"];
+const known: readonly Route[] = ["/", "/servers", "/users", "/account"];
 
 // routeFromHash maps location.hash ("#/servers") to a page. Hash routes keep
 // the hub simple: it serves one index.html and needs no fallback rules.

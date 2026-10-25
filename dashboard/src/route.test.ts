@@ -7,6 +7,8 @@ describe("routeFromHash", () => {
     ["#", "/"],
     ["#/", "/"],
     ["#/servers", "/servers"],
+    ["#/users", "/users"],
+    ["#/account", "/account"],
     ["#/nowhere", "/"],
   ])("%j is %s", (hash, want) => {
     expect(routeFromHash(hash)).toBe(want);

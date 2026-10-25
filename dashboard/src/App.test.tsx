@@ -5,7 +5,7 @@ import { App } from "./App";
 import type { Agent, Me, User } from "./api";
 import { FakeSocket } from "./fake-socket";
 
-const admin: User = { username: "admin", role: "admin", created_at: new Date().toISOString() };
+const admin: User = { username: "admin", role: "admin", created_at: new Date().toISOString(), disabled: false };
 
 const agent: Agent = {
   id: "local",
@@ -107,6 +107,19 @@ describe("App", () => {
       username: "admin",
       password: "correct horse battery",
     });
+  });
+
+  it("shows the Users page to administrators only", async () => {
+    mockHub({ me: { setup_required: false, user: admin }, agents: [] });
+    const first = render(<App />);
+    expect(await screen.findByRole("link", { name: "Users" })).toBeInTheDocument();
+    first.unmount();
+
+    const viewer: User = { ...admin, username: "eve", role: "viewer" };
+    mockHub({ me: { setup_required: false, user: viewer }, agents: [] });
+    render(<App />);
+    expect(await screen.findByRole("link", { name: /eve/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Users" })).not.toBeInTheDocument();
   });
 
   it("shows the error of a failed login", async () => {

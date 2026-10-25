@@ -19,9 +19,12 @@ export interface Agent {
 // User as returned by the authentication endpoints (see internal/auth).
 export interface User {
   username: string;
-  role: "admin" | "viewer";
+  role: Role;
   created_at: string;
+  disabled: boolean;
 }
+
+export type Role = "admin" | "viewer";
 
 export interface Me {
   setup_required: boolean;
@@ -130,3 +133,46 @@ export async function fetchMetrics(id: string, since?: string, signal?: AbortSig
   );
   return res.points;
 }
+
+// One login session of the signed-in user (GET /api/account/sessions).
+export interface SessionInfo {
+  id: string;
+  remote_addr: string;
+  user_agent: string;
+  created_at: string;
+  last_used_at: string;
+  expires_at: string;
+  current: boolean;
+}
+
+// One account event of the audit log (GET /api/audit).
+export interface AuditEntry {
+  id: number;
+  at: string;
+  actor: string;
+  event: string;
+  target: string;
+  remote: string;
+  detail: string;
+}
+
+export const fetchUsers = (signal?: AbortSignal) => request<User[]>("GET", "/api/users", undefined, signal);
+
+export const createUser = (username: string, password: string, role: Role) =>
+  request<User>("POST", "/api/users", { username, password, role });
+
+export const updateUser = (username: string, change: { role?: Role; disabled?: boolean }) =>
+  request<User>("PATCH", `/api/users/${encodeURIComponent(username)}`, change);
+
+export const deleteUser = (username: string) => request<void>("DELETE", `/api/users/${encodeURIComponent(username)}`, {});
+
+export const fetchAudit = (limit = 100, signal?: AbortSignal) =>
+  request<AuditEntry[]>("GET", `/api/audit?limit=${limit}`, undefined, signal);
+
+export const changePassword = (currentPassword: string, newPassword: string) =>
+  request<void>("POST", "/api/account/password", { current_password: currentPassword, new_password: newPassword });
+
+export const fetchSessions = (signal?: AbortSignal) =>
+  request<SessionInfo[]>("GET", "/api/account/sessions", undefined, signal);
+
+export const revokeSession = (id: string) => request<void>("DELETE", `/api/account/sessions/${encodeURIComponent(id)}`, {});

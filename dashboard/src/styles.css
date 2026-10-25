@@ -265,6 +265,60 @@ label {
   padding: 0.6rem 0.8rem;
 }
 
+/* accounts */
+.account a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.account a[aria-current="page"] {
+  text-decoration: underline;
+}
+
+.panel {
+  margin-top: 1.5rem;
+  max-width: 40rem;
+  padding: 1rem 1.2rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.panel h3 {
+  margin-top: 0;
+  font-size: 1.05rem;
+}
+
+.panel select {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+section.panel {
+  max-width: none;
+  overflow-x: auto;
+}
+
+td select {
+  font: inherit;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.row-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+td.wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 24rem;
+}
+
 /* widgets */
 .agent-view > select {
   width: auto;

@@ -23,6 +23,8 @@ type User struct {
 	Username  string    `json:"username"`
 	Role      Role      `json:"role"`
 	CreatedAt time.Time `json:"created_at"`
+	// Disabled accounts cannot log in and have no sessions.
+	Disabled bool `json:"disabled"`
 }
 
 // Errors returned by the store and the service.
@@ -32,6 +34,12 @@ var (
 	ErrInvalidCredentials = errors.New("invalid username or password")
 	ErrRateLimited        = errors.New("too many failed attempts, try again later")
 	ErrUnauthenticated    = errors.New("authentication required")
+	ErrForbidden          = errors.New("you are not allowed to do this")
+	ErrUserNotFound       = errors.New("user not found")
+	ErrUserExists         = errors.New("a user with this name already exists")
+	ErrLastAdmin          = errors.New("this would leave the hub without an enabled admin")
+	ErrWrongPassword      = errors.New("the current password is incorrect")
+	ErrSessionNotFound    = errors.New("session not found")
 )
 
 // timeLayout is a fixed-width UTC format, so timestamps sort correctly as text
@@ -77,8 +85,8 @@ func (s store) userByName(ctx context.Context, username string) (User, string, e
 		created string
 	)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, username, role, created_at, password_hash FROM users WHERE username = ?`, username).
-		Scan(&u.ID, &u.Username, &u.Role, &created, &hash)
+		`SELECT id, username, role, created_at, disabled, password_hash FROM users WHERE username = ?`, username).
+		Scan(&u.ID, &u.Username, &u.Role, &created, &u.Disabled, &hash)
 	if err != nil {
 		return User{}, "", err
 	}
@@ -86,10 +94,12 @@ func (s store) userByName(ctx context.Context, username string) (User, string, e
 	return u, hash, nil
 }
 
-func (s store) createSession(ctx context.Context, tokenHash string, userID int64, now, expires time.Time) error {
+func (s store) createSession(ctx context.Context, tokenHash string, userID int64, now, expires time.Time, c Client) error {
+	at := now.UTC().Format(timeLayout)
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)`,
-		tokenHash, userID, now.UTC().Format(timeLayout), expires.UTC().Format(timeLayout))
+		`INSERT INTO sessions (token_hash, user_id, created_at, expires_at, remote_addr, user_agent, last_used_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		tokenHash, userID, at, expires.UTC().Format(timeLayout), c.Remote, c.UserAgent, at)
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
@@ -104,7 +114,7 @@ func (s store) sessionUser(ctx context.Context, tokenHash string, now time.Time)
 	)
 	err := s.db.QueryRowContext(ctx,
 		`SELECT u.id, u.username, u.role, u.created_at, s.expires_at
-		 FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`, tokenHash).
+		 FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND u.disabled = 0`, tokenHash).
 		Scan(&u.ID, &u.Username, &u.Role, &created, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrUnauthenticated
