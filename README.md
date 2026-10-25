@@ -10,7 +10,7 @@ Regulus lavora per **plug-in**. L'installazione base fornisce una dashboard semp
 
 - **Dashboard**: interfaccia interamente web e personalizzabile. L'utente sceglie quali widget mostrare e come disporli.
 - **Agent**: va installato su ogni server da gestire. Collega il server alla rete di server dell'utente.
-- **Hub**: va installato su un server per gruppo. Gestisce gli agent a lui collegati e serve la dashboard.
+- **Hub**: va installato su un server per gruppo. Gestisce gli agent a lui collegati e serve la dashboard. Durante l'installazione dell'hub viene chiesto se includere anche l'agent, così il server che ospita l'hub può essere gestito come gli altri.
 - **Plug-in**: estendono la piattaforma con nuove funzioni lato server e nuovi widget lato dashboard.
 
 ```
