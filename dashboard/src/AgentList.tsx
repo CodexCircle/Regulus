@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchAgents, type Agent } from "./api";
+import { ApiError, fetchAgents, type Agent } from "./api";
 import { formatAgo, formatDuration } from "./format";
 
 const REFRESH_MS = 5000;
@@ -9,7 +9,13 @@ type State =
   | { kind: "error"; message: string }
   | { kind: "ready"; agents: Agent[] };
 
-export function AgentList({ refreshMs = REFRESH_MS }: { refreshMs?: number }) {
+interface Props {
+  refreshMs?: number;
+  // Called when the hub answers 401: the session has ended.
+  onUnauthorized?: () => void;
+}
+
+export function AgentList({ refreshMs = REFRESH_MS, onUnauthorized }: Props) {
   const [state, setState] = useState<State>({ kind: "loading" });
 
   useEffect(() => {
@@ -19,6 +25,10 @@ export function AgentList({ refreshMs = REFRESH_MS }: { refreshMs?: number }) {
         (agents) => setState({ kind: "ready", agents }),
         (err: unknown) => {
           if (controller.signal.aborted) return;
+          if (err instanceof ApiError && err.status === 401) {
+            onUnauthorized?.();
+            return;
+          }
           setState({ kind: "error", message: err instanceof Error ? err.message : String(err) });
         },
       );
@@ -29,7 +39,7 @@ export function AgentList({ refreshMs = REFRESH_MS }: { refreshMs?: number }) {
       controller.abort();
       clearInterval(timer);
     };
-  }, [refreshMs]);
+  }, [refreshMs, onUnauthorized]);
 
   return (
     <section aria-labelledby="agents-heading">

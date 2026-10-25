@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/CodexCircle/Regulus/internal/agent"
+	"github.com/CodexCircle/Regulus/internal/auth"
 	"github.com/CodexCircle/Regulus/internal/config"
 	agentv1 "github.com/CodexCircle/Regulus/internal/gen/regulus/agent/v1"
 	"github.com/CodexCircle/Regulus/internal/inproc"
@@ -33,6 +34,7 @@ type Hub struct {
 	ui  fs.FS
 
 	version   string
+	auth      *auth.Service
 	agents    *agentServer
 	transport *inproc.Transport // lets the built-in agent reach the hub without a network port
 }
@@ -64,8 +66,15 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, ui fs.FS, opt
 	}
 	log.Info("database ready", "dir", cfg.DataDir)
 
+	authn, err := auth.New(ctx, db, log)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
 	h := &Hub{
 		cfg:       cfg,
+		auth:      authn,
 		log:       log,
 		db:        db,
 		ui:        ui,
@@ -113,7 +122,7 @@ func (h *Hub) Close() error {
 // Serve serves HTTP on ln until ctx is cancelled, then shuts down gracefully.
 func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 	srv := &http.Server{
-		Handler:           NewHandler(h.ui, h),
+		Handler:           NewHandler(h.ui, h, h.auth),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -193,19 +202,34 @@ func (h *Hub) StaleAfter() time.Duration {
 }
 
 // NewHandler returns the hub HTTP handler. The dashboard is served from ui and
-// the agents API from agents, which may be nil (the list is then empty).
-func NewHandler(ui fs.FS, agents AgentSource) http.Handler {
+// the agents API from agents, which may be nil (the list is then empty). The
+// API requires a login through authn; a nil authn leaves it open, which is only
+// meant for tests. The dashboard files themselves are public: they hold no
+// data, and the page asks for a login before it shows anything.
+func NewHandler(ui fs.FS, agents AgentSource, authn *auth.Service) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = fmt.Fprintln(w, "ok")
 	})
 
-	mux.HandleFunc("GET /api/agents", agentsHandler(agents))
-	mux.HandleFunc("GET /api/agents/{id}/metrics", metricsHandler(agents))
+	api := http.NewServeMux()
+	api.HandleFunc("GET /api/agents", agentsHandler(agents))
+	api.HandleFunc("GET /api/agents/{id}/metrics", metricsHandler(agents))
+	var protected http.Handler = api
+	if authn != nil {
+		authn.Register(mux)
+		protected = authn.Require(api)
+	}
+	mux.Handle("/api/", protected)
 
 	files := http.FileServerFS(ui)
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		if _, err := fs.Stat(ui, "index.html"); err != nil {
 			http.Error(w, "dashboard not built: run `make dashboard` before `make build`", http.StatusServiceUnavailable)
 			return
