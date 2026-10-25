@@ -6,6 +6,12 @@
 # machines, put a reverse proxy with TLS in front and listen on 127.0.0.1:8080.
 listen: ":8080"
 
+# Address where remote agents connect (gRPC over TLS with client certificates).
+# Off by default. Enable it to manage other servers: the dashboard then makes
+# a one-time token and the install command for each new server. Open this port
+# in the firewall only towards the servers you manage.
+# agent_listen: ":8443"
+
 # Where the hub keeps its database. Created by the service unit.
 data_dir: /var/lib/regulus
 

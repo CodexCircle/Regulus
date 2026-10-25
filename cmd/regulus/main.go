@@ -30,6 +30,8 @@ func main() {
 	switch os.Args[1] {
 	case "hub":
 		os.Exit(runHub(os.Args[2:]))
+	case "agent":
+		os.Exit(runAgent(os.Args[2:]))
 	case "version":
 		fmt.Println(version)
 	case "help", "-h", "--help":
@@ -48,6 +50,7 @@ Commands:
   hub      run the hub (serves the dashboard); see 'regulus hub -h' for flags
   hub reset-admin
            regain access when the admin cannot log in; see 'regulus hub reset-admin -h'
+  agent    run a remote agent that connects to a hub; see 'regulus agent -h'
   version  print the version
 `)
 }

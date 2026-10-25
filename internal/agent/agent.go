@@ -7,10 +7,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	agentv1 "github.com/CodexCircle/Regulus/internal/gen/regulus/agent/v1"
@@ -128,12 +131,17 @@ func (a *agent) session(ctx context.Context) (established bool, err error) {
 		AgentVersion:    a.opts.Version,
 		AgentId:         a.id,
 		System:          a.system,
-	}}}); err != nil {
+	}}}); err != nil && !errors.Is(err, io.EOF) {
 		return false, err
-	}
+	} // on EOF the stream was closed by the hub: Recv below returns the reason
 
 	first, err := stream.Recv()
 	if err != nil {
+		// The network listener refuses an agent that is unknown or revoked
+		// before Hello is answered. Retrying cannot help.
+		if c := status.Code(err); c == codes.PermissionDenied || c == codes.Unauthenticated {
+			return false, &RejectedError{Reason: agentv1.Reject_REASON_UNAUTHORIZED, Message: status.Convert(err).Message()}
+		}
 		return false, err
 	}
 	var welcome *agentv1.Welcome

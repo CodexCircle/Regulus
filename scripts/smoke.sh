@@ -5,7 +5,8 @@
 # built-in agent connects (GET /api/agents) and that SIGTERM stops the hub
 # cleanly. Then it starts a hub with --builtin-agent=false on the same data and
 # checks that, after logging in, no agent shows up and that `hub reset-admin`
-# recovers the admin account.
+# recovers the admin account. Finally a remote agent enrolls, connects and is
+# revoked.
 #
 # Usage: scripts/smoke.sh [path/to/regulus]   (default: bin/regulus)
 set -euo pipefail
@@ -14,6 +15,7 @@ bin=${1:-bin/regulus}
 tmp=$(mktemp -d)
 log=$tmp/hub.log
 pid=
+agent_pid=
 addr=
 jar=$tmp/cookies
 password='smoke-test-password'
@@ -21,6 +23,9 @@ password='smoke-test-password'
 cleanup() {
 	if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then
 		kill -KILL "$pid" 2>/dev/null || true
+	fi
+	if [[ -n $agent_pid ]] && kill -0 "$agent_pid" 2>/dev/null; then
+		kill -KILL "$agent_pid" 2>/dev/null || true
 	fi
 	rm -rf "$tmp"
 }
@@ -133,6 +138,59 @@ code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/jso
 code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' \
 	-d "{\"username\":\"admin\",\"password\":\"$new_password\"}" "http://$addr/api/auth/login") || fail "login request failed"
 [[ $code == 200 ]] || fail "login with the new password answered $code, want 200"
+stop_hub
+
+# A remote agent enrolls with a one-time token, connects over mTLS and is
+# revoked from the API: the agent process then stops for good.
+start_hub --builtin-agent=false --agent-listen 127.0.0.1:0
+agent_addr=
+for _ in $(seq 1 100); do
+	agent_addr=$(sed -n 's/.*agent listener ready.*addr=\([0-9.]*:[0-9]*\).*/\1/p' "$log" | head -n1)
+	[[ -n $agent_addr ]] && break
+	sleep 0.1
+done
+[[ -n $agent_addr ]] || fail "the hub did not report the address of the agent listener"
+rm -f "$jar"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -c "$jar" -H 'Content-Type: application/json' \
+	-d "{\"username\":\"admin\",\"password\":\"$new_password\"}" "http://$addr/api/auth/login") || fail "login request failed"
+[[ $code == 200 ]] || fail "login answered $code, want 200"
+grant=$(curl -fsS -b "$jar" -H 'Content-Type: application/json' -d '{"name":"smoke"}' "http://$addr/api/enrollment-tokens") || fail "creating an enrollment token failed"
+enroll_token=$(sed -n 's/.*"token":"\([^"]*\)".*/\1/p' <<<"$grant")
+fingerprint=$(sed -n 's/.*"ca_fingerprint":"\([^"]*\)".*/\1/p' <<<"$grant")
+[[ -n $enroll_token && -n $fingerprint ]] || fail "unexpected enrollment answer: $grant"
+
+"$bin" agent --hub "$agent_addr" --token "$enroll_token" --ca-fingerprint "$fingerprint" \
+	--data-dir "$tmp/agent" >"$tmp/agent.log" 2>&1 &
+agent_pid=$!
+remote_id=
+for _ in $(seq 1 100); do
+	remote_id=$(curl -fsS -b "$jar" "http://$addr/api/agents" | sed -n 's/.*"id":"\(agent-[0-9a-f]*\)".*/\1/p' | head -n1)
+	[[ -n $remote_id ]] && break
+	kill -0 "$agent_pid" 2>/dev/null || { cat "$tmp/agent.log" >&2; fail "the remote agent exited"; }
+	sleep 0.1
+done
+[[ -n $remote_id ]] || fail "the remote agent did not show up within 10s"
+[[ -s $tmp/agent/agent.key && -s $tmp/agent/agent.crt && -s $tmp/agent/ca.crt ]] || fail "the agent did not save its credentials"
+[[ $(stat -c %a "$tmp/agent/agent.key") == 600 ]] || fail "the agent key is not private"
+
+# The token is single use.
+"$bin" agent --hub "$agent_addr" --token "$enroll_token" --ca-fingerprint "$fingerprint" \
+	--data-dir "$tmp/agent2" >"$tmp/agent2.log" 2>&1 && fail "a used token enrolled a second agent"
+
+code=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -b "$jar" -H 'Content-Type: application/json' -d '{}' \
+	"http://$addr/api/agents/$remote_id") || fail "revoke request failed"
+[[ $code == 204 ]] || fail "revoking answered $code, want 204"
+for _ in $(seq 1 100); do
+	kill -0 "$agent_pid" 2>/dev/null || break
+	sleep 0.1
+done
+if kill -0 "$agent_pid" 2>/dev/null; then
+	kill -KILL "$agent_pid" 2>/dev/null || true
+	fail "the revoked agent kept running"
+fi
+agent_status=0
+wait "$agent_pid" || agent_status=$?
+[[ $agent_status -ne 0 ]] || fail "the revoked agent exited with status 0"
 stop_hub
 
 echo "smoke test passed"

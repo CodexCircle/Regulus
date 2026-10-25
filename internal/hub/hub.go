@@ -11,15 +11,20 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	"github.com/CodexCircle/Regulus/internal/agent"
 	"github.com/CodexCircle/Regulus/internal/auth"
 	"github.com/CodexCircle/Regulus/internal/config"
+	"github.com/CodexCircle/Regulus/internal/fleet"
 	agentv1 "github.com/CodexCircle/Regulus/internal/gen/regulus/agent/v1"
 	"github.com/CodexCircle/Regulus/internal/inproc"
+	"github.com/CodexCircle/Regulus/internal/pki"
 	"github.com/CodexCircle/Regulus/internal/storage"
 )
 
@@ -35,6 +40,8 @@ type Hub struct {
 
 	version   string
 	auth      *auth.Service
+	fleet     *fleet.Service
+	agentAddr atomic.Value // string: where the agent listener is bound, once it is
 	agents    *agentServer
 	transport *inproc.Transport // lets the built-in agent reach the hub without a network port
 }
@@ -72,9 +79,16 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, ui fs.FS, opt
 		return nil, err
 	}
 
+	ca, err := pki.LoadOrCreate(filepath.Join(cfg.DataDir, "pki"), time.Now())
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("certificate authority: %w", err)
+	}
+
 	h := &Hub{
 		cfg:       cfg,
 		auth:      authn,
+		fleet:     fleet.New(db, ca, authn),
 		log:       log,
 		db:        db,
 		ui:        ui,
@@ -122,16 +136,24 @@ func (h *Hub) Close() error {
 // Serve serves HTTP on ln until ctx is cancelled, then shuts down gracefully.
 func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 	srv := &http.Server{
-		Handler:           NewHandler(Deps{UI: h.ui, Agents: h, Layouts: h, Log: h.log, Auth: h.auth}),
+		Handler:           NewHandler(Deps{UI: h.ui, Agents: h, Layouts: h, Log: h.log, Auth: h.auth, Fleet: h}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	// The agent service runs on the in-process transport; the network
-	// listener for remote agents comes with the remote agent work.
+	// The built-in agent talks to the agent service over the in-process
+	// transport; remote agents use the network listener below.
 	grpcSrv := grpc.NewServer()
 	agentv1.RegisterAgentServiceServer(grpcSrv, h.agents)
 	go func() { _ = grpcSrv.Serve(h.transport.Listener()) }()
 	defer grpcSrv.Stop() // agent streams are long-lived, so a graceful stop would wait forever
+
+	if h.cfg.AgentListen != "" {
+		stopNet, err := h.serveAgents()
+		if err != nil {
+			return err
+		}
+		defer stopNet()
+	}
 
 	if h.cfg.BuiltinAgent {
 		stopAgent, err := h.startBuiltinAgent(ctx)
@@ -161,6 +183,37 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 		return err
 	}
 	return nil
+}
+
+// serveAgents starts the listener for remote agents: gRPC over TLS 1.3 with
+// the hub's own CA. Streams need the client certificate of an enrolled agent;
+// only Enroll works without one. The returned function stops it.
+func (h *Hub) serveAgents() (stop func(), err error) {
+	cert, err := h.fleet.CA().ServerCertificate(time.Now())
+	if err != nil {
+		return nil, fmt.Errorf("agent listener certificate: %w", err)
+	}
+	ln, err := net.Listen("tcp", h.cfg.AgentListen)
+	if err != nil {
+		return nil, fmt.Errorf("agent listener: %w", err)
+	}
+	srv := grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(h.fleet.CA().ServerTLS(cert))),
+		grpc.StreamInterceptor(h.requireAgent),
+	)
+	agentv1.RegisterAgentServiceServer(srv, h.agents)
+	agentv1.RegisterEnrollmentServiceServer(srv, enrollServer{hub: h})
+	go func() { _ = srv.Serve(ln) }()
+	h.agentAddr.Store(ln.Addr().String())
+	h.log.Info("agent listener ready", "addr", ln.Addr().String(), "ca", h.fleet.CA().Fingerprint())
+	return srv.Stop, nil
+}
+
+// AgentAddr is where the listener for remote agents is bound, or "" while it
+// is off.
+func (h *Hub) AgentAddr() string {
+	addr, _ := h.agentAddr.Load().(string)
+	return addr
 }
 
 // BuiltinAgentID is the id of the agent that runs inside the hub.
@@ -219,6 +272,9 @@ type Deps struct {
 	// Auth protects the API. A nil Auth leaves it open, which is only meant for
 	// tests.
 	Auth *auth.Service
+	// Fleet enrolls and revokes remote agents. May be nil in tests; the
+	// endpoints then answer 404.
+	Fleet FleetControl
 }
 
 // route is a protected API endpoint.
@@ -234,6 +290,8 @@ type route struct {
 // ones of the auth package. They must all be described in openapi.yaml.
 func apiRoutes(d Deps) []route {
 	h := layoutHandlers{layouts: d.Layouts, log: d.Log}
+	f := fleetHandlers{fleet: d.Fleet}
+	admin := func(next http.Handler) http.Handler { return auth.RequireRole(auth.RoleAdmin, next) }
 	routes := []route{
 		{pattern: "GET /api/agents", handler: agentsHandler(d.Agents)},
 		{pattern: "GET /api/agents/{id}", handler: agentGetHandler(d.Agents)},
@@ -241,6 +299,8 @@ func apiRoutes(d Deps) []route {
 		{pattern: "GET /api/layout", handler: http.HandlerFunc(h.get)},
 		{pattern: "PUT /api/layout", handler: auth.RequireJSON(http.HandlerFunc(h.put))},
 		{pattern: "GET /api/stream", handler: streamHandler(d.Agents)},
+		{pattern: "POST /api/enrollment-tokens", handler: admin(auth.RequireJSON(http.HandlerFunc(f.createToken))), needsAuth: true},
+		{pattern: "DELETE /api/agents/{id}", handler: admin(auth.RequireJSON(http.HandlerFunc(f.revoke))), needsAuth: true},
 		{pattern: "GET /api/openapi.yaml", handler: http.HandlerFunc(serveOpenAPI)},
 	}
 	for _, r := range auth.APIRoutes(d.Auth) {

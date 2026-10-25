@@ -69,6 +69,8 @@ type session struct {
 
 	out      chan *agentv1.HubMessage
 	replaced chan struct{} // closed when a newer connection takes over the agent id
+	revoked  chan struct{} // closed when the agent is revoked
+	revokeMu sync.Once
 	done     chan struct{} // closed when the stream ends
 
 	pendingMu sync.Mutex
@@ -109,6 +111,16 @@ func (s *agentServer) Connect(stream grpc.BidiStreamingServer[agentv1.AgentMessa
 	}
 
 	id := hello.GetAgentId()
+	if who, ok := identityFrom(ctx); ok {
+		// A remote agent is who its certificate says, whatever Hello claims.
+		if id != "" && id != who.AgentID {
+			return stream.Send(&agentv1.HubMessage{Payload: &agentv1.HubMessage_Reject{Reject: &agentv1.Reject{
+				Reason:  agentv1.Reject_REASON_UNAUTHORIZED,
+				Message: "the agent id does not match the client certificate",
+			}}})
+		}
+		id = who.AgentID
+	}
 	if id == "" {
 		if id, err = newAgentID(); err != nil {
 			return status.Errorf(codes.Internal, "cannot assign an agent id: %v", err)
@@ -211,6 +223,8 @@ func (s *agentServer) serve(ctx context.Context, stream grpc.BidiStreamingServer
 			return status.Error(codes.DeadlineExceeded, "no message received from the agent")
 		case <-sess.replaced:
 			return status.Error(codes.AlreadyExists, "replaced by a newer connection of the same agent")
+		case <-sess.revoked:
+			return status.Error(codes.PermissionDenied, "this agent was revoked")
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -253,6 +267,7 @@ func (s *agentServer) register(id string, hello *agentv1.Hello) *session {
 		},
 		out:      make(chan *agentv1.HubMessage),
 		replaced: make(chan struct{}),
+		revoked:  make(chan struct{}),
 		done:     make(chan struct{}),
 		pending:  map[string]chan *agentv1.CommandResult{},
 	}
@@ -267,6 +282,16 @@ func (s *agentServer) register(id string, hello *agentv1.Hello) *session {
 	}
 	s.events.publish(agentEvent{Type: "agent.connected", Agent: toAgentJSON(sess.info, time.Now(), s.staleAfter())})
 	return sess
+}
+
+// disconnect ends the connection of a revoked agent.
+func (s *agentServer) disconnect(id string) {
+	s.mu.Lock()
+	sess := s.sessions[id]
+	s.mu.Unlock()
+	if sess != nil {
+		sess.revokeMu.Do(func() { close(sess.revoked) })
+	}
 }
 
 // staleAfter is how long an agent may stay silent before it is reported as
