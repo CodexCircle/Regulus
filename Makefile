@@ -12,6 +12,7 @@ lint:
 	cd dashboard && npm ci && npm run lint
 
 test:
+	sh scripts/test-install.sh
 	go vet ./...
 	go test -race ./...
 	cd dashboard && npm ci && npm run typecheck && npm test

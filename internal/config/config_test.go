@@ -165,3 +165,15 @@ func TestErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestPackagedConfigIsValid(t *testing.T) {
+	// The file installed by the .deb (packaging/config.yaml) must load.
+	path := filepath.Join("..", "..", "packaging", "config.yaml")
+	cfg, err := Load([]string{"--config", path}, func(string) string { return "" }, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DataDir != "/var/lib/regulus" || !cfg.BuiltinAgent || cfg.Listen != ":8080" {
+		t.Errorf("unexpected packaged defaults: %+v", cfg)
+	}
+}
