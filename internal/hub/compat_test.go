@@ -10,7 +10,7 @@ import (
 )
 
 // runAgentVersion is runAgent for an agent that reports another release.
-func runAgentVersion(t *testing.T, h *Hub, creds *agent.Credentials, version string) {
+func runAgentVersion(t *testing.T, h *Hub, creds *agent.Credentials, version string) (stop func()) {
 	t.Helper()
 	conn, err := creds.Dial(h.AgentAddr())
 	if err != nil {
@@ -26,7 +26,9 @@ func runAgentVersion(t *testing.T, h *Hub, creds *agent.Credentials, version str
 		})
 		_ = conn.Close()
 	}()
-	t.Cleanup(func() { cancel(); <-done })
+	stop = func() { cancel(); <-done }
+	t.Cleanup(stop)
+	return stop
 }
 
 // The hub (9.9.9 in these tests) takes agents of its own series and the
@@ -43,7 +45,7 @@ func TestAgentsOfOtherReleasesAreSortedByCompatibility(t *testing.T) {
 	runAgentVersion(t, h, current, "9.9.9")
 	runAgentVersion(t, h, behind, "9.8.1")
 	runAgentVersion(t, h, ahead, "9.10.0")
-	runAgentVersion(t, h, tooOld, "9.7.0")
+	stopOld := runAgentVersion(t, h, tooOld, "9.7.0")
 
 	waitFor(t, "three agents to connect and one to be refused", func() bool {
 		if len(h.Agents()) != 3 {
@@ -68,7 +70,9 @@ func TestAgentsOfOtherReleasesAreSortedByCompatibility(t *testing.T) {
 		t.Errorf("too old: %+v", old)
 	}
 
-	// The refusal is dropped once the agent comes back with a supported release.
+	// The refusal is dropped once the agent comes back with a supported release
+	// (the old process is gone by then, as it is after a real update).
+	stopOld()
 	runAgentVersion(t, h, tooOld, "9.9.0")
 	waitFor(t, "the updated agent to connect", func() bool { return len(h.Agents()) == 4 })
 	if _, refused := h.Rejection(tooOld.AgentID); refused {

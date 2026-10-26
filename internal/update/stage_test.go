@@ -1,8 +1,10 @@
 package update
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -216,6 +218,72 @@ func TestRedirectToPlainHTTPIsRefused(t *testing.T) {
 
 	s := &Stager{Dir: t.TempDir(), Client: secure.Client()}
 	if _, err := s.fetchSmall(t.Context(), secure.URL); err == nil || !strings.Contains(err.Error(), "refusing a redirect") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+type fakeVerifier struct {
+	err    error
+	tag    string
+	sums   []byte
+	bundle []byte
+}
+
+func (f *fakeVerifier) Verify(_ context.Context, tag string, checksums, bundle []byte) error {
+	f.tag, f.sums, f.bundle = tag, checksums, bundle
+	return f.err
+}
+
+func TestStageWithAVerifierRecordsTheSignature(t *testing.T) {
+	rel := newFakeRelease(t, "0.2.0")
+	s := newStager(t)
+	fv := &fakeVerifier{}
+	s.Verifier = fv
+
+	st, err := s.Stage(t.Context(), rel.release(), "linux", "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Verified != VerifiedSignature || !st.Signed {
+		t.Errorf("staged = %+v", st)
+	}
+	if fv.tag != "v0.2.0" || string(fv.sums) != string(rel.files[checksumsName]) || string(fv.bundle) != string(rel.files[bundleName]) {
+		t.Errorf("the verifier was given tag %q, checksums %q, bundle %q", fv.tag, fv.sums, fv.bundle)
+	}
+}
+
+func TestStageRefusesWhatTheVerifierRefusesBeforeDownloadingTheArchive(t *testing.T) {
+	rel := newFakeRelease(t, "0.2.0")
+	var archiveRequests int
+	inner := rel.srv.Config.Handler
+	rel.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".tar.gz") {
+			archiveRequests++
+		}
+		inner.ServeHTTP(w, r)
+	})
+	s := newStager(t)
+	s.Verifier = &fakeVerifier{err: errors.New("signature is not valid")}
+
+	_, err := s.Stage(t.Context(), rel.release(), "linux", "amd64")
+	if err == nil || !strings.Contains(err.Error(), "signature is not valid") {
+		t.Fatalf("error = %v", err)
+	}
+	if archiveRequests != 0 {
+		t.Errorf("the archive was downloaded %d times although the signature was refused", archiveRequests)
+	}
+	if _, ok := s.Current(); ok {
+		t.Error("a release with a bad signature was kept")
+	}
+}
+
+func TestStageWithAVerifierNeedsTheSignatureFile(t *testing.T) {
+	rel := newFakeRelease(t, "0.2.0")
+	delete(rel.files, bundleName)
+	s := newStager(t)
+	s.Verifier = &fakeVerifier{}
+	_, err := s.Stage(t.Context(), rel.release(), "linux", "amd64")
+	if err == nil || !strings.Contains(err.Error(), "origin cannot be verified") {
 		t.Fatalf("error = %v", err)
 	}
 }

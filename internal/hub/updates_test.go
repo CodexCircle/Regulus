@@ -36,6 +36,7 @@ func newReleaseServer(t *testing.T, version string) releaseServer {
 	files := map[string][]byte{name: []byte("archive of " + version)}
 	sum := sha256.Sum256(files[name])
 	files["checksums.txt"] = []byte(hex.EncodeToString(sum[:]) + "  " + name + "\n")
+	files["checksums.txt.sigstore.json"] = []byte("{}")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, ok := files[strings.TrimPrefix(r.URL.Path, "/")]
 		if !ok {
@@ -52,6 +53,11 @@ func newReleaseServer(t *testing.T, version string) releaseServer {
 	}
 	return releaseServer{Source: staticSource{rel}, archive: name}
 }
+
+// acceptAll stands in for the Sigstore check, which has its own tests.
+type acceptAll struct{}
+
+func (acceptAll) Verify(context.Context, string, []byte, []byte) error { return nil }
 
 type staticSource []update.Release
 
@@ -71,7 +77,7 @@ func newUpdateHub(t *testing.T, version string, src update.Source, mutate ...fun
 	for _, m := range mutate {
 		m(&cfg)
 	}
-	h, err := New(t.Context(), cfg, quiet(), fstest.MapFS{}, WithVersion(version), WithUpdateSource(src))
+	h, err := New(t.Context(), cfg, quiet(), fstest.MapFS{}, WithVersion(version), WithUpdateSource(src), WithUpdateVerifier(acceptAll{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +131,7 @@ func TestUpdatesAPIFollowsTheFlow(t *testing.T) {
 		return st.Staged != nil && !st.Downloading
 	})
 	st = decodeStatus(t, admin.do("GET", "/api/updates", nil))
-	if st.Staged.Version != "0.2.0" || st.Staged.Verified != update.VerifiedChecksum || st.DownloadError != "" {
+	if st.Staged.Version != "0.2.0" || st.Staged.Verified != update.VerifiedSignature || st.DownloadError != "" {
 		t.Errorf("status after the download = %+v", st)
 	}
 
@@ -224,5 +230,32 @@ func TestUpdateErrorsMapToStatusCodes(t *testing.T) {
 		if tc.want == http.StatusInternalServerError && strings.Contains(rec.Body.String(), "disk") {
 			t.Errorf("an internal error leaked: %s", rec.Body)
 		}
+	}
+}
+
+// Without a test double the hub checks the Sigstore signature, so a release
+// whose signature file is not a valid bundle is never kept.
+func TestHubRefusesAReleaseWithoutAValidSignature(t *testing.T) {
+	rs := newReleaseServer(t, "0.2.0")
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	cfg.BuiltinAgent = false
+	h, err := New(t.Context(), cfg, quiet(), fstest.MapFS{}, WithVersion("0.1.0"), WithUpdateSource(rs.Source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.Close() })
+	admin := newAPI(t, h, auth.RoleAdmin)
+
+	admin.do("POST", "/api/updates/check", struct{}{})
+	if rec := admin.do("POST", "/api/updates/download", struct{}{}); rec.Code != http.StatusAccepted {
+		t.Fatalf("download: %d %s", rec.Code, rec.Body)
+	}
+	waitFor(t, "the download to fail", func() bool {
+		return decodeStatus(t, admin.do("GET", "/api/updates", nil)).DownloadError != ""
+	})
+	st := decodeStatus(t, admin.do("GET", "/api/updates", nil))
+	if st.Staged != nil || !strings.Contains(st.DownloadError, "not a Sigstore bundle") {
+		t.Errorf("status = %+v", st)
 	}
 }

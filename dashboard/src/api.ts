@@ -351,16 +351,18 @@ export interface UpdateInfo {
   published_at: string;
 }
 
-// A release downloaded into the hub's cache. verified "checksum" means it
-// matches the SHA-256 of the release's checksums.txt: that catches a corrupt
-// download, it does not prove who published it.
+// A release downloaded into the hub's cache. verified "signature": the
+// checksum list is signed by this project's release workflow and the archive
+// matches it. "checksum": it only matches the SHA-256 of the release's
+// checksums.txt, which catches a corrupt download but does not prove who
+// published it.
 export interface UpdateStaged {
   version: string;
   tag: string;
   archive: string;
   sha256: string;
   size: number;
-  verified: "checksum";
+  verified: "checksum" | "signature";
   staged_at: string;
   signed: boolean;
 }
