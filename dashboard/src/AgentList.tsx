@@ -72,7 +72,17 @@ const STATUS_LABEL: Record<Agent["status"], string> = {
   stale: "stale",
   offline: "offline",
   revoked: "revoked",
+  incompatible: "incompatible",
 };
+
+// versionNote says, in a few words, what to do about an agent whose release
+// differs from the hub's, or "" when there is nothing to do.
+export function versionNote(a: Agent): string {
+  if (a.status === "incompatible") return "too old for this hub: update it";
+  if (a.compatibility === "behind") return "behind the hub";
+  if (a.compatibility === "ahead") return "ahead of the hub: update the hub";
+  return "";
+}
 
 export const statusLabel = (a: Agent) => STATUS_LABEL[a.status];
 
@@ -103,7 +113,10 @@ function AgentTable({ agents }: { agents: Agent[] }) {
               {a.name && a.hostname && a.name !== a.hostname ? <span className="muted"> {a.hostname}</span> : null}
             </td>
             <td>{[a.os_version ?? a.os, a.arch].filter(Boolean).join(" ") || "-"}</td>
-            <td>{a.version || "-"}</td>
+            <td>
+              {a.version || "-"}
+              {versionNote(a) && <span className="muted"> {versionNote(a)}</span>}
+            </td>
             <td>
               <span className={`status ${a.status}`}>{statusLabel(a)}</span>
             </td>

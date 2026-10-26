@@ -56,7 +56,7 @@ func runAgent(t *testing.T, h *Hub, creds *agent.Credentials) (stop func(), resu
 	res := make(chan error, 1)
 	go func() {
 		res <- agent.Run(ctx, conn, agent.Options{
-			Version: "1.2.3", ID: creds.AgentID, Log: quiet(),
+			Version: "9.9.9", ID: creds.AgentID, Log: quiet(),
 			MinBackoff: 20 * time.Millisecond, MaxBackoff: 50 * time.Millisecond,
 		})
 		_ = conn.Close()
@@ -71,7 +71,7 @@ func enrollNew(t *testing.T, h *Hub, name string) *agent.Credentials {
 	if err != nil {
 		t.Fatal(err)
 	}
-	creds, err := agent.Enroll(context.Background(), h.AgentAddr(), grant.CAFingerprint, grant.Token, "1.2.3", t.TempDir())
+	creds, err := agent.Enroll(context.Background(), h.AgentAddr(), grant.CAFingerprint, grant.Token, "9.9.9", t.TempDir())
 	if err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestServerListShowsOfflineAndRevokedAgents(t *testing.T) {
 		off = list[0]
 		return off.LastSeenAt != nil
 	})
-	if off.Status != statusOffline || off.Hostname == "" || off.Version != "1.2.3" || off.ConnectedAt != nil {
+	if off.Status != statusOffline || off.Hostname == "" || off.Version != "9.9.9" || off.ConnectedAt != nil {
 		t.Errorf("offline: %+v", off)
 	}
 	rec := admin.do("GET", "/api/agents/"+creds.AgentID, nil)

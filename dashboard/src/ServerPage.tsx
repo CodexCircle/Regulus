@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { displayName, lastContact, statusLabel } from "./AgentList";
+import { displayName, lastContact, statusLabel, versionNote } from "./AgentList";
 import { ApiError, can, fetchAgent, renameAgent, revokeAgent, type Agent } from "./api";
 import { serverIdFromHash } from "./route";
 import { useSession } from "./session";
@@ -81,7 +81,10 @@ function Details({ agent, canManage, onChanged }: { agent: Agent; canManage: boo
         </div>
         <div>
           <dt>Agent version</dt>
-          <dd>{agent.version || "-"}</dd>
+          <dd>
+            {agent.version || "-"}
+            {versionNote(agent) && <span className="muted"> ({versionNote(agent)})</span>}
+          </dd>
         </div>
         <div>
           <dt>Last contact</dt>
@@ -111,7 +114,9 @@ function Details({ agent, canManage, onChanged }: { agent: Agent; canManage: boo
         <p role="status" className="note warn">
           {agent.status === "revoked"
             ? "This server was revoked and cannot connect any more. To use it again, remove its agent data directory and add it with a new token."
-            : "This server is offline. Its metrics appear here again when its agent reconnects."}
+            : agent.status === "incompatible"
+              ? `The hub refuses this server's agent: ${agent.incompatible_reason ?? "its version does not work with this hub"}. The agent keeps trying and connects once it is updated.`
+              : "This server is offline. Its metrics appear here again when its agent reconnects."}
         </p>
       )}
     </>
