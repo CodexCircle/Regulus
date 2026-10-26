@@ -5,6 +5,7 @@ import { ServersPage } from "./ServersPage";
 import { useRoute, type Route } from "./route";
 import { can } from "./api";
 import type { Session } from "./session";
+import { UpdatesPage } from "./UpdatesPage";
 import { UsersPage } from "./UsersPage";
 
 // A page with permissions is shown to anyone who holds one of them.
@@ -12,6 +13,7 @@ const nav: { route: Route; label: string; permissions?: string[] }[] = [
   { route: "/", label: "Dashboard" },
   { route: "/servers", label: "Servers" },
   { route: "/users", label: "Users", permissions: ["users.manage", "roles.manage", "audit.read"] },
+  { route: "/updates", label: "Updates", permissions: ["core.update"] },
 ];
 
 function Page({ route }: { route: Route }) {
@@ -22,6 +24,8 @@ function Page({ route }: { route: Route }) {
       return <ServerPage />;
     case "/users":
       return <UsersPage />;
+    case "/updates":
+      return <UpdatesPage />;
     case "/account":
       return <AccountPage />;
     default:

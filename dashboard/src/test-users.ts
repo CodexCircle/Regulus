@@ -8,6 +8,7 @@ export const CATALOGUE: PermissionInfo[] = [
   { id: "users.manage", description: "Manage accounts" },
   { id: "roles.manage", description: "Manage roles" },
   { id: "audit.read", description: "Read the audit log" },
+  { id: "core.update", description: "Check for, download and choose how to update Regulus" },
 ];
 
 export const ADMIN_PERMISSIONS = CATALOGUE.map((p) => p.id);

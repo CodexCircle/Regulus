@@ -332,3 +332,58 @@ export const fetchSecurity = (signal?: AbortSignal) => request<SecuritySettings>
 
 export const saveSecurity = (policy: TwoFactorPolicy) =>
   request<SecuritySettings>("PUT", "/api/settings/security", { two_factor_policy: policy });
+
+// Updates of Regulus itself (see internal/update and GET /api/updates).
+export type UpdateMode = "manual" | "download";
+export type UpdateChannel = "stable" | "beta";
+
+export interface UpdateInfo {
+  version: string;
+  tag: string;
+  prerelease: boolean;
+  url: string;
+  notes?: string;
+  published_at: string;
+}
+
+// A release downloaded into the hub's cache. verified "checksum" means it
+// matches the SHA-256 of the release's checksums.txt: that catches a corrupt
+// download, it does not prove who published it.
+export interface UpdateStaged {
+  version: string;
+  tag: string;
+  archive: string;
+  sha256: string;
+  size: number;
+  verified: "checksum";
+  staged_at: string;
+  signed: boolean;
+}
+
+export interface UpdateStatus {
+  current_version: string;
+  // false for a development build: no update is ever offered to it.
+  release_build: boolean;
+  // false when updates.check is off: the hub never asks the release server.
+  checks_enabled: boolean;
+  mode: UpdateMode;
+  channel: UpdateChannel;
+  platform: string;
+  checked_at: string | null;
+  check_error?: string;
+  checking: boolean;
+  latest: UpdateInfo | null;
+  update_available: boolean;
+  staged: UpdateStaged | null;
+  downloading: boolean;
+  download_error?: string;
+}
+
+export const fetchUpdates = (signal?: AbortSignal) => request<UpdateStatus>("GET", "/api/updates", undefined, signal);
+
+export const saveUpdateSettings = (mode: UpdateMode, channel: UpdateChannel) =>
+  request<UpdateStatus>("PUT", "/api/updates/settings", { mode, channel });
+
+export const checkForUpdates = () => request<UpdateStatus>("POST", "/api/updates/check", {});
+
+export const downloadUpdate = () => request<UpdateStatus>("POST", "/api/updates/download", {});

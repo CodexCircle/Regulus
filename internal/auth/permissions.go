@@ -22,6 +22,7 @@ const (
 	PermUsersManage   = "users.manage"
 	PermRolesManage   = "roles.manage"
 	PermAuditRead     = "audit.read"
+	PermCoreUpdate    = "core.update"
 )
 
 var catalogue = []Permission{
@@ -31,6 +32,7 @@ var catalogue = []Permission{
 	{PermUsersManage, "Manage accounts: create, disable, delete, reset passwords and two-factor, and the two-factor policy"},
 	{PermRolesManage, "Create, change and delete roles"},
 	{PermAuditRead, "Read the audit log"},
+	{PermCoreUpdate, "See the updates of Regulus, check for them, download them and choose the update mode and channel"},
 }
 
 // Permissions returns every permission the hub knows, in a stable order.

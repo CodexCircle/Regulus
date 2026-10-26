@@ -18,6 +18,7 @@ tags:
   - name: agents
   - name: dashboard
   - name: accounts
+  - name: updates
 paths:
   /healthz:
     get:
@@ -258,6 +259,118 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "409":
           description: Remote agents are off on this hub.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/updates:
+    get:
+      tags: [updates]
+      summary: What the hub knows about updates of Regulus (needs core.update)
+      description: |
+        The version of the hub, the update mode and channel, the newest release on
+        that channel at the last check, and the release waiting in the download
+        cache, if any. `update_available` is never true for a build that is not a
+        release (`release_build` false).
+      responses:
+        "200":
+          description: The state of the updates.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/updates/settings:
+    put:
+      tags: [updates]
+      summary: Choose the update mode and channel (needs core.update)
+      description: |
+        `manual` only tells that a new version exists; `download` also downloads
+        and checks it. The `automatic` mode is refused for now: the hub cannot
+        apply an update yet. Changing the channel starts a new check. The change
+        is written to the audit log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [mode, channel]
+              properties:
+                mode: { type: string, enum: [manual, download] }
+                channel: { type: string, enum: [stable, beta] }
+      responses:
+        "200":
+          description: The state of the updates after the change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/updates/check:
+    post:
+      tags: [updates]
+      summary: Ask the release server for new releases now (needs core.update)
+      description: |
+        The hub also checks by itself every few hours. This answers 429 when
+        the release server was asked in the last 30 seconds, 409 when checks
+        are turned off (`updates.check`), and 502 when the release server
+        cannot be reached or refuses (the message says why). The request needs
+        a JSON body, which must be empty (`{}`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        "200":
+          description: The state of the updates after the check.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Update checks are turned off in the configuration.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "502":
+          description: The release server could not be reached or refused the request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/updates/download:
+    post:
+      tags: [updates]
+      summary: Download and check the newest release (needs core.update)
+      description: |
+        Starts the download in the background and answers at once; poll
+        `GET /api/updates` (`downloading`, then `staged` or `download_error`).
+        The archive is checked against the SHA-256 in the release's
+        `checksums.txt` before it is kept (`staged.verified` is `checksum`).
+        Nothing is installed. Answers 409 when there is no newer release, a
+        download is already running, checks are off, or this build is not a
+        release. The request needs a JSON body, which must be empty (`{}`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        "202":
+          description: The download started.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Nothing to download, or a download is running, or checks are off.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -1035,6 +1148,61 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    UpdateInfo:
+      type: object
+      required: [version, tag, prerelease, url, published_at]
+      properties:
+        version: { type: string, example: "0.2.0" }
+        tag: { type: string, example: "v0.2.0" }
+        prerelease: { type: boolean }
+        url: { type: string, description: Page of the release. }
+        notes: { type: string, description: Release notes as plain text (cut at 8 KiB). }
+        published_at: { type: string, format: date-time }
+    UpdateStaged:
+      type: object
+      description: A release downloaded into the hub's cache.
+      required: [version, tag, archive, sha256, size, verified, staged_at, signed]
+      properties:
+        version: { type: string }
+        tag: { type: string }
+        archive: { type: string, example: regulus_0.2.0_linux_amd64.tar.gz }
+        sha256: { type: string }
+        size: { type: integer, format: int64 }
+        verified:
+          type: string
+          enum: [checksum]
+          description: |
+            How far the download was checked. `checksum`: it matches the SHA-256 in
+            the release's checksums.txt, which catches a corrupt download but does
+            not prove who published it.
+        staged_at: { type: string, format: date-time }
+        signed:
+          type: boolean
+          description: The signature bundle of checksums.txt was published and kept; it is not verified yet.
+    UpdateStatus:
+      type: object
+      required: [current_version, release_build, checks_enabled, mode, channel, platform, checked_at, checking, latest, update_available, staged, downloading]
+      properties:
+        current_version: { type: string }
+        release_build: { type: boolean }
+        checks_enabled: { type: boolean }
+        mode: { type: string, enum: [manual, download] }
+        channel: { type: string, enum: [stable, beta] }
+        platform: { type: string, example: linux/amd64 }
+        checked_at: { type: [string, "null"], format: date-time }
+        check_error: { type: string }
+        checking: { type: boolean }
+        latest:
+          oneOf:
+            - { $ref: "#/components/schemas/UpdateInfo" }
+            - { type: "null" }
+        update_available: { type: boolean }
+        staged:
+          oneOf:
+            - { $ref: "#/components/schemas/UpdateStaged" }
+            - { type: "null" }
+        downloading: { type: boolean }
+        download_error: { type: string }
     Error:
       type: object
       required: [error]

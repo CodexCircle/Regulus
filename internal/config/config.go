@@ -35,6 +35,15 @@ type Config struct {
 	MetricsInterval time.Duration `yaml:"metrics_interval"`
 	Log             Log           `yaml:"log"`
 	Console         Console       `yaml:"console"`
+	Updates         Updates       `yaml:"updates"`
+}
+
+// Updates configures how the hub looks for new releases. What happens when one
+// is found (the mode and the channel) is chosen in the dashboard.
+type Updates struct {
+	// Check lets the hub ask GitHub for new releases every few hours. Turn it
+	// off on a hub that must not contact the internet.
+	Check bool `yaml:"check"`
 }
 
 // Console configures the interactive terminal console (`regulus`).
@@ -64,6 +73,7 @@ func Default() Config {
 		MetricsInterval: 10 * time.Second,
 		Log:             Log{Level: "info", Format: "text"},
 		Console:         Console{TUI: true},
+		Updates:         Updates{Check: true},
 	}
 }
 
@@ -147,6 +157,13 @@ func LoadWith(name string, args []string, getenv func(string) string, output io.
 			return Config{}, fmt.Errorf("invalid configuration: REGULUS_METRICS_INTERVAL %q is not a duration (for example 10s)", v)
 		}
 		cfg.MetricsInterval = d
+	}
+	if v := getenv("REGULUS_UPDATES_CHECK"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid configuration: REGULUS_UPDATES_CHECK %q is not a boolean", v)
+		}
+		cfg.Updates.Check = b
 	}
 	setIfNotEmpty(&cfg.Log.Level, getenv("REGULUS_LOG_LEVEL"))
 	setIfNotEmpty(&cfg.Log.Format, getenv("REGULUS_LOG_FORMAT"))

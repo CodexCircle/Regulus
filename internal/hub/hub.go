@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -26,7 +27,11 @@ import (
 	"github.com/CodexCircle/Regulus/internal/inproc"
 	"github.com/CodexCircle/Regulus/internal/pki"
 	"github.com/CodexCircle/Regulus/internal/storage"
+	"github.com/CodexCircle/Regulus/internal/update"
 )
+
+// ReleaseRepo is the repository the hub reads releases from.
+const ReleaseRepo = "CodexCircle/Regulus"
 
 const shutdownTimeout = 10 * time.Second
 
@@ -42,7 +47,9 @@ type Hub struct {
 	startedAt time.Time
 	auth      *auth.Service
 	fleet     *fleet.Service
-	agentAddr atomic.Value // string: where the agent listener is bound, once it is
+	updates   *update.Manager
+	updateSrc update.Source // nil: the GitHub releases of ReleaseRepo
+	agentAddr atomic.Value  // string: where the agent listener is bound, once it is
 	agents    *agentServer
 	transport *inproc.Transport // lets the built-in agent reach the hub without a network port
 }
@@ -54,6 +61,12 @@ type Option func(*Hub)
 // agent.
 func WithVersion(version string) Option {
 	return func(h *Hub) { h.version = version }
+}
+
+// WithUpdateSource replaces the place the hub looks for new releases. Mostly
+// useful in tests.
+func WithUpdateSource(src update.Source) Option {
+	return func(h *Hub) { h.updateSrc = src }
 }
 
 // WithAgentIntervals sets the heartbeat and metrics intervals the hub asks
@@ -114,8 +127,26 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, ui fs.FS, opt
 	for _, opt := range opts {
 		opt(h)
 	}
+	src := h.updateSrc
+	if src == nil {
+		src = &update.GitHubSource{Repo: ReleaseRepo, UserAgent: "regulus-hub/" + h.version}
+	}
+	h.updates = update.New(update.Options{
+		DB:      db,
+		Log:     log.With("component", "updates"),
+		Source:  src,
+		Stager:  &update.Stager{Dir: filepath.Join(cfg.DataDir, "updates")},
+		Audit:   authn,
+		Version: h.version,
+		GOOS:    runtime.GOOS,
+		GOARCH:  runtime.GOARCH,
+		Enabled: cfg.Updates.Check,
+	})
 	return h, nil
 }
+
+// Updates returns the manager that looks for new releases.
+func (h *Hub) Updates() *update.Manager { return h.updates }
 
 // Agents returns a snapshot of the connected agents, ordered by id.
 func (h *Hub) Agents() []AgentInfo {
@@ -143,13 +174,14 @@ func (h *Hub) AgentConn() (*grpc.ClientConn, error) {
 
 // Close releases the hub resources.
 func (h *Hub) Close() error {
+	h.updates.Close()
 	return h.db.Close()
 }
 
 // Serve serves HTTP on ln until ctx is cancelled, then shuts down gracefully.
 func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 	srv := &http.Server{
-		Handler:           NewHandler(Deps{UI: h.ui, Agents: h, Layouts: h, Log: h.log, Auth: h.auth, Fleet: h}),
+		Handler:           NewHandler(Deps{UI: h.ui, Agents: h, Layouts: h, Log: h.log, Auth: h.auth, Fleet: h, Updates: h.updates}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -177,6 +209,13 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 	}
 
 	defer h.serveLocal(ln.Addr().String())()
+
+	updatesDone := make(chan struct{})
+	go func() {
+		defer close(updatesDone)
+		h.updates.Run(ctx)
+	}()
+	defer func() { <-updatesDone }()
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
@@ -290,6 +329,9 @@ type Deps struct {
 	// Fleet enrolls and revokes remote agents. May be nil in tests; the
 	// endpoints then answer 404.
 	Fleet FleetControl
+	// Updates reports and steers the updates of the hub. May be nil in tests;
+	// the endpoints then answer 404.
+	Updates UpdateControl
 }
 
 // route is a protected API endpoint.
@@ -306,6 +348,7 @@ type route struct {
 func apiRoutes(d Deps) []route {
 	h := layoutHandlers{layouts: d.Layouts, log: d.Log}
 	f := fleetHandlers{fleet: d.Fleet}
+	u := updateHandlers{updates: d.Updates}
 	// Without authentication (tests that exercise the handlers alone) there is
 	// no user to check.
 	need := func(permission string, next http.Handler) http.Handler {
@@ -324,6 +367,10 @@ func apiRoutes(d Deps) []route {
 		{pattern: "POST /api/enrollment-tokens", handler: need(auth.PermServersManage, auth.RequireJSON(http.HandlerFunc(f.createToken))), needsAuth: true},
 		{pattern: "PATCH /api/agents/{id}", handler: need(auth.PermServersManage, auth.RequireJSON(http.HandlerFunc(f.rename))), needsAuth: true},
 		{pattern: "DELETE /api/agents/{id}", handler: need(auth.PermServersManage, auth.RequireJSON(http.HandlerFunc(f.revoke))), needsAuth: true},
+		{pattern: "GET /api/updates", handler: need(auth.PermCoreUpdate, http.HandlerFunc(u.status)), needsAuth: true},
+		{pattern: "PUT /api/updates/settings", handler: need(auth.PermCoreUpdate, auth.RequireJSON(http.HandlerFunc(u.settings))), needsAuth: true},
+		{pattern: "POST /api/updates/check", handler: need(auth.PermCoreUpdate, auth.RequireJSON(http.HandlerFunc(u.check))), needsAuth: true},
+		{pattern: "POST /api/updates/download", handler: need(auth.PermCoreUpdate, auth.RequireJSON(http.HandlerFunc(u.download))), needsAuth: true},
 		{pattern: "GET /api/openapi.yaml", handler: http.HandlerFunc(serveOpenAPI)},
 	}
 	for _, r := range auth.APIRoutes(d.Auth) {

@@ -10,6 +10,7 @@ Regulus v0.3.0  Hub ● running
    metrics_interval   10s                        file
    log.level          info                       file
    log.format         text                       file
+   updates.check      true                       default
    console.tui        true                       default
 
  listen  default: :8080
@@ -19,7 +20,6 @@ Regulus v0.3.0  Hub ● running
  Editing listen
  > 9090
  ✓ will be saved as :9090
-
 
 
 
