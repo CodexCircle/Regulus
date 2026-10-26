@@ -46,6 +46,7 @@ func Settings() []Setting {
 		{Key: "metrics_interval", Env: "REGULUS_METRICS_INTERVAL", Description: "How often agents report metrics, such as 10s (at least 1s)", Restart: true},
 		{Key: "log.level", Env: "REGULUS_LOG_LEVEL", Description: "How much the hub logs", Choices: []string{"debug", "info", "warn", "error"}, Restart: true},
 		{Key: "log.format", Env: "REGULUS_LOG_FORMAT", Description: "Log format", Choices: []string{"text", "json"}, Restart: true},
+		{Key: "updates.check", Env: "REGULUS_UPDATES_CHECK", Description: "Look for new releases on GitHub every few hours; false keeps the hub from contacting any server for updates", Choices: []string{"true", "false"}, Restart: true},
 		{Key: "console.tui", Description: "Open the full-screen console when running `regulus` in a terminal", Choices: []string{"true", "false"}},
 	}
 }
@@ -86,6 +87,8 @@ func (c Config) Get(key string) (string, bool) {
 		return c.Log.Level, true
 	case "log.format":
 		return c.Log.Format, true
+	case "updates.check":
+		return strconv.FormatBool(c.Updates.Check), true
 	case "console.tui":
 		return strconv.FormatBool(c.Console.TUI), true
 	}
@@ -113,7 +116,7 @@ func Normalize(key, raw string) (string, error) {
 			return "", errors.New("data_dir must not be empty")
 		}
 		return v, nil
-	case "builtin_agent", "console.tui":
+	case "builtin_agent", "console.tui", "updates.check":
 		b, err := strconv.ParseBool(v)
 		if err != nil {
 			return "", errors.New("use true or false")

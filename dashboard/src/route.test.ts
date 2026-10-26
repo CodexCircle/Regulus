@@ -8,6 +8,7 @@ describe("routeFromHash", () => {
     ["#/", "/"],
     ["#/servers", "/servers"],
     ["#/users", "/users"],
+    ["#/updates", "/updates"],
     ["#/account", "/account"],
     ["#/servers/agent-1", "/server"],
     ["#/servers/", "/"],

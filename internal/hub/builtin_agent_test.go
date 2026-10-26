@@ -17,6 +17,7 @@ func startHubWithConfig(t *testing.T, cfg config.Config) *Hub {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg.DataDir = t.TempDir()
+	cfg.Updates.Check = false // tests never reach for the network
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h, err := New(ctx, cfg, log, fstest.MapFS{},
 		WithVersion("9.9.9"), WithAgentIntervals(50*time.Millisecond, 50*time.Millisecond))

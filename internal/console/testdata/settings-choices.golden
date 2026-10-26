@@ -10,6 +10,7 @@ Regulus v0.3.0  Hub ● running
    metrics_interval   10s                        file
  ▸ log.level          info                       file
    log.format         text                       file
+   updates.check      true                       default
    console.tui        true                       default
 
  log.level  default: info
@@ -20,7 +21,6 @@ Regulus v0.3.0  Hub ● running
  Editing log.level
  > info
  ✓ will be saved as info
-
 
 
 
