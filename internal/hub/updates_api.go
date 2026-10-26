@@ -109,3 +109,59 @@ func (u updateHandlers) reply(w http.ResponseWriter, ok int, st update.Status, e
 		writeJSONError(w, http.StatusInternalServerError, "internal error")
 	}
 }
+
+type rolloutHandlers struct {
+	rollout RolloutControl
+}
+
+func (r rolloutHandlers) reply(w http.ResponseWriter, ok int, st RolloutStatus, err error) {
+	switch {
+	case err == nil:
+		writeJSONBody(w, ok, st)
+	case errors.Is(err, ErrRolloutRunning), errors.Is(err, ErrNothingToRoll), errors.Is(err, ErrNotRelease), errors.Is(err, update.ErrChecksOff):
+		writeJSONError(w, http.StatusConflict, err.Error())
+	case update.IsUpstream(err):
+		writeJSONError(w, http.StatusBadGateway, err.Error())
+	case errors.Is(err, errBadRollout):
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+	default:
+		writeJSONError(w, http.StatusInternalServerError, "internal error")
+	}
+}
+
+func (r rolloutHandlers) status(w http.ResponseWriter, req *http.Request) {
+	if r.rollout == nil {
+		http.NotFound(w, req)
+		return
+	}
+	st, err := r.rollout.RolloutStatus(req.Context())
+	r.reply(w, http.StatusOK, st, err)
+}
+
+func (r rolloutHandlers) start(w http.ResponseWriter, req *http.Request) {
+	if r.rollout == nil {
+		http.NotFound(w, req)
+		return
+	}
+	var opts RolloutOptions
+	if !decodeBody(w, req, &opts) {
+		return
+	}
+	by, _ := auth.UserFrom(req.Context())
+	st, err := r.rollout.StartRollout(req.Context(), by.Username, opts)
+	r.reply(w, http.StatusAccepted, st, err)
+}
+
+func (r rolloutHandlers) stop(w http.ResponseWriter, req *http.Request) {
+	if r.rollout == nil {
+		http.NotFound(w, req)
+		return
+	}
+	var body struct{}
+	if !decodeBody(w, req, &body) {
+		return
+	}
+	by, _ := auth.UserFrom(req.Context())
+	st, err := r.rollout.StopRollout(req.Context(), by.Username)
+	r.reply(w, http.StatusOK, st, err)
+}

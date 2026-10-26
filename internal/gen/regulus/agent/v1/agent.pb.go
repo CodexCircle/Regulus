@@ -33,6 +33,62 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Files of a release that FetchUpdate serves.
+type UpdateFile int32
+
+const (
+	UpdateFile_UPDATE_FILE_UNSPECIFIED UpdateFile = 0
+	// The archive of the caller's platform.
+	UpdateFile_UPDATE_FILE_ARCHIVE UpdateFile = 1
+	// checksums.txt, which the release workflow signed.
+	UpdateFile_UPDATE_FILE_CHECKSUMS UpdateFile = 2
+	// checksums.txt.sigstore.json, the Sigstore bundle of that signature.
+	UpdateFile_UPDATE_FILE_BUNDLE UpdateFile = 3
+)
+
+// Enum value maps for UpdateFile.
+var (
+	UpdateFile_name = map[int32]string{
+		0: "UPDATE_FILE_UNSPECIFIED",
+		1: "UPDATE_FILE_ARCHIVE",
+		2: "UPDATE_FILE_CHECKSUMS",
+		3: "UPDATE_FILE_BUNDLE",
+	}
+	UpdateFile_value = map[string]int32{
+		"UPDATE_FILE_UNSPECIFIED": 0,
+		"UPDATE_FILE_ARCHIVE":     1,
+		"UPDATE_FILE_CHECKSUMS":   2,
+		"UPDATE_FILE_BUNDLE":      3,
+	}
+)
+
+func (x UpdateFile) Enum() *UpdateFile {
+	p := new(UpdateFile)
+	*p = x
+	return p
+}
+
+func (x UpdateFile) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (UpdateFile) Descriptor() protoreflect.EnumDescriptor {
+	return file_regulus_agent_v1_agent_proto_enumTypes[0].Descriptor()
+}
+
+func (UpdateFile) Type() protoreflect.EnumType {
+	return &file_regulus_agent_v1_agent_proto_enumTypes[0]
+}
+
+func (x UpdateFile) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use UpdateFile.Descriptor instead.
+func (UpdateFile) EnumDescriptor() ([]byte, []int) {
+	return file_regulus_agent_v1_agent_proto_rawDescGZIP(), []int{0}
+}
+
 type Reject_Reason int32
 
 const (
@@ -72,11 +128,11 @@ func (x Reject_Reason) String() string {
 }
 
 func (Reject_Reason) Descriptor() protoreflect.EnumDescriptor {
-	return file_regulus_agent_v1_agent_proto_enumTypes[0].Descriptor()
+	return file_regulus_agent_v1_agent_proto_enumTypes[1].Descriptor()
 }
 
 func (Reject_Reason) Type() protoreflect.EnumType {
-	return &file_regulus_agent_v1_agent_proto_enumTypes[0]
+	return &file_regulus_agent_v1_agent_proto_enumTypes[1]
 }
 
 func (x Reject_Reason) Number() protoreflect.EnumNumber {
@@ -1045,6 +1101,7 @@ type Command struct {
 	//
 	//	*Command_Ping
 	//	*Command_SetIntervals
+	//	*Command_ApplyUpdate
 	Kind          isCommand_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1112,6 +1169,15 @@ func (x *Command) GetSetIntervals() *SetIntervals {
 	return nil
 }
 
+func (x *Command) GetApplyUpdate() *ApplyUpdate {
+	if x != nil {
+		if x, ok := x.Kind.(*Command_ApplyUpdate); ok {
+			return x.ApplyUpdate
+		}
+	}
+	return nil
+}
+
 type isCommand_Kind interface {
 	isCommand_Kind()
 }
@@ -1124,9 +1190,15 @@ type Command_SetIntervals struct {
 	SetIntervals *SetIntervals `protobuf:"bytes,3,opt,name=set_intervals,json=setIntervals,proto3,oneof"`
 }
 
+type Command_ApplyUpdate struct {
+	ApplyUpdate *ApplyUpdate `protobuf:"bytes,4,opt,name=apply_update,json=applyUpdate,proto3,oneof"`
+}
+
 func (*Command_Ping) isCommand_Kind() {}
 
 func (*Command_SetIntervals) isCommand_Kind() {}
+
+func (*Command_ApplyUpdate) isCommand_Kind() {}
 
 // Ping asks the agent to answer with a successful CommandResult.
 type Ping struct {
@@ -1281,6 +1353,179 @@ func (x *CommandResult) GetError() string {
 	return ""
 }
 
+// ApplyUpdate offers the agent a new release. The agent downloads the files
+// with FetchUpdate, checks them, and asks the helper of its server (which runs
+// as root) to install them; the result is sent once the files are handed over,
+// and the restarted agent proves the update by connecting with the new version.
+// An agent that predates this command answers "unsupported command".
+type ApplyUpdate struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Version to install, for example "0.2.0"; the tag is "v" + version.
+	Version string `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"`
+	// Name of the archive for the agent's platform.
+	Archive string `protobuf:"bytes,2,opt,name=archive,proto3" json:"archive,omitempty"`
+	// SHA-256 of the archive, lower-case hex, as listed in the signed
+	// checksums.txt.
+	Sha256        string `protobuf:"bytes,3,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	Size          uint64 `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApplyUpdate) Reset() {
+	*x = ApplyUpdate{}
+	mi := &file_regulus_agent_v1_agent_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApplyUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApplyUpdate) ProtoMessage() {}
+
+func (x *ApplyUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_regulus_agent_v1_agent_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApplyUpdate.ProtoReflect.Descriptor instead.
+func (*ApplyUpdate) Descriptor() ([]byte, []int) {
+	return file_regulus_agent_v1_agent_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ApplyUpdate) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *ApplyUpdate) GetArchive() string {
+	if x != nil {
+		return x.Archive
+	}
+	return ""
+}
+
+func (x *ApplyUpdate) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
+func (x *ApplyUpdate) GetSize() uint64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+type FetchUpdateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Version       string                 `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"`
+	File          UpdateFile             `protobuf:"varint,2,opt,name=file,proto3,enum=regulus.agent.v1.UpdateFile" json:"file,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FetchUpdateRequest) Reset() {
+	*x = FetchUpdateRequest{}
+	mi := &file_regulus_agent_v1_agent_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FetchUpdateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FetchUpdateRequest) ProtoMessage() {}
+
+func (x *FetchUpdateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_regulus_agent_v1_agent_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FetchUpdateRequest.ProtoReflect.Descriptor instead.
+func (*FetchUpdateRequest) Descriptor() ([]byte, []int) {
+	return file_regulus_agent_v1_agent_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *FetchUpdateRequest) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *FetchUpdateRequest) GetFile() UpdateFile {
+	if x != nil {
+		return x.File
+	}
+	return UpdateFile_UPDATE_FILE_UNSPECIFIED
+}
+
+type FileChunk struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FileChunk) Reset() {
+	*x = FileChunk{}
+	mi := &file_regulus_agent_v1_agent_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileChunk) ProtoMessage() {}
+
+func (x *FileChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_regulus_agent_v1_agent_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileChunk.ProtoReflect.Descriptor instead.
+func (*FileChunk) Descriptor() ([]byte, []int) {
+	return file_regulus_agent_v1_agent_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *FileChunk) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
 var File_regulus_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_regulus_agent_v1_agent_proto_rawDesc = "" +
@@ -1367,11 +1612,12 @@ const file_regulus_agent_v1_agent_proto_rawDesc = "" +
 	"\x0eNetworkMetrics\x12\x1c\n" +
 	"\tinterface\x18\x01 \x01(\tR\tinterface\x12\x19\n" +
 	"\brx_bytes\x18\x02 \x01(\x04R\arxBytes\x12\x19\n" +
-	"\btx_bytes\x18\x03 \x01(\x04R\atxBytes\"\x96\x01\n" +
+	"\btx_bytes\x18\x03 \x01(\x04R\atxBytes\"\xda\x01\n" +
 	"\aCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12,\n" +
 	"\x04ping\x18\x02 \x01(\v2\x16.regulus.agent.v1.PingH\x00R\x04ping\x12E\n" +
-	"\rset_intervals\x18\x03 \x01(\v2\x1e.regulus.agent.v1.SetIntervalsH\x00R\fsetIntervalsB\x06\n" +
+	"\rset_intervals\x18\x03 \x01(\v2\x1e.regulus.agent.v1.SetIntervalsH\x00R\fsetIntervals\x12B\n" +
+	"\fapply_update\x18\x04 \x01(\v2\x1d.regulus.agent.v1.ApplyUpdateH\x00R\vapplyUpdateB\x06\n" +
 	"\x04kind\"\x06\n" +
 	"\x04Ping\"\x9e\x01\n" +
 	"\fSetIntervals\x12H\n" +
@@ -1381,9 +1627,26 @@ const file_regulus_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x18\n" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error2[\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"m\n" +
+	"\vApplyUpdate\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\tR\aversion\x12\x18\n" +
+	"\aarchive\x18\x02 \x01(\tR\aarchive\x12\x16\n" +
+	"\x06sha256\x18\x03 \x01(\tR\x06sha256\x12\x12\n" +
+	"\x04size\x18\x04 \x01(\x04R\x04size\"`\n" +
+	"\x12FetchUpdateRequest\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\tR\aversion\x120\n" +
+	"\x04file\x18\x02 \x01(\x0e2\x1c.regulus.agent.v1.UpdateFileR\x04file\"\x1f\n" +
+	"\tFileChunk\x12\x12\n" +
+	"\x04data\x18\x01 \x01(\fR\x04data*u\n" +
+	"\n" +
+	"UpdateFile\x12\x1b\n" +
+	"\x17UPDATE_FILE_UNSPECIFIED\x10\x00\x12\x17\n" +
+	"\x13UPDATE_FILE_ARCHIVE\x10\x01\x12\x19\n" +
+	"\x15UPDATE_FILE_CHECKSUMS\x10\x02\x12\x16\n" +
+	"\x12UPDATE_FILE_BUNDLE\x10\x032\xaf\x01\n" +
 	"\fAgentService\x12K\n" +
-	"\aConnect\x12\x1e.regulus.agent.v1.AgentMessage\x1a\x1c.regulus.agent.v1.HubMessage(\x010\x01B\xca\x01\n" +
+	"\aConnect\x12\x1e.regulus.agent.v1.AgentMessage\x1a\x1c.regulus.agent.v1.HubMessage(\x010\x01\x12R\n" +
+	"\vFetchUpdate\x12$.regulus.agent.v1.FetchUpdateRequest\x1a\x1b.regulus.agent.v1.FileChunk0\x01B\xca\x01\n" +
 	"\x14com.regulus.agent.v1B\n" +
 	"AgentProtoP\x01ZDgithub.com/CodexCircle/Regulus/internal/gen/regulus/agent/v1;agentv1\xa2\x02\x03RAX\xaa\x02\x10Regulus.Agent.V1\xca\x02\x10Regulus\\Agent\\V1\xe2\x02\x1cRegulus\\Agent\\V1\\GPBMetadata\xea\x02\x12Regulus::Agent::V1b\x06proto3"
 
@@ -1399,58 +1662,66 @@ func file_regulus_agent_v1_agent_proto_rawDescGZIP() []byte {
 	return file_regulus_agent_v1_agent_proto_rawDescData
 }
 
-var file_regulus_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_regulus_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_regulus_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_regulus_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_regulus_agent_v1_agent_proto_goTypes = []any{
-	(Reject_Reason)(0),            // 0: regulus.agent.v1.Reject.Reason
-	(*AgentMessage)(nil),          // 1: regulus.agent.v1.AgentMessage
-	(*HubMessage)(nil),            // 2: regulus.agent.v1.HubMessage
-	(*Hello)(nil),                 // 3: regulus.agent.v1.Hello
-	(*SystemInfo)(nil),            // 4: regulus.agent.v1.SystemInfo
-	(*Welcome)(nil),               // 5: regulus.agent.v1.Welcome
-	(*Reject)(nil),                // 6: regulus.agent.v1.Reject
-	(*Heartbeat)(nil),             // 7: regulus.agent.v1.Heartbeat
-	(*MetricsReport)(nil),         // 8: regulus.agent.v1.MetricsReport
-	(*CpuMetrics)(nil),            // 9: regulus.agent.v1.CpuMetrics
-	(*MemoryMetrics)(nil),         // 10: regulus.agent.v1.MemoryMetrics
-	(*DiskMetrics)(nil),           // 11: regulus.agent.v1.DiskMetrics
-	(*NetworkMetrics)(nil),        // 12: regulus.agent.v1.NetworkMetrics
-	(*Command)(nil),               // 13: regulus.agent.v1.Command
-	(*Ping)(nil),                  // 14: regulus.agent.v1.Ping
-	(*SetIntervals)(nil),          // 15: regulus.agent.v1.SetIntervals
-	(*CommandResult)(nil),         // 16: regulus.agent.v1.CommandResult
-	(*durationpb.Duration)(nil),   // 17: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil), // 18: google.protobuf.Timestamp
+	(UpdateFile)(0),               // 0: regulus.agent.v1.UpdateFile
+	(Reject_Reason)(0),            // 1: regulus.agent.v1.Reject.Reason
+	(*AgentMessage)(nil),          // 2: regulus.agent.v1.AgentMessage
+	(*HubMessage)(nil),            // 3: regulus.agent.v1.HubMessage
+	(*Hello)(nil),                 // 4: regulus.agent.v1.Hello
+	(*SystemInfo)(nil),            // 5: regulus.agent.v1.SystemInfo
+	(*Welcome)(nil),               // 6: regulus.agent.v1.Welcome
+	(*Reject)(nil),                // 7: regulus.agent.v1.Reject
+	(*Heartbeat)(nil),             // 8: regulus.agent.v1.Heartbeat
+	(*MetricsReport)(nil),         // 9: regulus.agent.v1.MetricsReport
+	(*CpuMetrics)(nil),            // 10: regulus.agent.v1.CpuMetrics
+	(*MemoryMetrics)(nil),         // 11: regulus.agent.v1.MemoryMetrics
+	(*DiskMetrics)(nil),           // 12: regulus.agent.v1.DiskMetrics
+	(*NetworkMetrics)(nil),        // 13: regulus.agent.v1.NetworkMetrics
+	(*Command)(nil),               // 14: regulus.agent.v1.Command
+	(*Ping)(nil),                  // 15: regulus.agent.v1.Ping
+	(*SetIntervals)(nil),          // 16: regulus.agent.v1.SetIntervals
+	(*CommandResult)(nil),         // 17: regulus.agent.v1.CommandResult
+	(*ApplyUpdate)(nil),           // 18: regulus.agent.v1.ApplyUpdate
+	(*FetchUpdateRequest)(nil),    // 19: regulus.agent.v1.FetchUpdateRequest
+	(*FileChunk)(nil),             // 20: regulus.agent.v1.FileChunk
+	(*durationpb.Duration)(nil),   // 21: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil), // 22: google.protobuf.Timestamp
 }
 var file_regulus_agent_v1_agent_proto_depIdxs = []int32{
-	3,  // 0: regulus.agent.v1.AgentMessage.hello:type_name -> regulus.agent.v1.Hello
-	7,  // 1: regulus.agent.v1.AgentMessage.heartbeat:type_name -> regulus.agent.v1.Heartbeat
-	8,  // 2: regulus.agent.v1.AgentMessage.metrics:type_name -> regulus.agent.v1.MetricsReport
-	16, // 3: regulus.agent.v1.AgentMessage.command_result:type_name -> regulus.agent.v1.CommandResult
-	5,  // 4: regulus.agent.v1.HubMessage.welcome:type_name -> regulus.agent.v1.Welcome
-	6,  // 5: regulus.agent.v1.HubMessage.reject:type_name -> regulus.agent.v1.Reject
-	13, // 6: regulus.agent.v1.HubMessage.command:type_name -> regulus.agent.v1.Command
-	4,  // 7: regulus.agent.v1.Hello.system:type_name -> regulus.agent.v1.SystemInfo
-	17, // 8: regulus.agent.v1.Welcome.heartbeat_interval:type_name -> google.protobuf.Duration
-	17, // 9: regulus.agent.v1.Welcome.metrics_interval:type_name -> google.protobuf.Duration
-	0,  // 10: regulus.agent.v1.Reject.reason:type_name -> regulus.agent.v1.Reject.Reason
-	18, // 11: regulus.agent.v1.Heartbeat.sent_at:type_name -> google.protobuf.Timestamp
-	18, // 12: regulus.agent.v1.MetricsReport.collected_at:type_name -> google.protobuf.Timestamp
-	9,  // 13: regulus.agent.v1.MetricsReport.cpu:type_name -> regulus.agent.v1.CpuMetrics
-	10, // 14: regulus.agent.v1.MetricsReport.memory:type_name -> regulus.agent.v1.MemoryMetrics
-	11, // 15: regulus.agent.v1.MetricsReport.disks:type_name -> regulus.agent.v1.DiskMetrics
-	12, // 16: regulus.agent.v1.MetricsReport.networks:type_name -> regulus.agent.v1.NetworkMetrics
-	14, // 17: regulus.agent.v1.Command.ping:type_name -> regulus.agent.v1.Ping
-	15, // 18: regulus.agent.v1.Command.set_intervals:type_name -> regulus.agent.v1.SetIntervals
-	17, // 19: regulus.agent.v1.SetIntervals.heartbeat_interval:type_name -> google.protobuf.Duration
-	17, // 20: regulus.agent.v1.SetIntervals.metrics_interval:type_name -> google.protobuf.Duration
-	1,  // 21: regulus.agent.v1.AgentService.Connect:input_type -> regulus.agent.v1.AgentMessage
-	2,  // 22: regulus.agent.v1.AgentService.Connect:output_type -> regulus.agent.v1.HubMessage
-	22, // [22:23] is the sub-list for method output_type
-	21, // [21:22] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	4,  // 0: regulus.agent.v1.AgentMessage.hello:type_name -> regulus.agent.v1.Hello
+	8,  // 1: regulus.agent.v1.AgentMessage.heartbeat:type_name -> regulus.agent.v1.Heartbeat
+	9,  // 2: regulus.agent.v1.AgentMessage.metrics:type_name -> regulus.agent.v1.MetricsReport
+	17, // 3: regulus.agent.v1.AgentMessage.command_result:type_name -> regulus.agent.v1.CommandResult
+	6,  // 4: regulus.agent.v1.HubMessage.welcome:type_name -> regulus.agent.v1.Welcome
+	7,  // 5: regulus.agent.v1.HubMessage.reject:type_name -> regulus.agent.v1.Reject
+	14, // 6: regulus.agent.v1.HubMessage.command:type_name -> regulus.agent.v1.Command
+	5,  // 7: regulus.agent.v1.Hello.system:type_name -> regulus.agent.v1.SystemInfo
+	21, // 8: regulus.agent.v1.Welcome.heartbeat_interval:type_name -> google.protobuf.Duration
+	21, // 9: regulus.agent.v1.Welcome.metrics_interval:type_name -> google.protobuf.Duration
+	1,  // 10: regulus.agent.v1.Reject.reason:type_name -> regulus.agent.v1.Reject.Reason
+	22, // 11: regulus.agent.v1.Heartbeat.sent_at:type_name -> google.protobuf.Timestamp
+	22, // 12: regulus.agent.v1.MetricsReport.collected_at:type_name -> google.protobuf.Timestamp
+	10, // 13: regulus.agent.v1.MetricsReport.cpu:type_name -> regulus.agent.v1.CpuMetrics
+	11, // 14: regulus.agent.v1.MetricsReport.memory:type_name -> regulus.agent.v1.MemoryMetrics
+	12, // 15: regulus.agent.v1.MetricsReport.disks:type_name -> regulus.agent.v1.DiskMetrics
+	13, // 16: regulus.agent.v1.MetricsReport.networks:type_name -> regulus.agent.v1.NetworkMetrics
+	15, // 17: regulus.agent.v1.Command.ping:type_name -> regulus.agent.v1.Ping
+	16, // 18: regulus.agent.v1.Command.set_intervals:type_name -> regulus.agent.v1.SetIntervals
+	18, // 19: regulus.agent.v1.Command.apply_update:type_name -> regulus.agent.v1.ApplyUpdate
+	21, // 20: regulus.agent.v1.SetIntervals.heartbeat_interval:type_name -> google.protobuf.Duration
+	21, // 21: regulus.agent.v1.SetIntervals.metrics_interval:type_name -> google.protobuf.Duration
+	0,  // 22: regulus.agent.v1.FetchUpdateRequest.file:type_name -> regulus.agent.v1.UpdateFile
+	2,  // 23: regulus.agent.v1.AgentService.Connect:input_type -> regulus.agent.v1.AgentMessage
+	19, // 24: regulus.agent.v1.AgentService.FetchUpdate:input_type -> regulus.agent.v1.FetchUpdateRequest
+	3,  // 25: regulus.agent.v1.AgentService.Connect:output_type -> regulus.agent.v1.HubMessage
+	20, // 26: regulus.agent.v1.AgentService.FetchUpdate:output_type -> regulus.agent.v1.FileChunk
+	25, // [25:27] is the sub-list for method output_type
+	23, // [23:25] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_regulus_agent_v1_agent_proto_init() }
@@ -1472,14 +1743,15 @@ func file_regulus_agent_v1_agent_proto_init() {
 	file_regulus_agent_v1_agent_proto_msgTypes[12].OneofWrappers = []any{
 		(*Command_Ping)(nil),
 		(*Command_SetIntervals)(nil),
+		(*Command_ApplyUpdate)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_regulus_agent_v1_agent_proto_rawDesc), len(file_regulus_agent_v1_agent_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   16,
+			NumEnums:      2,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

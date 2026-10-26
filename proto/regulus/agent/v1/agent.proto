@@ -24,6 +24,11 @@ service AgentService {
   // send Command messages at any time; each Command is answered by a
   // CommandResult.
   rpc Connect(stream AgentMessage) returns (stream HubMessage);
+
+  // FetchUpdate streams one file of the release the hub offers in an
+  // ApplyUpdate command, over the same mTLS connection. The hub serves only
+  // the release it runs itself, and the archive of the caller's platform.
+  rpc FetchUpdate(FetchUpdateRequest) returns (stream FileChunk);
 }
 
 // Messages sent by the agent.
@@ -157,6 +162,7 @@ message Command {
   oneof kind {
     Ping ping = 2;
     SetIntervals set_intervals = 3;
+    ApplyUpdate apply_update = 4;
   }
 }
 
@@ -176,4 +182,40 @@ message CommandResult {
   bool success = 2;
   // Set when success is false.
   string error = 3;
+}
+
+// ApplyUpdate offers the agent a new release. The agent downloads the files
+// with FetchUpdate, checks them, and asks the helper of its server (which runs
+// as root) to install them; the result is sent once the files are handed over,
+// and the restarted agent proves the update by connecting with the new version.
+// An agent that predates this command answers "unsupported command".
+message ApplyUpdate {
+  // Version to install, for example "0.2.0"; the tag is "v" + version.
+  string version = 1;
+  // Name of the archive for the agent's platform.
+  string archive = 2;
+  // SHA-256 of the archive, lower-case hex, as listed in the signed
+  // checksums.txt.
+  string sha256 = 3;
+  uint64 size = 4;
+}
+
+// Files of a release that FetchUpdate serves.
+enum UpdateFile {
+  UPDATE_FILE_UNSPECIFIED = 0;
+  // The archive of the caller's platform.
+  UPDATE_FILE_ARCHIVE = 1;
+  // checksums.txt, which the release workflow signed.
+  UPDATE_FILE_CHECKSUMS = 2;
+  // checksums.txt.sigstore.json, the Sigstore bundle of that signature.
+  UPDATE_FILE_BUNDLE = 3;
+}
+
+message FetchUpdateRequest {
+  string version = 1;
+  UpdateFile file = 2;
+}
+
+message FileChunk {
+  bytes data = 1;
 }

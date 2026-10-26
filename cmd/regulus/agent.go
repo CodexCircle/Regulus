@@ -8,11 +8,13 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/CodexCircle/Regulus/internal/agent"
 	"github.com/CodexCircle/Regulus/internal/config"
 	"github.com/CodexCircle/Regulus/internal/logging"
+	"github.com/CodexCircle/Regulus/internal/update"
 )
 
 // exitRejected is the exit status of an agent the hub does not accept (revoked
@@ -77,7 +79,12 @@ func agentMain(ctx context.Context, args []string, getenv func(string) string, s
 	defer func() { _ = conn.Close() }()
 
 	log.Info("starting agent", "version", version, "agent", creds.AgentID, "hub", cfg.Hub)
-	err = agent.Run(ctx, conn, agent.Options{Version: version, ID: creds.AgentID, Log: log})
+	opts := agent.Options{Version: version, ID: creds.AgentID, Log: log}
+	if cfg.Updates {
+		opts.UpdateDir = cfg.DataDir
+		opts.Verifier = &update.SigstoreVerifier{Trust: update.PublicTrust(filepath.Join(cfg.DataDir, "tuf"))}
+	}
+	err = agent.Run(ctx, conn, opts)
 	var rejected *agent.RejectedError
 	if errors.As(err, &rejected) {
 		log.Error("the hub does not accept this agent: it was revoked or removed. To use this server again, remove the agent data directory and enroll with a new token", "dir", cfg.DataDir, "err", err)

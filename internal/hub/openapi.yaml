@@ -414,6 +414,89 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/updates/rollout:
+    get:
+      tags: [updates]
+      summary: The servers that run an older version, and the last rollout (needs core.update)
+      description: |
+        `candidates` are the connected servers that run an older release than the
+        hub and would be updated by a new rollout (the hub is updated first;
+        servers are updated to the version the hub runs). `agents` is what the
+        last rollout did, server by server.
+      responses:
+        "200":
+          description: The state of the rollout.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RolloutStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [updates]
+      summary: Update the servers to the version of the hub (needs core.update)
+      description: |
+        Updates the connected servers that run an older release, `wave_size` at a
+        time (default 1), and stops at the first failure; servers not reached are
+        `skipped`. Each server fetches the release from the hub over its agent
+        connection, checks it, and hands it to the installer that runs as root on
+        that server, which checks the signature again, replaces the binary,
+        restarts the agent and puts the old version back if the agent does not
+        connect to the hub again. A server is `updated` when it connects with the
+        new version. The hub downloads what it lacks (the archive of each platform
+        in use) first. `agents` limits the rollout to those ids. Answers 409 when
+        a rollout is running, no server is behind, or the release is not cached and
+        checks are off; 502 when the release cannot be downloaded. Follow it with
+        `GET /api/updates/rollout`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                agents:
+                  type: array
+                  items: { type: string }
+                wave_size: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        "202":
+          description: The rollout started.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RolloutStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: A rollout is running, or no server is behind, or the release is not available.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502":
+          description: The release could not be downloaded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/updates/rollout/stop:
+    post:
+      tags: [updates]
+      summary: Stop offering the update to more servers (needs core.update)
+      description: Servers that already received the update finish it. The body must be empty (`{}`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        "200":
+          description: The state of the rollout.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RolloutStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /api/agents:
     get:
       tags: [agents]
@@ -1256,6 +1339,31 @@ components:
           oneOf:
             - { $ref: "#/components/schemas/UpdateApplyResult" }
             - { type: "null" }
+    RolloutAgent:
+      type: object
+      required: [id, from, status]
+      properties:
+        id: { type: string }
+        hostname: { type: string }
+        from: { type: string, description: The version the server ran. }
+        status: { type: string, enum: [pending, offered, installing, updated, failed, skipped] }
+        message: { type: string }
+    RolloutStatus:
+      type: object
+      required: [target, state, candidates, agents, started_at, finished_at]
+      properties:
+        target: { type: string, description: The version the servers are updated to, the one the hub runs. }
+        state: { type: string, enum: [idle, running, done, failed, stopped] }
+        candidates:
+          type: array
+          items: { $ref: "#/components/schemas/RolloutAgent" }
+        agents:
+          type: array
+          items: { $ref: "#/components/schemas/RolloutAgent" }
+        wave_size: { type: integer }
+        started_by: { type: string }
+        started_at: { type: [string, "null"], format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
     UpdateApplyResult:
       type: object
       required: [version, outcome, at]

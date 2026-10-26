@@ -525,3 +525,45 @@ export const downloadUpdate = () =>
 
 export const applyUpdate = () =>
   request<UpdateStatus>("POST", "/api/updates/apply", {});
+
+// Updating the servers (agents) to the version the hub runs.
+export type RolloutAgentStatus =
+  | "pending"
+  | "offered"
+  | "installing"
+  | "updated"
+  | "failed"
+  | "skipped";
+
+export interface RolloutAgent {
+  id: string;
+  hostname?: string;
+  from: string;
+  status: RolloutAgentStatus;
+  message?: string;
+}
+
+export interface RolloutStatus {
+  // The version the servers are updated to: the one the hub runs.
+  target: string;
+  state: "idle" | "running" | "done" | "failed" | "stopped";
+  // Connected servers that run an older version.
+  candidates: RolloutAgent[];
+  // What the last rollout did, server by server.
+  agents: RolloutAgent[];
+  wave_size?: number;
+  started_by?: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export const fetchRollout = (signal?: AbortSignal) =>
+  request<RolloutStatus>("GET", "/api/updates/rollout", undefined, signal);
+
+export const startRollout = (waveSize: number) =>
+  request<RolloutStatus>("POST", "/api/updates/rollout", {
+    wave_size: waveSize,
+  });
+
+export const stopRollout = () =>
+  request<RolloutStatus>("POST", "/api/updates/rollout/stop", {});

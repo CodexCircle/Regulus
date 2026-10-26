@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -74,6 +75,9 @@ type Stager struct {
 	// Verifier, if set, checks the signature of checksums.txt before anything
 	// else is downloaded; a release without a valid signature is refused.
 	Verifier Verifier
+	// Keep, if set, is a version that is never pruned: the one this server runs,
+	// whose files the hub serves to the agents it manages.
+	Keep string
 }
 
 func (s *Stager) client() *http.Client {
@@ -99,15 +103,33 @@ func (s *Stager) client() *http.Client {
 	return &cc
 }
 
+// Platform is an operating system and architecture a release is built for.
+type Platform struct{ OS, Arch string }
+
 // Stage downloads the archive of the release for a platform, checks it against
 // the release's checksums.txt and keeps it, with the checksums and the
 // signature bundle, in Dir/<version>/. Any other staged version is removed.
 // Nothing reaches the final place unless the checksum matches.
 func (s *Stager) Stage(ctx context.Context, rel Release, goos, goarch string) (Staged, error) {
-	archiveName := ArchiveName(rel.Version, goos, goarch)
-	archive, ok := rel.Asset(archiveName)
-	if !ok {
-		return Staged{}, fmt.Errorf("release %s has no %s", rel.Tag, archiveName)
+	return s.StagePlatforms(ctx, rel, Platform{goos, goarch})
+}
+
+// StagePlatforms is Stage for several platforms at once: the hub also serves
+// the archives of the servers it manages. The first platform is the one
+// described by the returned Staged.
+func (s *Stager) StagePlatforms(ctx context.Context, rel Release, plats ...Platform) (Staged, error) {
+	if len(plats) == 0 {
+		return Staged{}, errors.New("no platform to stage")
+	}
+	archiveName := ArchiveName(rel.Version, plats[0].OS, plats[0].Arch)
+	archives := map[string]Asset{}
+	for _, p := range plats {
+		name := ArchiveName(rel.Version, p.OS, p.Arch)
+		a, ok := rel.Asset(name)
+		if !ok {
+			return Staged{}, fmt.Errorf("release %s has no %s", rel.Tag, name)
+		}
+		archives[name] = a
 	}
 	sums, ok := rel.Asset(checksumsName)
 	if !ok {
@@ -127,11 +149,6 @@ func (s *Stager) Stage(ctx context.Context, rel Release, goos, goarch string) (S
 	if err != nil {
 		return Staged{}, fmt.Errorf("download %s: %w", checksumsName, err)
 	}
-	want, err := checksumFor(sumsData, archiveName)
-	if err != nil {
-		return Staged{}, err
-	}
-
 	var bundleData []byte
 	if bundle, ok := rel.Asset(bundleName); ok {
 		bundleData, err = s.fetchSmall(ctx, bundle.URL)
@@ -150,15 +167,26 @@ func (s *Stager) Stage(ctx context.Context, rel Release, goos, goarch string) (S
 		verified = VerifiedSignature
 	}
 
-	got, size, err := s.fetchFile(ctx, archive.URL, filepath.Join(work, archiveName), maxArchive)
-	if err != nil {
-		return Staged{}, fmt.Errorf("download %s: %w", archiveName, err)
-	}
-	if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-		return Staged{}, fmt.Errorf("%s does not match its checksum (expected %s, got %s): the download is corrupt or has been tampered with", archiveName, want, got)
-	}
-	if archive.Size > 0 && archive.Size != size {
-		return Staged{}, fmt.Errorf("%s is %d bytes but the release says %d", archiveName, size, archive.Size)
+	var got string
+	var size int64
+	for name, asset := range archives {
+		want, err := checksumFor(sumsData, name)
+		if err != nil {
+			return Staged{}, err
+		}
+		sum, n, err := s.fetchFile(ctx, asset.URL, filepath.Join(work, name), maxArchive)
+		if err != nil {
+			return Staged{}, fmt.Errorf("download %s: %w", name, err)
+		}
+		if subtle.ConstantTimeCompare([]byte(sum), []byte(want)) != 1 {
+			return Staged{}, fmt.Errorf("%s does not match its checksum (expected %s, got %s): the download is corrupt or has been tampered with", name, want, sum)
+		}
+		if asset.Size > 0 && asset.Size != n {
+			return Staged{}, fmt.Errorf("%s is %d bytes but the release says %d", name, n, asset.Size)
+		}
+		if name == archiveName {
+			got, size = sum, n
+		}
 	}
 	if err := os.WriteFile(filepath.Join(work, checksumsName), sumsData, 0o600); err != nil {
 		return Staged{}, err
@@ -186,6 +214,12 @@ func (s *Stager) Stage(ctx context.Context, rel Release, goos, goarch string) (S
 
 	// The version is made of digits, letters, dots and hyphens only (it was
 	// parsed), so it is a safe directory name.
+	return s.install(work, st)
+}
+
+// install moves a finished work directory to its place and removes the other
+// versions.
+func (s *Stager) install(work string, st Staged) (Staged, error) {
 	final := filepath.Join(s.Dir, st.Version)
 	if err := os.RemoveAll(final); err != nil {
 		return Staged{}, err
@@ -193,19 +227,28 @@ func (s *Stager) Stage(ctx context.Context, rel Release, goos, goarch string) (S
 	if err := os.Rename(work, final); err != nil {
 		return Staged{}, err
 	}
-	s.prune(st.Version)
+	keep := []string{st.Version, s.Keep}
+	// A newer release that is waiting to be installed stays too.
+	if cur, ok := s.Current(); ok {
+		if v, err := ParseVersion(cur.Version); err == nil {
+			if sv, err := ParseVersion(st.Version); err == nil && v.Compare(sv) > 0 {
+				keep = append(keep, cur.Version)
+			}
+		}
+	}
+	s.prune(keep...)
 	return st, nil
 }
 
-// prune removes every staged version except keep, and leftovers of downloads
-// that were interrupted.
-func (s *Stager) prune(keep string) {
+// prune removes every staged version except the ones to keep, and leftovers of
+// downloads that were interrupted.
+func (s *Stager) prune(keep ...string) {
 	entries, err := os.ReadDir(s.Dir)
 	if err != nil {
 		return
 	}
 	for _, e := range entries {
-		if e.Name() != keep {
+		if !slices.Contains(keep, e.Name()) {
 			_ = os.RemoveAll(filepath.Join(s.Dir, e.Name()))
 		}
 	}
@@ -344,9 +387,6 @@ func checksumFor(sums []byte, name string) (string, error) {
 	}
 	return "", fmt.Errorf("%s does not list %s", checksumsName, name)
 }
-
-// Clear removes every staged release, for after one was installed.
-func (s *Stager) Clear() { s.prune("") }
 
 // limited reads at most n bytes of r.
 func limited(r io.Reader, n int64) io.Reader { return io.LimitReader(r, n) }

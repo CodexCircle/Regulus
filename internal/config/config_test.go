@@ -248,3 +248,31 @@ func TestLoadAgentErrors(t *testing.T) {
 		t.Error("an unknown key in the file must be rejected")
 	}
 }
+
+func TestAgentAndHubUpdateSettings(t *testing.T) {
+	cfg, err := LoadAgent([]string{"--hub", "h:1"}, env(nil), io.Discard)
+	if err != nil || cfg.Updates {
+		t.Fatalf("by default the agent does not update itself: %+v, %v", cfg, err)
+	}
+	file := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := os.WriteFile(file, []byte("hub: h:1\nupdates: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = LoadAgent([]string{"--config", file}, env(nil), io.Discard); err != nil || !cfg.Updates {
+		t.Errorf("updates: true in the file: %+v, %v", cfg, err)
+	}
+	if cfg, err = LoadAgent([]string{"--config", file}, env(map[string]string{"REGULUS_AGENT_UPDATES": "false"}), io.Discard); err != nil || cfg.Updates {
+		t.Errorf("the environment wins: %+v, %v", cfg, err)
+	}
+	if _, err = LoadAgent([]string{"--hub", "h:1"}, env(map[string]string{"REGULUS_AGENT_UPDATES": "maybe"}), io.Discard); err == nil {
+		t.Error("accepted a value that is not a boolean")
+	}
+
+	hub, err := Load(nil, env(map[string]string{"REGULUS_UPDATES_APPLY": "true"}), io.Discard)
+	if err != nil || !hub.Updates.Apply {
+		t.Errorf("hub: %+v, %v", hub.Updates, err)
+	}
+	if hub, _ = Load(nil, env(nil), io.Discard); hub.Updates.Apply {
+		t.Error("the hub installs updates by default")
+	}
+}
