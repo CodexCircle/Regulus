@@ -17,6 +17,7 @@ type UpdateControl interface {
 	SetSettings(ctx context.Context, by string, s update.Settings) (update.Status, error)
 	Check(ctx context.Context) (update.Status, error)
 	Download(ctx context.Context, by string) (update.Status, error)
+	Apply(ctx context.Context, by string) (update.Status, error)
 }
 
 type updateHandlers struct {
@@ -73,6 +74,20 @@ func (u updateHandlers) download(w http.ResponseWriter, r *http.Request) {
 	u.reply(w, http.StatusAccepted, st, err)
 }
 
+func (u updateHandlers) apply(w http.ResponseWriter, r *http.Request) {
+	if u.updates == nil {
+		http.NotFound(w, r)
+		return
+	}
+	var req struct{}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	by, _ := auth.UserFrom(r.Context())
+	st, err := u.updates.Apply(r.Context(), by.Username)
+	u.reply(w, http.StatusAccepted, st, err)
+}
+
 // reply writes the status, or the error as the status code that fits it.
 func (u updateHandlers) reply(w http.ResponseWriter, ok int, st update.Status, err error) {
 	switch {
@@ -82,9 +97,11 @@ func (u updateHandlers) reply(w http.ResponseWriter, ok int, st update.Status, e
 		w.Header().Set("Retry-After", strconv.Itoa(30))
 		writeJSONError(w, http.StatusTooManyRequests, err.Error())
 	case errors.Is(err, update.ErrChecksOff), errors.Is(err, update.ErrBusy),
-		errors.Is(err, update.ErrNothingToFetch), errors.Is(err, update.ErrNotReleaseBuild):
+		errors.Is(err, update.ErrNothingToFetch), errors.Is(err, update.ErrNotReleaseBuild),
+		errors.Is(err, update.ErrApplyDisabled), errors.Is(err, update.ErrNothingToApply),
+		errors.Is(err, update.ErrNotVerified), errors.Is(err, update.ErrApplying):
 		writeJSONError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, update.ErrAutomaticNotAvailable), errors.Is(err, update.ErrInvalidSettings):
+	case errors.Is(err, update.ErrInvalidSettings):
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 	case update.IsUpstream(err):
 		writeJSONError(w, http.StatusBadGateway, err.Error())

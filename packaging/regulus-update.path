@@ -1,0 +1,13 @@
+[Unit]
+Description=Install the Regulus update the hub asked for
+Documentation=https://github.com/CodexCircle/Regulus
+
+[Path]
+# The hub (an unprivileged user) leaves this file when an administrator presses
+# "Install" in the dashboard, or the automatic mode does. It names a version
+# and nothing else: regulus-update.service checks everything itself.
+PathExists=/var/lib/regulus/update-apply/request.json
+Unit=regulus-update.service
+
+[Install]
+WantedBy=multi-user.target

@@ -285,9 +285,12 @@ paths:
       summary: Choose the update mode and channel (needs core.update)
       description: |
         `manual` only tells that a new version exists; `download` also downloads
-        and checks it. The `automatic` mode is refused for now: the hub cannot
-        apply an update yet. Changing the channel starts a new check. The change
-        is written to the audit log.
+        and checks it; `automatic` also installs it, but only inside the
+        maintenance window (`window_start` to `window_end`, "HH:MM" in the hub's
+        local time, possibly across midnight), and never again a version that was
+        rolled back. `automatic` answers 400 without a window and 409 when
+        installing is turned off (`updates.apply`). Changing the channel starts a
+        new check. The change is written to the audit log.
       requestBody:
         required: true
         content:
@@ -297,8 +300,10 @@ paths:
               additionalProperties: false
               required: [mode, channel]
               properties:
-                mode: { type: string, enum: [manual, download] }
+                mode: { type: string, enum: [manual, download, automatic] }
                 channel: { type: string, enum: [stable, beta] }
+                window_start: { type: string, example: "03:00" }
+                window_end: { type: string, example: "05:00" }
       responses:
         "200":
           description: The state of the updates after the change.
@@ -353,7 +358,7 @@ paths:
         The archive is checked against the SHA-256 in the release's
         `checksums.txt`, and that file's Sigstore signature is verified, before it
         is kept (`staged.verified` is `signature`).
-        Nothing is installed. Answers 409 when there is no newer release, a
+        Nothing is installed by this call (see `POST /api/updates/apply`). Answers 409 when there is no newer release, a
         download is already running, checks are off, or this build is not a
         release. The request needs a JSON body, which must be empty (`{}`).
       requestBody:
@@ -372,6 +377,40 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "409":
           description: Nothing to download, or a download is running, or checks are off.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/updates/apply:
+    post:
+      tags: [updates]
+      summary: Install the downloaded release (needs core.update)
+      description: |
+        Asks the root-owned helper (`regulus-update.path`, set up by the
+        installer) to install the downloaded release, and answers at once. The
+        helper checks the signature and the checksum again itself, keeps the
+        current binary, replaces it, restarts the hub and watches it; if the new
+        version does not come up healthy and stay up, the previous one is put
+        back. The hub restarts during this, so the API is briefly unavailable.
+        Follow `applying`, then `last_apply` (`applied`, `rolled_back` or
+        `failed`). Answers 409 when installing is turned off (`updates.apply`),
+        nothing is downloaded, the download was not verified by its signature, or
+        an installation is already running. The body must be empty (`{}`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        "202":
+          description: The request was left for the helper.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Installing is off, there is nothing verified to install, or one is running.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -1185,13 +1224,15 @@ components:
           description: The signature bundle of checksums.txt was published and kept next to it.
     UpdateStatus:
       type: object
-      required: [current_version, release_build, checks_enabled, mode, channel, platform, checked_at, checking, latest, update_available, staged, downloading]
+      required: [current_version, release_build, checks_enabled, mode, channel, platform, checked_at, checking, latest, update_available, staged, downloading, apply_enabled, apply_available, applying, last_apply]
       properties:
         current_version: { type: string }
         release_build: { type: boolean }
         checks_enabled: { type: boolean }
-        mode: { type: string, enum: [manual, download] }
+        mode: { type: string, enum: [manual, download, automatic] }
         channel: { type: string, enum: [stable, beta] }
+        window_start: { type: string }
+        window_end: { type: string }
         platform: { type: string, example: linux/amd64 }
         checked_at: { type: [string, "null"], format: date-time }
         check_error: { type: string }
@@ -1207,6 +1248,24 @@ components:
             - { type: "null" }
         downloading: { type: boolean }
         download_error: { type: string }
+        apply_enabled: { type: boolean, description: The hub can have an update installed (`updates.apply`). }
+        apply_available: { type: boolean, description: A verified release is waiting and nothing is being installed. }
+        applying: { type: boolean, description: An installation was requested or is running. }
+        apply_stalled: { type: boolean, description: The request was not picked up for minutes; the helper unit is probably not enabled. }
+        last_apply:
+          oneOf:
+            - { $ref: "#/components/schemas/UpdateApplyResult" }
+            - { type: "null" }
+    UpdateApplyResult:
+      type: object
+      required: [version, outcome, at]
+      properties:
+        version: { type: string }
+        from: { type: string }
+        outcome: { type: string, enum: [applied, rolled_back, failed] }
+        message: { type: string }
+        requested_by: { type: string }
+        at: { type: string, format: date-time }
     Error:
       type: object
       required: [error]

@@ -11,12 +11,12 @@ Regulus v0.3.0  Hub ● running
    log.level          info                       file
    log.format         text                       file
    updates.check      true                       default
+   updates.apply      false                      default
    console.tui        true                       default
 
  agent_listen  default: (empty)
  Address where remote agents connect (gRPC over TLS); empty keeps remote agents off
  The hub reads it at start: restart it to apply.
-
 
 
 

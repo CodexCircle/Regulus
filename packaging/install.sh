@@ -36,6 +36,9 @@ Usage: install.sh [options]
   --beta                 install the latest pre-release (beta channel)
   --builtin-agent        include the built-in agent (manage the hub's own server)
   --no-builtin-agent     run only the hub
+  --no-self-update       do not set up installing updates from the dashboard (by default
+                         a systemd unit is set up that installs, as root, only updates
+                         the hub downloaded and whose signature it checks again)
   --yes, -y              do not ask anything: the default is the built-in agent
   --require-signature    fail if the signature cannot be verified (needs cosign)
   --base-url URL         download from URL/v<version>/ instead of GitHub Releases
@@ -285,18 +288,37 @@ ask_builtin_agent() {
 	esac
 }
 
-# write_settings stores the answer where the service reads it. The file is
-# left alone when the answer is the default, so config.yaml stays in charge.
+# set_env_value stores KEY=VALUE in the environment file the service reads,
+# replacing an earlier value of KEY. Run it once per key, with $tmp_env set up
+# by write_settings.
+set_env_value() {
+	grep -v "^$1=" "$tmp_env" >"$tmp_env.new" || true
+	printf '%s=%s\n' "$1" "$2" >>"$tmp_env.new"
+	mv "$tmp_env.new" "$tmp_env"
+}
+
+# write_settings stores the answers where the service reads them. The built-in
+# agent answer is left out when it is the default, so config.yaml stays in
+# charge; the update helper is switched on unless it was declined.
 write_settings() {
-	[ "$builtin_agent" = default ] && return 0
+	[ "$builtin_agent" = default ] && [ "$self_update" != 1 ] && return 0
 	$SUDO mkdir -p "$CONFIG_DIR"
 	tmp_env=$(mktemp)
 	if [ -f "$CONFIG_DIR/regulus.env" ]; then
-		grep -v '^REGULUS_BUILTIN_AGENT=' "$CONFIG_DIR/regulus.env" >"$tmp_env" || true
+		cat "$CONFIG_DIR/regulus.env" >"$tmp_env"
 	fi
-	printf 'REGULUS_BUILTIN_AGENT=%s\n' "$builtin_agent" >>"$tmp_env"
+	[ "$builtin_agent" = default ] || set_env_value REGULUS_BUILTIN_AGENT "$builtin_agent"
+	[ "$self_update" != 1 ] || set_env_value REGULUS_UPDATES_APPLY true
 	$SUDO install -m 0640 "$tmp_env" "$CONFIG_DIR/regulus.env"
-	rm -f "$tmp_env"
+	rm -f "$tmp_env" "$tmp_env.new"
+}
+
+# enable_self_update starts watching for the update requests of the hub. The
+# unit files come with the package.
+enable_self_update() {
+	[ "$self_update" = 1 ] || return 0
+	[ -d /run/systemd/system ] || return 0
+	$SUDO systemctl enable --now regulus-update.path || warn "could not enable regulus-update.path: updates from the dashboard will not install until it is enabled"
 }
 
 # listen_port prints the TCP port the hub listens on.
@@ -355,6 +377,7 @@ main() {
 	token=
 	ca_fingerprint=
 	assume_yes=0
+	self_update=1
 	require_signature=${REGULUS_REQUIRE_SIGNATURE:-0}
 	base_url=$DEFAULT_BASE_URL
 
@@ -388,6 +411,7 @@ main() {
 			--beta) channel=beta ;;
 			--builtin-agent) builtin_agent=true ;;
 			--no-builtin-agent) builtin_agent=false ;;
+			--no-self-update) self_update=0 ;;
 			--yes | -y) assume_yes=1 ;;
 			--require-signature) require_signature=1 ;;
 			--base-url)
@@ -414,6 +438,7 @@ main() {
 		agent)
 			[ -n "$token" ] || token=${REGULUS_AGENT_TOKEN:-}
 			[ -z "$builtin_agent" ] || die "--builtin-agent and --no-builtin-agent are for the hub role"
+			self_update=0
 			check_agent_args
 			;;
 		*) die "invalid --role $role: use hub or agent" ;;
@@ -460,6 +485,7 @@ main() {
 		setup_agent
 		report_agent
 	else
+		enable_self_update
 		report
 	fi
 }

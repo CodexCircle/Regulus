@@ -1,0 +1,33 @@
+[Unit]
+Description=Install a Regulus update (checks its signature, keeps the old version for a rollback)
+Documentation=https://github.com/CodexCircle/Regulus
+# Started by regulus-update.path; not meant to be enabled.
+
+[Service]
+Type=oneshot
+# Root: it replaces /usr/bin/regulus and restarts the hub. It trusts nothing in
+# /var/lib/regulus, which the hub's user can write: the release is verified
+# again here (Sigstore signature of checksums.txt by the release workflow).
+ExecStart=/usr/bin/regulus update-apply --data-dir /var/lib/regulus --state-dir /var/lib/regulus-update --unit regulus.service
+TimeoutStartSec=20min
+StateDirectory=regulus-update
+StateDirectoryMode=0700
+UMask=0077
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/usr/bin /var/lib/regulus
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native

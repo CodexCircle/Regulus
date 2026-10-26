@@ -260,9 +260,18 @@ func TestSettings(t *testing.T) {
 			t.Errorf("%s: accepted %+v", name, s)
 		}
 	}
-	// The automatic mode needs the code that applies an update.
-	if _, err := r.m.SetSettings(ctx, "admin", Settings{Mode: "automatic", Channel: Stable}); !errors.Is(err, ErrAutomaticNotAvailable) {
-		t.Errorf("automatic: error = %v", err)
+	// The automatic mode needs a maintenance window, and a way to install.
+	for name, s := range map[string]Settings{
+		"no window":    {Mode: ModeAutomatic, Channel: Stable},
+		"empty window": {Mode: ModeAutomatic, Channel: Stable, WindowStart: "03:00", WindowEnd: "03:00"},
+		"bad time":     {Mode: ModeAutomatic, Channel: Stable, WindowStart: "3am", WindowEnd: "05:00"},
+	} {
+		if _, err := r.m.SetSettings(ctx, "admin", s); !errors.Is(err, ErrInvalidSettings) {
+			t.Errorf("%s: error = %v", name, err)
+		}
+	}
+	if _, err := r.m.SetSettings(ctx, "admin", Settings{Mode: ModeAutomatic, Channel: Stable, WindowStart: "03:00", WindowEnd: "05:00"}); !errors.Is(err, ErrApplyDisabled) {
+		t.Errorf("automatic without a helper: error = %v", err)
 	}
 	if got, _ := r.m.Settings(ctx); got != (Settings{Mode: ModeDownload, Channel: Beta}) {
 		t.Errorf("a refused change altered the settings: %+v", got)

@@ -227,7 +227,7 @@ func TestConfigListGetSetPath(t *testing.T) {
 	}
 	code, out, _ = run("list", "--json")
 	var items []map[string]any
-	if code != 0 || json.Unmarshal([]byte(out), &items) != nil || len(items) != 9 || items[0]["key"] != "listen" || items[0]["source"] != "file" {
+	if code != 0 || json.Unmarshal([]byte(out), &items) != nil || len(items) != 10 || items[0]["key"] != "listen" || items[0]["source"] != "file" {
 		t.Errorf("list --json: %d\n%s", code, out)
 	}
 	code, out, _ = run("list", "--plain")

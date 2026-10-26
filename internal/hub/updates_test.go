@@ -219,7 +219,9 @@ func TestUpdateErrorsMapToStatusCodes(t *testing.T) {
 		{update.ErrBusy, http.StatusConflict},
 		{fmt.Errorf("wrapped: %w", update.ErrNothingToFetch), http.StatusConflict},
 		{update.ErrNotReleaseBuild, http.StatusConflict},
-		{update.ErrAutomaticNotAvailable, http.StatusBadRequest},
+		{update.ErrApplyDisabled, http.StatusConflict},
+		{update.ErrNotVerified, http.StatusConflict},
+		{fmt.Errorf("%w: x", update.ErrInvalidSettings), http.StatusBadRequest},
 		{errors.New("disk on fire"), http.StatusInternalServerError},
 	} {
 		rec := httptest.NewRecorder()
@@ -257,5 +259,59 @@ func TestHubRefusesAReleaseWithoutAValidSignature(t *testing.T) {
 	st := decodeStatus(t, admin.do("GET", "/api/updates", nil))
 	if st.Staged != nil || !strings.Contains(st.DownloadError, "not a Sigstore bundle") {
 		t.Errorf("status = %+v", st)
+	}
+}
+
+func TestUpdatesAPIApplyLeavesARequestForTheHelper(t *testing.T) {
+	rs := newReleaseServer(t, "0.2.0")
+	h := newUpdateHub(t, "0.1.0", rs, func(c *config.Config) { c.Updates.Apply = true })
+	admin := newAPI(t, h, auth.RoleAdmin)
+
+	if rec := admin.do("POST", "/api/updates/apply", struct{}{}); rec.Code != http.StatusConflict {
+		t.Errorf("apply with nothing downloaded: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	admin.do("POST", "/api/updates/check", struct{}{})
+	admin.do("POST", "/api/updates/download", struct{}{})
+	waitFor(t, "the download", func() bool {
+		st := decodeStatus(t, admin.do("GET", "/api/updates", nil))
+		return st.Staged != nil && !st.Downloading
+	})
+	if st := decodeStatus(t, admin.do("GET", "/api/updates", nil)); !st.ApplyEnabled || !st.ApplyAvailable {
+		t.Fatalf("status = %+v", st)
+	}
+
+	rec := admin.do("POST", "/api/updates/apply", struct{}{})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("apply: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	if st := decodeStatus(t, rec); !st.Applying || st.ApplyAvailable {
+		t.Errorf("status after apply = %+v", st)
+	}
+	req, ok := update.ReadRequest(update.ApplyDir(h.cfg.DataDir))
+	if !ok || req.Version != "0.2.0" || req.RequestedBy != "admin" {
+		t.Errorf("request = %+v, %v", req, ok)
+	}
+	if rec := admin.do("POST", "/api/updates/apply", struct{}{}); rec.Code != http.StatusConflict {
+		t.Errorf("second apply: status = %d", rec.Code)
+	}
+}
+
+func TestUpdatesAPIApplyIsOffByDefault(t *testing.T) {
+	h := newUpdateHub(t, "0.1.0", newReleaseServer(t, "0.2.0"))
+	admin := newAPI(t, h, auth.RoleAdmin)
+	if rec := admin.do("POST", "/api/updates/apply", struct{}{}); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "updates.apply") {
+		t.Errorf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	rec := admin.do("PUT", "/api/updates/settings", map[string]string{"mode": "automatic", "channel": "stable", "window_start": "03:00", "window_end": "05:00"})
+	if rec.Code != http.StatusConflict {
+		t.Errorf("automatic without the helper: status = %d, body = %s", rec.Code, rec.Body)
+	}
+}
+
+func TestOperatorsCannotApplyUpdates(t *testing.T) {
+	h := newUpdateHub(t, "0.1.0", newReleaseServer(t, "0.2.0"), func(c *config.Config) { c.Updates.Apply = true })
+	op := newAPI(t, h, auth.RoleOperator)
+	if rec := op.do("POST", "/api/updates/apply", struct{}{}); rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d", rec.Code)
 	}
 }
