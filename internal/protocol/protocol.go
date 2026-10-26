@@ -14,3 +14,17 @@ const MinSupported uint32 = 1
 func Supported(v uint32) bool {
 	return v >= MinSupported && v <= Version
 }
+
+// Negotiate picks the protocol version for a connection from the range the
+// agent speaks. min 0 means an agent that predates the field and speaks only
+// max. ok is false when the ranges do not meet.
+func Negotiate(min, max uint32) (version uint32, ok bool) {
+	if min == 0 || min > max {
+		min = max
+	}
+	version = max
+	if version > Version {
+		version = Version
+	}
+	return version, version >= min && Supported(version)
+}

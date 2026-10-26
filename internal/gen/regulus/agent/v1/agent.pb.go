@@ -39,6 +39,10 @@ const (
 	Reject_REASON_UNSPECIFIED                  Reject_Reason = 0
 	Reject_REASON_UNSUPPORTED_PROTOCOL_VERSION Reject_Reason = 1
 	Reject_REASON_UNAUTHORIZED                 Reject_Reason = 2
+	// The protocol would work but the release of the agent is further behind
+	// the hub than the hub supports (the current and the previous release
+	// series are accepted). Update the agent.
+	Reject_REASON_AGENT_TOO_OLD Reject_Reason = 3
 )
 
 // Enum value maps for Reject_Reason.
@@ -47,11 +51,13 @@ var (
 		0: "REASON_UNSPECIFIED",
 		1: "REASON_UNSUPPORTED_PROTOCOL_VERSION",
 		2: "REASON_UNAUTHORIZED",
+		3: "REASON_AGENT_TOO_OLD",
 	}
 	Reject_Reason_value = map[string]int32{
 		"REASON_UNSPECIFIED":                  0,
 		"REASON_UNSUPPORTED_PROTOCOL_VERSION": 1,
 		"REASON_UNAUTHORIZED":                 2,
+		"REASON_AGENT_TOO_OLD":                3,
 	}
 )
 
@@ -305,10 +311,14 @@ type Hello struct {
 	AgentVersion string `protobuf:"bytes,2,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`
 	// Stable identifier of the agent. Empty on the very first connection, when
 	// the hub assigns one in Welcome.
-	AgentId       string      `protobuf:"bytes,3,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	System        *SystemInfo `protobuf:"bytes,4,opt,name=system,proto3" json:"system,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	AgentId string      `protobuf:"bytes,3,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	System  *SystemInfo `protobuf:"bytes,4,opt,name=system,proto3" json:"system,omitempty"`
+	// Lowest protocol version the agent still speaks. Zero (an agent that
+	// predates this field) means it speaks only protocol_version. The hub picks
+	// the highest version both sides speak.
+	MinProtocolVersion uint32 `protobuf:"varint,5,opt,name=min_protocol_version,json=minProtocolVersion,proto3" json:"min_protocol_version,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *Hello) Reset() {
@@ -367,6 +377,13 @@ func (x *Hello) GetSystem() *SystemInfo {
 		return x.System
 	}
 	return nil
+}
+
+func (x *Hello) GetMinProtocolVersion() uint32 {
+	if x != nil {
+		return x.MinProtocolVersion
+	}
+	return 0
 }
 
 // SystemInfo describes the machine the agent runs on. It rarely changes.
@@ -1280,12 +1297,13 @@ const file_regulus_agent_v1_agent_proto_rawDesc = "" +
 	"\awelcome\x18\x01 \x01(\v2\x19.regulus.agent.v1.WelcomeH\x00R\awelcome\x122\n" +
 	"\x06reject\x18\x02 \x01(\v2\x18.regulus.agent.v1.RejectH\x00R\x06reject\x125\n" +
 	"\acommand\x18\x03 \x01(\v2\x19.regulus.agent.v1.CommandH\x00R\acommandB\t\n" +
-	"\apayload\"\xa8\x01\n" +
+	"\apayload\"\xda\x01\n" +
 	"\x05Hello\x12)\n" +
 	"\x10protocol_version\x18\x01 \x01(\rR\x0fprotocolVersion\x12#\n" +
 	"\ragent_version\x18\x02 \x01(\tR\fagentVersion\x12\x19\n" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x124\n" +
-	"\x06system\x18\x04 \x01(\v2\x1c.regulus.agent.v1.SystemInfoR\x06system\"\xce\x01\n" +
+	"\x06system\x18\x04 \x01(\v2\x1c.regulus.agent.v1.SystemInfoR\x06system\x120\n" +
+	"\x14min_protocol_version\x18\x05 \x01(\rR\x12minProtocolVersion\"\xce\x01\n" +
 	"\n" +
 	"SystemInfo\x12\x1a\n" +
 	"\bhostname\x18\x01 \x01(\tR\bhostname\x12\x0e\n" +
@@ -1302,16 +1320,17 @@ const file_regulus_agent_v1_agent_proto_rawDesc = "" +
 	"hubVersion\x12\x19\n" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12H\n" +
 	"\x12heartbeat_interval\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x11heartbeatInterval\x12D\n" +
-	"\x10metrics_interval\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x0fmetricsInterval\"\xa3\x02\n" +
+	"\x10metrics_interval\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x0fmetricsInterval\"\xbd\x02\n" +
 	"\x06Reject\x127\n" +
 	"\x06reason\x18\x01 \x01(\x0e2\x1f.regulus.agent.v1.Reject.ReasonR\x06reason\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x120\n" +
 	"\x14min_protocol_version\x18\x03 \x01(\rR\x12minProtocolVersion\x120\n" +
-	"\x14max_protocol_version\x18\x04 \x01(\rR\x12maxProtocolVersion\"b\n" +
+	"\x14max_protocol_version\x18\x04 \x01(\rR\x12maxProtocolVersion\"|\n" +
 	"\x06Reason\x12\x16\n" +
 	"\x12REASON_UNSPECIFIED\x10\x00\x12'\n" +
 	"#REASON_UNSUPPORTED_PROTOCOL_VERSION\x10\x01\x12\x17\n" +
-	"\x13REASON_UNAUTHORIZED\x10\x02\"@\n" +
+	"\x13REASON_UNAUTHORIZED\x10\x02\x12\x18\n" +
+	"\x14REASON_AGENT_TOO_OLD\x10\x03\"@\n" +
 	"\tHeartbeat\x123\n" +
 	"\asent_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x06sentAt\"\xd1\x02\n" +
 	"\rMetricsReport\x12=\n" +

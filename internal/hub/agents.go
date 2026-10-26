@@ -19,6 +19,7 @@ import (
 
 	agentv1 "github.com/CodexCircle/Regulus/internal/gen/regulus/agent/v1"
 	"github.com/CodexCircle/Regulus/internal/protocol"
+	"github.com/CodexCircle/Regulus/internal/update"
 )
 
 // Errors returned by SendCommand.
@@ -44,6 +45,19 @@ type AgentInfo struct {
 	ConnectedAt   time.Time
 	LastHeartbeat time.Time // zero until the first heartbeat
 	LastMetrics   *agentv1.MetricsReport
+	// ProtocolVersion is the version negotiated for the connection.
+	ProtocolVersion uint32
+	// Compat tells how the agent's release relates to the hub's.
+	Compat update.Compat
+}
+
+// Rejection is the last time the hub refused an enrolled agent because its
+// version cannot work with this hub. The dashboard shows it until the agent
+// connects.
+type Rejection struct {
+	At      time.Time
+	Version string
+	Message string
 }
 
 // agentServer implements the hub side of the agent contract and keeps the
@@ -59,11 +73,15 @@ type agentServer struct {
 	metrics *metricsStore
 	events  *broker
 
+	// hubVersion is the release of the hub, to judge the release of agents.
+	hubVersion string
+
 	// seen, if set, is told when an agent connects and when it goes away.
 	seen func(info AgentInfo, at time.Time)
 
 	mu       sync.Mutex
 	sessions map[string]*session
+	rejected map[string]Rejection // by agent id, only for agents with a certificate
 }
 
 // session is one connected agent.
@@ -90,6 +108,7 @@ func newAgentServer(log *slog.Logger) *agentServer {
 		metrics:           newMetricsStore(defaultMetricsRetention),
 		events:            newBroker(),
 		sessions:          map[string]*session{},
+		rejected:          map[string]Rejection{},
 	}
 }
 
@@ -103,14 +122,27 @@ func (s *agentServer) Connect(stream grpc.BidiStreamingServer[agentv1.AgentMessa
 	if err != nil {
 		return err
 	}
-	if !protocol.Supported(hello.GetProtocolVersion()) {
-		s.log.Warn("rejecting agent", "protocol_version", hello.GetProtocolVersion(), "agent_version", hello.GetAgentVersion())
-		return stream.Send(&agentv1.HubMessage{Payload: &agentv1.HubMessage_Reject{Reject: &agentv1.Reject{
+	negotiated, ok := protocol.Negotiate(hello.GetMinProtocolVersion(), hello.GetProtocolVersion())
+	if !ok {
+		msg := fmt.Sprintf("protocol version %d is not supported by this hub (supported: %d to %d): update the agent", hello.GetProtocolVersion(), protocol.MinSupported, protocol.Version)
+		if hello.GetProtocolVersion() > protocol.Version {
+			msg = fmt.Sprintf("the agent needs protocol version %d or newer but this hub speaks %d to %d: update the hub first", max(hello.GetMinProtocolVersion(), hello.GetProtocolVersion()), protocol.MinSupported, protocol.Version)
+		}
+		return s.reject(ctx, stream, hello, &agentv1.Reject{
 			Reason:             agentv1.Reject_REASON_UNSUPPORTED_PROTOCOL_VERSION,
-			Message:            fmt.Sprintf("protocol version %d is not supported by this hub (supported: %d to %d)", hello.GetProtocolVersion(), protocol.MinSupported, protocol.Version),
+			Message:            msg,
 			MinProtocolVersion: protocol.MinSupported,
 			MaxProtocolVersion: protocol.Version,
-		}}})
+		})
+	}
+	compat := update.CheckCompat(s.hubVersion, hello.GetAgentVersion())
+	if compat == update.CompatTooOld {
+		return s.reject(ctx, stream, hello, &agentv1.Reject{
+			Reason:             agentv1.Reject_REASON_AGENT_TOO_OLD,
+			Message:            fmt.Sprintf("agent version %s is too far behind this hub (%s): only the same release series and the previous one are supported; update the agent", hello.GetAgentVersion(), s.hubVersion),
+			MinProtocolVersion: protocol.MinSupported,
+			MaxProtocolVersion: protocol.Version,
+		})
 	}
 
 	id := hello.GetAgentId()
@@ -129,12 +161,12 @@ func (s *agentServer) Connect(stream grpc.BidiStreamingServer[agentv1.AgentMessa
 			return status.Errorf(codes.Internal, "cannot assign an agent id: %v", err)
 		}
 	}
-	sess := s.register(id, hello)
+	sess := s.register(id, hello, negotiated, compat)
 	defer s.unregister(sess)
 	s.log.Info("agent connected", "agent", id, "version", hello.GetAgentVersion(), "host", hello.GetSystem().GetHostname())
 
 	if err := stream.Send(&agentv1.HubMessage{Payload: &agentv1.HubMessage_Welcome{Welcome: &agentv1.Welcome{
-		ProtocolVersion:   protocol.Version,
+		ProtocolVersion:   negotiated,
 		AgentId:           id,
 		HeartbeatInterval: durationpb.New(s.heartbeatInterval),
 		MetricsInterval:   durationpb.New(s.metricsInterval),
@@ -260,13 +292,15 @@ func (s *agentServer) handle(sess *session, msg *agentv1.AgentMessage) error {
 // register adds the agent to the registry. A previous connection with the same
 // id is replaced: an agent that reconnects after a network failure must not be
 // blocked by its own stale stream.
-func (s *agentServer) register(id string, hello *agentv1.Hello) *session {
+func (s *agentServer) register(id string, hello *agentv1.Hello, negotiated uint32, compat update.Compat) *session {
 	sess := &session{
 		info: AgentInfo{
-			ID:          id,
-			Version:     hello.GetAgentVersion(),
-			System:      hello.GetSystem(),
-			ConnectedAt: time.Now(),
+			ID:              id,
+			Version:         hello.GetAgentVersion(),
+			System:          hello.GetSystem(),
+			ConnectedAt:     time.Now(),
+			ProtocolVersion: negotiated,
+			Compat:          compat,
 		},
 		out:      make(chan *agentv1.HubMessage),
 		replaced: make(chan struct{}),
@@ -278,6 +312,7 @@ func (s *agentServer) register(id string, hello *agentv1.Hello) *session {
 	s.mu.Lock()
 	old := s.sessions[id]
 	s.sessions[id] = sess
+	delete(s.rejected, id)
 	s.mu.Unlock()
 
 	if old != nil {
@@ -414,4 +449,30 @@ func newAgentID() (string, error) {
 		return "", err
 	}
 	return "agent-" + hex.EncodeToString(b), nil
+}
+
+// reject tells the agent why it is refused, remembers it for the dashboard when
+// the agent is known by its certificate, and ends the stream.
+func (s *agentServer) reject(ctx context.Context, stream grpc.BidiStreamingServer[agentv1.AgentMessage, agentv1.HubMessage], hello *agentv1.Hello, r *agentv1.Reject) error {
+	s.log.Warn("rejecting agent", "reason", r.GetReason().String(), "protocol_version", hello.GetProtocolVersion(), "agent_version", hello.GetAgentVersion())
+	if who, ok := identityFrom(ctx); ok {
+		s.mu.Lock()
+		if len(s.rejected) < maxRejections {
+			s.rejected[who.AgentID] = Rejection{At: time.Now(), Version: hello.GetAgentVersion(), Message: r.GetMessage()}
+		}
+		s.mu.Unlock()
+	}
+	return stream.Send(&agentv1.HubMessage{Payload: &agentv1.HubMessage_Reject{Reject: r}})
+}
+
+// maxRejections bounds the memory used to remember refused agents.
+const maxRejections = 1000
+
+// Rejection returns why an enrolled agent was last refused, if it has not
+// connected since.
+func (s *agentServer) rejection(id string) (Rejection, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.rejected[id]
+	return r, ok
 }

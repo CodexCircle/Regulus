@@ -35,6 +35,9 @@ const (
 	statusStale     = "stale"
 	statusOffline   = "offline"
 	statusRevoked   = "revoked"
+	// statusIncompatible: an enrolled agent the hub refused because its
+	// version cannot work with this hub; see incompatible_reason.
+	statusIncompatible = "incompatible"
 )
 
 // agentJSON is the JSON form of an agent in GET /api/agents.
@@ -55,6 +58,13 @@ type agentJSON struct {
 	LastHeartbeat    *time.Time `json:"last_heartbeat"`
 	MetricsAt        *time.Time `json:"metrics_at"`
 	UptimeSeconds    *uint64    `json:"uptime_seconds"`
+	// Compatibility says how the agent's release relates to the hub's:
+	// current, behind, ahead or unknown (see update.Compat).
+	Compatibility   string `json:"compatibility,omitempty"`
+	ProtocolVersion uint32 `json:"protocol_version,omitempty"`
+	// IncompatibleReason is why the hub refused the agent, with the status
+	// incompatible.
+	IncompatibleReason string `json:"incompatible_reason,omitempty"`
 }
 
 func toAgentJSON(a AgentInfo, now time.Time, staleAfter time.Duration) agentJSON {
@@ -64,6 +74,9 @@ func toAgentJSON(a AgentInfo, now time.Time, staleAfter time.Duration) agentJSON
 		Version:     a.Version,
 		Status:      statusConnected,
 		ConnectedAt: &connected,
+
+		Compatibility:   string(a.Compat),
+		ProtocolVersion: a.ProtocolVersion,
 	}
 	if s := a.System; s != nil {
 		out.Hostname = s.Hostname
@@ -134,7 +147,7 @@ func agentsHandler(src AgentSource) http.HandlerFunc {
 			if r.URL.Query().Get("all") == "true" {
 				for _, e := range enrolled {
 					if !seen[e.ID] {
-						agents = append(agents, offlineJSON(e))
+						agents = append(agents, offlineJSON(e, src))
 					}
 				}
 				slices.SortFunc(agents, func(a, b agentJSON) int { return strings.Compare(a.ID, b.ID) })
@@ -144,11 +157,25 @@ func agentsHandler(src AgentSource) http.HandlerFunc {
 	}
 }
 
+// rejectionSource is implemented by sources that remember why they refused an
+// enrolled agent.
+type rejectionSource interface {
+	Rejection(id string) (Rejection, bool)
+}
+
 // offlineJSON is the JSON form of an enrolled agent that is not connected.
-func offlineJSON(e fleet.Agent) agentJSON {
+func offlineJSON(e fleet.Agent, src AgentSource) agentJSON {
 	out := agentJSON{ID: e.ID, Name: e.Name, Version: e.Version, Status: statusOffline, Hostname: e.Hostname, OSVersion: e.OSVersion}
 	if e.Revoked {
 		out.Status = statusRevoked
+	} else if rs, ok := src.(rejectionSource); ok {
+		if r, ok := rs.Rejection(e.ID); ok {
+			out.Status = statusIncompatible
+			out.IncompatibleReason = r.Message
+			if r.Version != "" {
+				out.Version = r.Version
+			}
+		}
 	}
 	if !e.LastSeen.IsZero() {
 		t := e.LastSeen.UTC()
@@ -314,7 +341,7 @@ func agentGetHandler(src AgentSource) http.HandlerFunc {
 			}
 			for _, e := range enrolled {
 				if e.ID == id {
-					writeJSONBody(w, http.StatusOK, offlineJSON(e))
+					writeJSONBody(w, http.StatusOK, offlineJSON(e, src))
 					return
 				}
 			}

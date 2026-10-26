@@ -127,6 +127,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, ui fs.FS, opt
 	for _, opt := range opts {
 		opt(h)
 	}
+	h.agents.hubVersion = h.version
 	src := h.updateSrc
 	if src == nil {
 		src = &update.GitHubSource{Repo: ReleaseRepo, UserAgent: "regulus-hub/" + h.version}
@@ -143,6 +144,12 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, ui fs.FS, opt
 		Enabled: cfg.Updates.Check,
 	})
 	return h, nil
+}
+
+// Rejection returns why an enrolled agent was last refused because of its
+// version, if it has not connected since.
+func (h *Hub) Rejection(id string) (Rejection, bool) {
+	return h.agents.rejection(id)
 }
 
 // Updates returns the manager that looks for new releases.

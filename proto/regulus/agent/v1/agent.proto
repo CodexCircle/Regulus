@@ -55,6 +55,10 @@ message Hello {
   // the hub assigns one in Welcome.
   string agent_id = 3;
   SystemInfo system = 4;
+  // Lowest protocol version the agent still speaks. Zero (an agent that
+  // predates this field) means it speaks only protocol_version. The hub picks
+  // the highest version both sides speak.
+  uint32 min_protocol_version = 5;
 }
 
 // SystemInfo describes the machine the agent runs on. It rarely changes.
@@ -87,6 +91,10 @@ message Reject {
     REASON_UNSPECIFIED = 0;
     REASON_UNSUPPORTED_PROTOCOL_VERSION = 1;
     REASON_UNAUTHORIZED = 2;
+    // The protocol would work but the release of the agent is further behind
+    // the hub than the hub supports (the current and the previous release
+    // series are accepted). Update the agent.
+    REASON_AGENT_TOO_OLD = 3;
   }
   Reason reason = 1;
   // Human readable explanation, safe to show in the dashboard.

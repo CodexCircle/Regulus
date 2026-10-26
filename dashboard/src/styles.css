@@ -349,6 +349,7 @@ td.wrap {
   border-color: var(--warn);
 }
 
+.status.incompatible,
 .status.revoked {
   color: var(--danger);
   border-color: var(--danger);

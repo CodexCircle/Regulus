@@ -6,7 +6,12 @@ export interface Agent {
   version: string;
   // offline and revoked only come with fetchAgents(.., true): enrolled agents
   // that are not connected.
-  status: "connected" | "stale" | "offline" | "revoked";
+  status: "connected" | "stale" | "offline" | "revoked" | "incompatible";
+  // How the agent's release relates to the hub's (connected agents only).
+  compatibility?: "current" | "behind" | "ahead" | "unknown";
+  protocol_version?: number;
+  // Why the hub refused the agent, with the status "incompatible".
+  incompatible_reason?: string;
   hostname?: string;
   os?: string;
   os_version?: string;

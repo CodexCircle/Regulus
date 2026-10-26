@@ -1320,11 +1320,14 @@ components:
         version: { type: string }
         status:
           type: string
-          enum: [connected, stale, offline, revoked]
+          enum: [connected, stale, offline, revoked, incompatible]
           description: |
             `stale` when nothing was heard from the agent for two heartbeat
-            intervals. `offline` and `revoked` only appear with `all=true`, for
-            enrolled agents that are not connected.
+            intervals. `offline`, `revoked` and `incompatible` only appear with
+            `all=true`, for enrolled agents that are not connected.
+            `incompatible`: the hub refused the agent because its version cannot
+            work with this hub (see `incompatible_reason`); it stays until the
+            agent connects.
         hostname: { type: string }
         os: { type: string }
         os_version: { type: string }
@@ -1343,6 +1346,20 @@ components:
         last_heartbeat: { type: [string, "null"], format: date-time }
         metrics_at: { type: [string, "null"], format: date-time }
         uptime_seconds: { type: [integer, "null"] }
+        compatibility:
+          type: string
+          enum: [current, behind, ahead, unknown]
+          description: |
+            For a connected agent, how its release relates to the hub's. The hub
+            accepts the same release series and the previous one. `behind`: older
+            but supported, worth updating. `ahead`: newer than the hub (update the
+            hub). `unknown`: one of the two is not a release build.
+        protocol_version:
+          type: integer
+          description: The protocol version negotiated for the connection.
+        incompatible_reason:
+          type: string
+          description: Why the hub refused the agent; with the status `incompatible`.
     MetricsPoint:
       type: object
       required:

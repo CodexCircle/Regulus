@@ -49,8 +49,10 @@ type Options struct {
 	MinBackoff, MaxBackoff time.Duration
 }
 
-// RejectedError is returned by Run when the hub refuses the agent. Retrying
-// would not help, so Run does not.
+// RejectedError is returned by Run when the hub refuses the agent for good:
+// it is revoked or unknown. Retrying would not help, so Run does not. A
+// refusal because of versions is different: updating the hub or the agent
+// fixes it, so Run keeps trying (see versionRejection).
 type RejectedError struct {
 	Reason  agentv1.Reject_Reason
 	Message string
@@ -58,6 +60,12 @@ type RejectedError struct {
 
 func (e *RejectedError) Error() string {
 	return fmt.Sprintf("rejected by the hub (%s): %s", e.Reason, e.Message)
+}
+
+// versionRejection reports whether a refusal is about versions, which change
+// when something is updated.
+func versionRejection(r agentv1.Reject_Reason) bool {
+	return r == agentv1.Reject_REASON_UNSUPPORTED_PROTOCOL_VERSION || r == agentv1.Reject_REASON_AGENT_TOO_OLD
 }
 
 type agent struct {
@@ -101,9 +109,16 @@ func Run(ctx context.Context, conn grpc.ClientConnInterface, opts Options) error
 		}
 		var rejected *RejectedError
 		if errors.As(err, &rejected) {
-			return err
+			if !versionRejection(rejected.Reason) {
+				return err
+			}
+			// Stay up and ask again slowly: the hub or this agent will be
+			// updated, and nobody should have to restart the service.
+			backoff = opts.MaxBackoff
+			a.log.Error("the hub refuses this agent because of the versions involved; it will keep trying", "err", err, "retry_in", backoff)
+		} else {
+			a.log.Warn("connection to the hub lost", "err", err, "retry_in", backoff)
 		}
-		a.log.Warn("connection to the hub lost", "err", err, "retry_in", backoff)
 		if established {
 			backoff = opts.MinBackoff
 		}
@@ -127,10 +142,11 @@ func (a *agent) session(ctx context.Context) (established bool, err error) {
 		return false, err
 	}
 	if err := stream.Send(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Hello{Hello: &agentv1.Hello{
-		ProtocolVersion: protocol.Version,
-		AgentVersion:    a.opts.Version,
-		AgentId:         a.id,
-		System:          a.system,
+		ProtocolVersion:    protocol.Version,
+		MinProtocolVersion: protocol.MinSupported,
+		AgentVersion:       a.opts.Version,
+		AgentId:            a.id,
+		System:             a.system,
 	}}}); err != nil && !errors.Is(err, io.EOF) {
 		return false, err
 	} // on EOF the stream was closed by the hub: Recv below returns the reason

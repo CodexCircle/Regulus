@@ -246,14 +246,14 @@ func TestCommands(t *testing.T) {
 	}
 }
 
-func TestRejectionIsFatal(t *testing.T) {
+func TestRevocationIsFatal(t *testing.T) {
 	conn := newFakeHub(t, func(_ int, stream grpc.BidiStreamingServer[agentv1.AgentMessage, agentv1.HubMessage]) error {
 		if _, err := stream.Recv(); err != nil {
 			return err
 		}
 		return stream.Send(&agentv1.HubMessage{Payload: &agentv1.HubMessage_Reject{Reject: &agentv1.Reject{
-			Reason:  agentv1.Reject_REASON_UNSUPPORTED_PROTOCOL_VERSION,
-			Message: "too old",
+			Reason:  agentv1.Reject_REASON_UNAUTHORIZED,
+			Message: "revoked",
 		}}})
 	})
 	_, res := runAgent(t, conn, opts())
@@ -261,11 +261,41 @@ func TestRejectionIsFatal(t *testing.T) {
 	select {
 	case err := <-res:
 		var rejected *RejectedError
-		if !errors.As(err, &rejected) || rejected.Reason != agentv1.Reject_REASON_UNSUPPORTED_PROTOCOL_VERSION || rejected.Message != "too old" {
+		if !errors.As(err, &rejected) || rejected.Reason != agentv1.Reject_REASON_UNAUTHORIZED || rejected.Message != "revoked" {
 			t.Fatalf("error = %v, want a RejectedError", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run kept retrying after a rejection")
+	}
+}
+
+// A refusal because of versions ends when the hub or the agent is updated, so
+// the agent keeps asking instead of stopping for good.
+func TestVersionRejectionIsRetried(t *testing.T) {
+	for _, reason := range []agentv1.Reject_Reason{agentv1.Reject_REASON_UNSUPPORTED_PROTOCOL_VERSION, agentv1.Reject_REASON_AGENT_TOO_OLD} {
+		welcomed := make(chan struct{})
+		conn := newFakeHub(t, func(n int, stream grpc.BidiStreamingServer[agentv1.AgentMessage, agentv1.HubMessage]) error {
+			if _, err := stream.Recv(); err != nil {
+				return err
+			}
+			if n < 3 {
+				return stream.Send(&agentv1.HubMessage{Payload: &agentv1.HubMessage_Reject{Reject: &agentv1.Reject{Reason: reason, Message: "update me"}}})
+			}
+			if err := stream.Send(welcome("a", time.Hour, time.Hour)); err != nil {
+				return err
+			}
+			close(welcomed)
+			<-stream.Context().Done()
+			return nil
+		})
+		_, res := runAgent(t, conn, opts())
+		select {
+		case <-welcomed:
+		case err := <-res:
+			t.Fatalf("%v: Run stopped with %v instead of trying again", reason, err)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%v: the agent never got in", reason)
+		}
 	}
 }
 

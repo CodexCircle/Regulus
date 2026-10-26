@@ -94,6 +94,19 @@ describe("ServersPage", () => {
     expect(calls[0].path).toBe("/api/agents?all=true");
   });
 
+  it("tells which servers run another release than the hub", async () => {
+    const behind: Agent = { ...online, id: "b", name: "Behind", compatibility: "behind", version: "0.2.1" };
+    const ahead: Agent = { ...online, id: "a", name: "Ahead", compatibility: "ahead", version: "0.4.0" };
+    const refused: Agent = { ...offline, id: "r", hostname: "r.lan", status: "incompatible", incompatible_reason: "agent version 0.1.0 is too far behind", version: "0.1.0" };
+    mockHub({ "GET /api/agents?all=true": () => ({ data: [online, behind, ahead, refused] }) });
+    renderAs(viewer, <ServersPage />);
+
+    expect(await screen.findByText("behind the hub")).toBeInTheDocument();
+    expect(screen.getByText("ahead of the hub: update the hub")).toBeInTheDocument();
+    expect(screen.getByText("too old for this hub: update it")).toBeInTheDocument();
+    expect(screen.getByText("incompatible")).toBeInTheDocument();
+  });
+
   it("says when there is no server", async () => {
     mockHub({ "GET /api/agents?all=true": () => ({ data: [] }) });
     renderAs(viewer, <ServersPage />);
