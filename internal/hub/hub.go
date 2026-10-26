@@ -48,6 +48,7 @@ type Hub struct {
 	auth      *auth.Service
 	fleet     *fleet.Service
 	updates   *update.Manager
+	rollout   *rolloutState
 	updateSrc update.Source   // nil: the GitHub releases of ReleaseRepo
 	updateVer update.Verifier // nil: the Sigstore signature of the release workflow
 	agentAddr atomic.Value    // string: where the agent listener is bound, once it is
@@ -147,20 +148,26 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, ui fs.FS, opt
 	if cfg.Updates.Apply {
 		applyDir = update.ApplyDir(cfg.DataDir)
 	}
+	h.rollout = newRolloutState()
+	stager := &update.Stager{
+		Dir:      filepath.Join(cfg.DataDir, "updates"),
+		Verifier: ver,
+	}
+	if _, ok := update.ParseBuildVersion(h.version); ok {
+		stager.Keep = h.version
+	}
+	h.agents.files = stager
 	h.updates = update.New(update.Options{
 		ApplyDir: applyDir,
 		DB:       db,
 		Log:      log.With("component", "updates"),
 		Source:   src,
-		Stager: &update.Stager{
-			Dir:      filepath.Join(cfg.DataDir, "updates"),
-			Verifier: ver,
-		},
-		Audit:   authn,
-		Version: h.version,
-		GOOS:    runtime.GOOS,
-		GOARCH:  runtime.GOARCH,
-		Enabled: cfg.Updates.Check,
+		Stager:   stager,
+		Audit:    authn,
+		Version:  h.version,
+		GOOS:     runtime.GOOS,
+		GOARCH:   runtime.GOARCH,
+		Enabled:  cfg.Updates.Check,
 	})
 	return h, nil
 }
@@ -200,6 +207,7 @@ func (h *Hub) AgentConn() (*grpc.ClientConn, error) {
 
 // Close releases the hub resources.
 func (h *Hub) Close() error {
+	h.rollout.stop()
 	h.updates.Close()
 	return h.db.Close()
 }
@@ -207,7 +215,7 @@ func (h *Hub) Close() error {
 // Serve serves HTTP on ln until ctx is cancelled, then shuts down gracefully.
 func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 	srv := &http.Server{
-		Handler:           NewHandler(Deps{UI: h.ui, Agents: h, Layouts: h, Log: h.log, Auth: h.auth, Fleet: h, Updates: h.updates}),
+		Handler:           NewHandler(Deps{UI: h.ui, Agents: h, Layouts: h, Log: h.log, Auth: h.auth, Fleet: h, Updates: h.updates, Rollout: h}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -235,6 +243,22 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 	}
 
 	defer h.serveLocal(ln.Addr().String())()
+
+	h.rollout.mu.Lock()
+	h.rollout.base = ctx
+	h.rollout.mu.Unlock()
+	rolloutTick := time.NewTicker(5 * time.Minute)
+	defer rolloutTick.Stop()
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-rolloutTick.C:
+				h.autoRollout(ctx)
+			}
+		}
+	}()
 
 	updatesDone := make(chan struct{})
 	go func() {
@@ -358,6 +382,9 @@ type Deps struct {
 	// Updates reports and steers the updates of the hub. May be nil in tests;
 	// the endpoints then answer 404.
 	Updates UpdateControl
+	// Rollout updates the managed servers to the version of the hub. May be nil
+	// in tests; the endpoints then answer 404.
+	Rollout RolloutControl
 }
 
 // route is a protected API endpoint.
@@ -375,6 +402,7 @@ func apiRoutes(d Deps) []route {
 	h := layoutHandlers{layouts: d.Layouts, log: d.Log}
 	f := fleetHandlers{fleet: d.Fleet}
 	u := updateHandlers{updates: d.Updates}
+	r := rolloutHandlers{rollout: d.Rollout}
 	// Without authentication (tests that exercise the handlers alone) there is
 	// no user to check.
 	need := func(permission string, next http.Handler) http.Handler {
@@ -397,6 +425,9 @@ func apiRoutes(d Deps) []route {
 		{pattern: "PUT /api/updates/settings", handler: need(auth.PermCoreUpdate, auth.RequireJSON(http.HandlerFunc(u.settings))), needsAuth: true},
 		{pattern: "POST /api/updates/check", handler: need(auth.PermCoreUpdate, auth.RequireJSON(http.HandlerFunc(u.check))), needsAuth: true},
 		{pattern: "POST /api/updates/download", handler: need(auth.PermCoreUpdate, auth.RequireJSON(http.HandlerFunc(u.download))), needsAuth: true},
+		{pattern: "GET /api/updates/rollout", handler: need(auth.PermCoreUpdate, http.HandlerFunc(r.status)), needsAuth: true},
+		{pattern: "POST /api/updates/rollout", handler: need(auth.PermCoreUpdate, auth.RequireJSON(http.HandlerFunc(r.start))), needsAuth: true},
+		{pattern: "POST /api/updates/rollout/stop", handler: need(auth.PermCoreUpdate, auth.RequireJSON(http.HandlerFunc(r.stop))), needsAuth: true},
 		{pattern: "POST /api/updates/apply", handler: need(auth.PermCoreUpdate, auth.RequireJSON(http.HandlerFunc(u.apply))), needsAuth: true},
 		{pattern: "GET /api/openapi.yaml", handler: http.HandlerFunc(serveOpenAPI)},
 	}

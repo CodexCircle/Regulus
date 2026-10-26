@@ -89,7 +89,7 @@ func TestApplyRefusals(t *testing.T) {
 	}
 }
 
-func TestResultOfTheHelperIsAuditedOnceAndTheDownloadForgotten(t *testing.T) {
+func TestResultOfTheHelperIsAuditedOnce(t *testing.T) {
 	r := newApplyRig(t)
 	dir := r.m.opts.ApplyDir
 	at := time.Date(2026, 10, 25, 12, 5, 0, 0, time.UTC)
@@ -119,8 +119,9 @@ func TestResultOfTheHelperIsAuditedOnceAndTheDownloadForgotten(t *testing.T) {
 	if n != 1 {
 		t.Errorf("update_applied recorded %d times", n)
 	}
-	if _, err := os.Stat(filepath.Join(r.m.opts.Stager.Dir, "0.2.0")); err == nil {
-		t.Error("the installed release is still in the cache")
+	// The files stay: the hub serves them to the agents it manages.
+	if _, err := os.Stat(filepath.Join(r.m.opts.Stager.Dir, "0.2.0")); err != nil {
+		t.Errorf("the installed release left the cache: %v", err)
 	}
 
 	_ = WriteResult(dir, ApplyResult{Version: "0.3.0", Outcome: OutcomeRolledBack, At: at.Add(time.Hour)})

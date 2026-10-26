@@ -16,7 +16,7 @@ UMask=0077
 
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/usr/bin /var/lib/regulus
+ReadWritePaths=/usr/bin -/var/lib/regulus
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true

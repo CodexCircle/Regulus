@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -285,5 +286,155 @@ func TestStageWithAVerifierNeedsTheSignatureFile(t *testing.T) {
 	_, err := s.Stage(t.Context(), rel.release(), "linux", "amd64")
 	if err == nil || !strings.Contains(err.Error(), "origin cannot be verified") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestStagePlatformsKeepsEveryArchive(t *testing.T) {
+	rel := newFakeRelease(t, "0.2.0")
+	v, _ := ParseVersion("0.2.0")
+	arm := ArchiveName(v, "linux", "arm64")
+	body := []byte("arm build")
+	sum := sha256.Sum256(body)
+	rel.files[arm] = body
+	rel.files[checksumsName] = append(rel.files[checksumsName], []byte(hex.EncodeToString(sum[:])+"  "+arm+"\n")...)
+	s := newStager(t)
+	s.Verifier = &fakeVerifier{}
+
+	st, err := s.StagePlatforms(t.Context(), rel.release(), Platform{"linux", "amd64"}, Platform{"linux", "arm64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Archive != "regulus_0.2.0_linux_amd64.tar.gz" {
+		t.Errorf("primary archive = %s", st.Archive)
+	}
+	if !s.HasArchives("0.2.0", Platform{"linux", "amd64"}, Platform{"linux", "arm64"}) {
+		t.Error("an archive is missing")
+	}
+	if s.HasArchives("0.2.0", Platform{"linux", "riscv64"}) {
+		t.Error("an archive that was never staged is reported")
+	}
+	name, sha, size, err := s.Offer("0.2.0", Platform{"linux", "arm64"})
+	if err != nil || name != arm || sha != hex.EncodeToString(sum[:]) || size != int64(len(body)) {
+		t.Errorf("offer = %q %q %d, %v", name, sha, size, err)
+	}
+
+	// A platform the release lacks fails the whole staging.
+	if _, err := s.StagePlatforms(t.Context(), rel.release(), Platform{"linux", "amd64"}, Platform{"linux", "s390x"}); err == nil {
+		t.Error("staged a platform the release does not have")
+	}
+}
+
+func TestStagerKeepsTheRunningVersionAndAWaitingNewerOne(t *testing.T) {
+	s := newStager(t)
+	s.Keep = "0.1.0"
+	for _, v := range []string{"0.1.0", "0.3.0"} {
+		if _, err := s.Stage(t.Context(), newFakeRelease(t, v).release(), "linux", "amd64"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Staging the running version again must not drop the newer one that waits.
+	if _, err := s.Stage(t.Context(), newFakeRelease(t, "0.1.0").release(), "linux", "amd64"); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(s.Dir)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if strings.Join(names, ",") != "0.1.0,0.3.0" {
+		t.Errorf("cache holds %v", names)
+	}
+	// A newer release replaces the one that waited but not the running one.
+	if _, err := s.Stage(t.Context(), newFakeRelease(t, "0.4.0").release(), "linux", "amd64"); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ = os.ReadDir(s.Dir)
+	names = nil
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if strings.Join(names, ",") != "0.1.0,0.4.0" {
+		t.Errorf("cache holds %v", names)
+	}
+}
+
+func TestOpenServesOnlyTheFilesOfAStagedRelease(t *testing.T) {
+	s := newStager(t)
+	if _, err := s.Stage(t.Context(), newFakeRelease(t, "0.2.0").release(), "linux", "amd64"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"regulus_0.2.0_linux_amd64.tar.gz", checksumsName, bundleName} {
+		f, size, err := s.Open("0.2.0", name)
+		if err != nil || size == 0 {
+			t.Errorf("%s: %d, %v", name, size, err)
+			continue
+		}
+		_ = f.Close()
+	}
+	for _, tc := range [][2]string{
+		{"0.2.0", metaName}, {"0.2.0", "../0.2.0/staged.json"}, {"0.2.0", "regulus_9.9.9_linux_amd64.tar.gz"},
+		{"../etc", checksumsName}, {"0.2", checksumsName}, {"0.3.0", checksumsName},
+	} {
+		if f, _, err := s.Open(tc[0], tc[1]); err == nil {
+			_ = f.Close()
+			t.Errorf("Open(%q, %q) succeeded", tc[0], tc[1])
+		}
+	}
+}
+
+func TestStageFetchedChecksWhatTheHubSends(t *testing.T) {
+	rel := newFakeRelease(t, "0.2.0")
+	v, _ := ParseVersion("0.2.0")
+	plat := Platform{"linux", "amd64"}
+	name := ArchiveName(v, plat.OS, plat.Arch)
+	fetch := func(files map[string][]byte) Fetcher {
+		return func(_ context.Context, file string, w io.Writer) error {
+			data, ok := files[file]
+			if !ok {
+				return errors.New("no such file")
+			}
+			_, err := w.Write(data)
+			return err
+		}
+	}
+	sha := sha256.Sum256(rel.files[name])
+	good := hex.EncodeToString(sha[:])
+
+	s := newStager(t)
+	fv := &fakeVerifier{}
+	s.Verifier = fv
+	st, err := s.StageFetched(t.Context(), v, plat, good, fetch(rel.files))
+	if err != nil || st.Verified != VerifiedSignature || st.Archive != name {
+		t.Fatalf("staged = %+v, %v", st, err)
+	}
+	if fv.tag != "v0.2.0" {
+		t.Errorf("verified tag %q", fv.tag)
+	}
+	if err := s.Verify(st); err != nil {
+		t.Error(err)
+	}
+
+	for label, tc := range map[string]struct {
+		files map[string][]byte
+		sha   string
+		want  string
+	}{
+		"hub names another checksum": {rel.files, strings.Repeat("0", 64), "not the one in the checksum list"},
+		"tampered archive":           {map[string][]byte{name: []byte("tampered"), checksumsName: rel.files[checksumsName], bundleName: rel.files[bundleName]}, good, "does not match its checksum"},
+		"missing bundle":             {map[string][]byte{name: rel.files[name], checksumsName: rel.files[checksumsName]}, good, "no such file"},
+	} {
+		_, err := newStager(t).StageFetched(t.Context(), v, plat, tc.sha, fetch(tc.files))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: error = %v", label, err)
+		}
+	}
+
+	bad := newStager(t)
+	bad.Verifier = &fakeVerifier{err: errors.New("signature is not valid")}
+	if _, err := bad.StageFetched(t.Context(), v, plat, good, fetch(rel.files)); err == nil || !strings.Contains(err.Error(), "signature is not valid") {
+		t.Errorf("bad signature: %v", err)
+	}
+	if _, ok := bad.Current(); ok {
+		t.Error("a release with a bad signature was kept")
 	}
 }

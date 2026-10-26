@@ -1,0 +1,13 @@
+[Unit]
+Description=Install the Regulus agent update the agent fetched from the hub
+Documentation=https://github.com/CodexCircle/Regulus
+
+[Path]
+# The agent (an unprivileged user) leaves this file after it fetched the
+# release the hub offered. It names a version and nothing else:
+# regulus-agent-update.service checks everything itself.
+PathExists=/var/lib/regulus-agent/update-apply/request.json
+Unit=regulus-agent-update.service
+
+[Install]
+WantedBy=multi-user.target

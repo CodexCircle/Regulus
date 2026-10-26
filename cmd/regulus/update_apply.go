@@ -25,6 +25,7 @@ func runUpdateApply(args []string) int {
 	stateDir := fs.String("state-dir", "/var/lib/regulus-update", "directory owned by root for the previous binary and the signature trust cache")
 	unit := fs.String("unit", "regulus.service", "the service to restart")
 	binary := fs.String("binary", "", "the executable to replace (default: this one)")
+	isAgent := fs.Bool("agent", false, "this server runs the agent: healthy means the agent connected to the hub again")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -61,6 +62,7 @@ func runUpdateApply(args []string) int {
 		StateDir: *stateDir,
 		Binary:   *binary,
 		Unit:     *unit,
+		Agent:    *isAgent,
 		Verifier: &update.SigstoreVerifier{Trust: update.PublicTrust(filepath.Join(*stateDir, "tuf"))},
 	}
 	res, err := in.Apply(ctx)

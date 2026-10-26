@@ -116,3 +116,25 @@ func writeJSON(path string, v any, mode os.FileMode) error {
 
 // ErrNoRequest is returned by the installer when the hub left nothing to do.
 var ErrNoRequest = errors.New("there is no update request")
+
+// ConnectedName is the file an agent writes when the hub accepted it.
+const ConnectedName = "connected.json"
+
+// Connected is written by an agent each time the hub accepts it. After an
+// update the helper reads it: an agent that connected again with the new
+// version is a healthy one.
+type Connected struct {
+	Version string    `json:"version"`
+	At      time.Time `json:"at"`
+}
+
+// WriteConnected records that the agent of dataDir is connected.
+func WriteConnected(dataDir string, c Connected) error {
+	return writeJSON(filepath.Join(dataDir, ConnectedName), c, 0o644)
+}
+
+// ReadConnected returns what the agent of dataDir last wrote.
+func ReadConnected(dataDir string) (Connected, bool) {
+	var c Connected
+	return c, readJSON(filepath.Join(dataDir, ConnectedName), &c)
+}

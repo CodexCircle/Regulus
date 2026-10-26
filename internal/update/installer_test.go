@@ -103,7 +103,7 @@ func newInstallFixture(t *testing.T, installed, staged string, archiveEntries ma
 		}
 		return nil, errors.New("unexpected command " + name)
 	}
-	f.in.Probe = func(context.Context) (string, error) {
+	f.in.Probe = func(context.Context, time.Time) (string, error) {
 		data, err := os.ReadFile(f.binary)
 		if err != nil {
 			return "", err
@@ -291,5 +291,27 @@ func TestInstallerDoesNotFollowALinkInTheStagingDirectory(t *testing.T) {
 	f.request(t, "0.2.0")
 	if res, err := f.in.Apply(t.Context()); err == nil || res.Outcome != OutcomeFailed {
 		t.Fatalf("result = %+v, err = %v", res, err)
+	}
+}
+
+func TestAgentHealthIsConnectingAgainAfterTheRestart(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	in := f.in
+	in.Agent = true
+	in.Probe = nil
+	in.defaults()
+	restart := time.Date(2026, 10, 26, 3, 0, 0, 0, time.UTC)
+
+	if _, err := in.Probe(t.Context(), restart); err == nil {
+		t.Error("an agent that never wrote its file is healthy")
+	}
+	// What the agent wrote before the restart is not proof.
+	_ = WriteConnected(f.dataDir, Connected{Version: "0.2.0", At: restart.Add(-time.Minute)})
+	if _, err := in.Probe(t.Context(), restart); err == nil {
+		t.Error("an old connection counts")
+	}
+	_ = WriteConnected(f.dataDir, Connected{Version: "0.2.0", At: restart.Add(time.Second)})
+	if v, err := in.Probe(t.Context(), restart); err != nil || v != "0.2.0" {
+		t.Errorf("probe = %q, %v", v, err)
 	}
 }

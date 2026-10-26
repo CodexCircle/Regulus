@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -76,12 +77,20 @@ type agentServer struct {
 	// hubVersion is the release of the hub, to judge the release of agents.
 	hubVersion string
 
+	// files, if set, serves the cached release to the agents (FetchUpdate).
+	files updateFiles
+
 	// seen, if set, is told when an agent connects and when it goes away.
 	seen func(info AgentInfo, at time.Time)
 
 	mu       sync.Mutex
 	sessions map[string]*session
 	rejected map[string]Rejection // by agent id, only for agents with a certificate
+}
+
+// updateFiles opens the files of a cached release; *update.Stager implements it.
+type updateFiles interface {
+	Open(version, name string) (*os.File, int64, error)
 }
 
 // session is one connected agent.

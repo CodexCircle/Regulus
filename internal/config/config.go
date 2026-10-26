@@ -240,6 +240,11 @@ type Agent struct {
 	// DataDir holds the agent's key and certificates.
 	DataDir string `yaml:"data_dir"`
 	Log     Log    `yaml:"log"`
+	// Updates lets the hub update this agent: the agent fetches the release the
+	// hub offers and leaves it to the installer unit that runs as root
+	// (regulus-agent-update.path, enabled by the installer). On its own the
+	// setting does nothing.
+	Updates bool `yaml:"updates"`
 	// EnrollOnly enrolls and exits without connecting. The installer uses it
 	// to enroll as the service user before the service starts. Command line
 	// only.
@@ -315,6 +320,13 @@ func LoadAgent(args []string, getenv func(string) string, output io.Writer) (Age
 	setIfNotEmpty(&cfg.Token, getenv("REGULUS_AGENT_TOKEN"))
 	setIfNotEmpty(&cfg.CAFingerprint, getenv("REGULUS_AGENT_CA_FINGERPRINT"))
 	setIfNotEmpty(&cfg.DataDir, getenv("REGULUS_AGENT_DATA_DIR"))
+	if v := getenv("REGULUS_AGENT_UPDATES"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return Agent{}, fmt.Errorf("invalid configuration: REGULUS_AGENT_UPDATES %q is not a boolean", v)
+		}
+		cfg.Updates = b
+	}
 	setIfNotEmpty(&cfg.Log.Level, getenv("REGULUS_LOG_LEVEL"))
 	setIfNotEmpty(&cfg.Log.Format, getenv("REGULUS_LOG_FORMAT"))
 

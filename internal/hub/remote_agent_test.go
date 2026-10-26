@@ -236,7 +236,7 @@ func newAPI(t *testing.T, h *Hub, role auth.Role) *api {
 	}
 	return &api{
 		t:       t,
-		handler: NewHandler(Deps{UI: fstest.MapFS{}, Agents: h, Layouts: h, Log: quiet(), Auth: h.auth, Fleet: h, Updates: h.updates}),
+		handler: NewHandler(Deps{UI: fstest.MapFS{}, Agents: h, Layouts: h, Log: quiet(), Auth: h.auth, Fleet: h, Updates: h.updates, Rollout: h}),
 		cookie:  &http.Cookie{Name: auth.CookieName, Value: session},
 	}
 }
@@ -422,7 +422,7 @@ func TestAPIChecksPermissions(t *testing.T) {
 		}
 		return &api{
 			t:       t,
-			handler: NewHandler(Deps{UI: fstest.MapFS{}, Agents: h, Layouts: h, Log: quiet(), Auth: h.auth, Fleet: h, Updates: h.updates}),
+			handler: NewHandler(Deps{UI: fstest.MapFS{}, Agents: h, Layouts: h, Log: quiet(), Auth: h.auth, Fleet: h, Updates: h.updates, Rollout: h}),
 			cookie:  &http.Cookie{Name: auth.CookieName, Value: session},
 		}
 	}

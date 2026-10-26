@@ -29,7 +29,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentService_Connect_FullMethodName = "/regulus.agent.v1.AgentService/Connect"
+	AgentService_Connect_FullMethodName     = "/regulus.agent.v1.AgentService/Connect"
+	AgentService_FetchUpdate_FullMethodName = "/regulus.agent.v1.AgentService/FetchUpdate"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -45,6 +46,10 @@ type AgentServiceClient interface {
 	// send Command messages at any time; each Command is answered by a
 	// CommandResult.
 	Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[AgentMessage, HubMessage], error)
+	// FetchUpdate streams one file of the release the hub offers in an
+	// ApplyUpdate command, over the same mTLS connection. The hub serves only
+	// the release it runs itself, and the archive of the caller's platform.
+	FetchUpdate(ctx context.Context, in *FetchUpdateRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[FileChunk], error)
 }
 
 type agentServiceClient struct {
@@ -68,6 +73,25 @@ func (c *agentServiceClient) Connect(ctx context.Context, opts ...grpc.CallOptio
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_ConnectClient = grpc.BidiStreamingClient[AgentMessage, HubMessage]
 
+func (c *agentServiceClient) FetchUpdate(ctx context.Context, in *FetchUpdateRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[FileChunk], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[1], AgentService_FetchUpdate_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[FetchUpdateRequest, FileChunk]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_FetchUpdateClient = grpc.ServerStreamingClient[FileChunk]
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -81,6 +105,10 @@ type AgentServiceServer interface {
 	// send Command messages at any time; each Command is answered by a
 	// CommandResult.
 	Connect(grpc.BidiStreamingServer[AgentMessage, HubMessage]) error
+	// FetchUpdate streams one file of the release the hub offers in an
+	// ApplyUpdate command, over the same mTLS connection. The hub serves only
+	// the release it runs itself, and the archive of the caller's platform.
+	FetchUpdate(*FetchUpdateRequest, grpc.ServerStreamingServer[FileChunk]) error
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -93,6 +121,9 @@ type UnimplementedAgentServiceServer struct{}
 
 func (UnimplementedAgentServiceServer) Connect(grpc.BidiStreamingServer[AgentMessage, HubMessage]) error {
 	return status.Error(codes.Unimplemented, "method Connect not implemented")
+}
+func (UnimplementedAgentServiceServer) FetchUpdate(*FetchUpdateRequest, grpc.ServerStreamingServer[FileChunk]) error {
+	return status.Error(codes.Unimplemented, "method FetchUpdate not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -122,6 +153,17 @@ func _AgentService_Connect_Handler(srv interface{}, stream grpc.ServerStream) er
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_ConnectServer = grpc.BidiStreamingServer[AgentMessage, HubMessage]
 
+func _AgentService_FetchUpdate_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(FetchUpdateRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentServiceServer).FetchUpdate(m, &grpc.GenericServerStream[FetchUpdateRequest, FileChunk]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_FetchUpdateServer = grpc.ServerStreamingServer[FileChunk]
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -135,6 +177,11 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 			Handler:       _AgentService_Connect_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
+		},
+		{
+			StreamName:    "FetchUpdate",
+			Handler:       _AgentService_FetchUpdate_Handler,
+			ServerStreams: true,
 		},
 	},
 	Metadata: "regulus/agent/v1/agent.proto",

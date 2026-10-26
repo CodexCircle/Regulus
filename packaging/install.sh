@@ -36,9 +36,9 @@ Usage: install.sh [options]
   --beta                 install the latest pre-release (beta channel)
   --builtin-agent        include the built-in agent (manage the hub's own server)
   --no-builtin-agent     run only the hub
-  --no-self-update       do not set up installing updates from the dashboard (by default
-                         a systemd unit is set up that installs, as root, only updates
-                         the hub downloaded and whose signature it checks again)
+  --no-self-update       do not set up installing updates from the dashboard or, for an
+                         agent, from the hub (by default a systemd unit is set up that
+                         installs, as root, only updates whose signature it checks again)
   --yes, -y              do not ask anything: the default is the built-in agent
   --require-signature    fail if the signature cannot be verified (needs cosign)
   --base-url URL         download from URL/v<version>/ instead of GitHub Releases
@@ -237,6 +237,7 @@ as_service_user() {
 setup_agent() {
 	tmp_conf=$(mktemp)
 	printf 'hub: %s\ndata_dir: /var/lib/regulus-agent\n' "$hub" >"$tmp_conf"
+	[ "$self_update" != 1 ] || printf 'updates: true\n' >>"$tmp_conf"
 	$SUDO install -m 0640 -o root -g regulus "$tmp_conf" "$CONFIG_DIR/agent.yaml"
 	rm -f "$tmp_conf"
 
@@ -318,7 +319,9 @@ write_settings() {
 enable_self_update() {
 	[ "$self_update" = 1 ] || return 0
 	[ -d /run/systemd/system ] || return 0
-	$SUDO systemctl enable --now regulus-update.path || warn "could not enable regulus-update.path: updates from the dashboard will not install until it is enabled"
+	unit=regulus-update.path
+	[ "$role" != agent ] || unit=regulus-agent-update.path
+	$SUDO systemctl enable --now "$unit" || warn "could not enable $unit: updates from the hub will not install until it is enabled"
 }
 
 # listen_port prints the TCP port the hub listens on.
@@ -438,7 +441,6 @@ main() {
 		agent)
 			[ -n "$token" ] || token=${REGULUS_AGENT_TOKEN:-}
 			[ -z "$builtin_agent" ] || die "--builtin-agent and --no-builtin-agent are for the hub role"
-			self_update=0
 			check_agent_args
 			;;
 		*) die "invalid --role $role: use hub or agent" ;;
@@ -483,6 +485,7 @@ main() {
 
 	if [ "$role" = agent ]; then
 		setup_agent
+		enable_self_update
 		report_agent
 	else
 		enable_self_update

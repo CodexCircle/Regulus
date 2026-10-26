@@ -7,7 +7,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { UpdateStatus, User } from "./api";
+import type { RolloutStatus, UpdateStatus, User } from "./api";
 import { SessionContext } from "./session";
 import { ADMIN_PERMISSIONS } from "./test-users";
 import { UpdatesPage } from "./UpdatesPage";
@@ -68,6 +68,17 @@ const staged: UpdateStatus = {
   },
 };
 
+const idle: RolloutStatus = {
+  target: "0.2.0",
+  state: "idle",
+  candidates: [],
+  agents: [],
+  started_at: null,
+  finished_at: null,
+};
+const web1 = { id: "agent-1", hostname: "web1", from: "0.1.0" } as const;
+const web2 = { id: "agent-2", hostname: "web2", from: "0.1.0" } as const;
+
 interface Call {
   method: string;
   path: string;
@@ -77,8 +88,12 @@ interface Call {
 // mockHub answers each request with the next response queued for "METHOD path"
 // (the last one repeats).
 function mockHub(
-  responses: Record<string, { status?: number; data: unknown }[]>,
+  given: Record<string, { status?: number; data: unknown }[]>,
 ): Call[] {
+  const responses: Record<string, { status?: number; data: unknown }[]> = {
+    "GET /api/updates/rollout": [{ data: idle }],
+    ...given,
+  };
   const calls: Call[] = [];
   const index: Record<string, number> = {};
   vi.stubGlobal(
@@ -437,7 +452,10 @@ describe("UpdatesPage", () => {
       await screen.findByText(/Updated to 0.2.0 from 0.1.0/),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("0.2.0", { selector: "strong" }),
+      within(screen.getByRole("region", { name: "Version" })).getByText(
+        "0.2.0",
+        { selector: "strong" },
+      ),
     ).toBeInTheDocument();
   });
 
@@ -546,5 +564,151 @@ describe("UpdatesPage", () => {
     expect(
       screen.getByText(/Installing is not set up on this hub/),
     ).toBeInTheDocument();
+  });
+
+  it("updates the servers that are behind, a wave at a time", async () => {
+    const calls = mockHub({
+      "GET /api/updates": [{ data: base }],
+      "GET /api/updates/rollout": [
+        {
+          data: {
+            ...idle,
+            candidates: [
+              { ...web1, status: "pending" },
+              { ...web2, status: "pending" },
+            ],
+          },
+        },
+      ],
+      "POST /api/updates/rollout": [
+        {
+          status: 202,
+          data: {
+            ...idle,
+            state: "running",
+            wave_size: 3,
+            agents: [
+              { ...web1, status: "offered" },
+              { ...web2, status: "pending" },
+            ],
+          },
+        },
+      ],
+    });
+    renderPage();
+    expect(
+      await screen.findByText("2 servers run an older version."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("list", { name: "Servers behind" }),
+    ).toHaveTextContent("web1 runs 0.1.0");
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "At a time" }),
+      "3",
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Update 2 servers to 0.2.0" }),
+    );
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "POST",
+        path: "/api/updates/rollout",
+        body: { wave_size: 3 },
+      }),
+    );
+    const progress = await screen.findByRole("list", {
+      name: "Update progress",
+    });
+    expect(progress).toHaveTextContent("web1 (0.1.0): fetching the update");
+    expect(progress).toHaveTextContent("web2 (0.1.0): waiting");
+    expect(screen.getByText(/3 at a time/)).toBeInTheDocument();
+  });
+
+  it("follows the rollout to the end and shows what failed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running: RolloutStatus = {
+      ...idle,
+      state: "running",
+      wave_size: 1,
+      agents: [
+        { ...web1, status: "installing" },
+        { ...web2, status: "pending" },
+      ],
+    };
+    const failed: RolloutStatus = {
+      ...idle,
+      state: "failed",
+      finished_at: now,
+      agents: [
+        {
+          ...web1,
+          status: "failed",
+          message:
+            "the server came back with version 0.1.0: the update did not take and was rolled back",
+        },
+        { ...web2, status: "skipped" },
+      ],
+    };
+    mockHub({
+      "GET /api/updates": [{ data: base }],
+      "GET /api/updates/rollout": [{ data: running }, { data: failed }],
+    });
+    renderPage();
+    expect(
+      await screen.findByRole("list", { name: "Update progress" }),
+    ).toHaveTextContent("installing, waiting for it to come back");
+    await vi.advanceTimersByTimeAsync(2100);
+    const last = await screen.findByRole("list", { name: "Last update" });
+    expect(last).toHaveTextContent(
+      "web1 (0.1.0): failed — the server came back with version 0.1.0",
+    );
+    expect(last).toHaveTextContent("web2 (0.1.0): not tried");
+    expect(screen.getByText(/stopped by a failure/)).toBeInTheDocument();
+  });
+
+  it("stops a rollout", async () => {
+    const running: RolloutStatus = {
+      ...idle,
+      state: "running",
+      wave_size: 1,
+      agents: [{ ...web1, status: "installing" }],
+    };
+    const calls = mockHub({
+      "GET /api/updates": [{ data: base }],
+      "GET /api/updates/rollout": [{ data: running }],
+      "POST /api/updates/rollout/stop": [
+        {
+          data: {
+            ...idle,
+            state: "stopped",
+            finished_at: now,
+            agents: [{ ...web1, status: "failed", message: "stopped" }],
+          },
+        },
+      ],
+    });
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "POST",
+        path: "/api/updates/rollout/stop",
+        body: {},
+      }),
+    );
+    expect(
+      await screen.findByText(/Last update of the servers: stopped/),
+    ).toBeInTheDocument();
+  });
+
+  it("says when no server is behind", async () => {
+    mockHub({ "GET /api/updates": [{ data: base }] });
+    renderPage();
+    expect(
+      await screen.findByText(/Every connected server runs 0.2.0/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Update/ }),
+    ).not.toBeInTheDocument();
   });
 });

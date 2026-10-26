@@ -54,10 +54,14 @@ type Installer struct {
 
 	Verifier Verifier
 	Run      Runner
-	// Probe returns the version of the service that is running, or an error
-	// while it is not up. It defaults to the unit state plus the hub's local
+	// Agent is true on a server that runs the agent: its health is that it
+	// connected to the hub again (see WriteConnected), not the hub's local
 	// status socket.
-	Probe func(ctx context.Context) (string, error)
+	Agent bool
+	// Probe returns the version of the service that is running, or an error
+	// while it is not up. Only a process that started at or after since counts:
+	// the one that was there before the restart does not.
+	Probe func(ctx context.Context, since time.Time) (string, error)
 
 	// HealthTimeout is how long the new version has to come up; it must then
 	// keep running for Stable. Poll is how often it is looked at.
@@ -98,13 +102,23 @@ func (in *Installer) defaults() {
 	}
 }
 
-func (in *Installer) probeUnit(ctx context.Context) (string, error) {
+func (in *Installer) probeUnit(ctx context.Context, since time.Time) (string, error) {
 	if _, err := in.Run(ctx, "systemctl", "is-active", "--quiet", in.Unit); err != nil {
 		return "", fmt.Errorf("%s is not active", in.Unit)
+	}
+	if in.Agent {
+		c, ok := ReadConnected(in.DataDir)
+		if !ok || c.At.Before(since) {
+			return "", errors.New("the agent has not connected to the hub since the restart")
+		}
+		return c.Version, nil
 	}
 	st, err := localstatus.Fetch(ctx, in.DataDir)
 	if err != nil {
 		return "", err
+	}
+	if st.StartedAt.Before(since) {
+		return "", errors.New("the hub that answers is the one from before the restart")
 	}
 	return st.Version, nil
 }
@@ -266,6 +280,7 @@ func (in *Installer) fetchVerified(ctx context.Context, v Version, work string) 
 }
 
 func (in *Installer) restartAndWatch(ctx context.Context, want string) error {
+	since := in.Now()
 	if _, err := in.Run(ctx, "systemctl", "restart", in.Unit); err != nil {
 		return err
 	}
@@ -273,7 +288,7 @@ func (in *Installer) restartAndWatch(ctx context.Context, want string) error {
 	var upSince time.Time
 	var last error
 	for {
-		got, err := in.Probe(ctx)
+		got, err := in.Probe(ctx, since)
 		switch {
 		case err != nil:
 			last, upSince = err, time.Time{}
@@ -305,6 +320,7 @@ func (in *Installer) rollback(ctx context.Context, backup, want string) error {
 	if err := os.Rename(tmp, in.Binary); err != nil {
 		return err
 	}
+	since := in.Now()
 	if _, err := in.Run(ctx, "systemctl", "restart", in.Unit); err != nil {
 		return err
 	}
@@ -312,7 +328,7 @@ func (in *Installer) rollback(ctx context.Context, backup, want string) error {
 	// test of the new one.
 	deadline := time.Now().Add(in.HealthTimeout)
 	for {
-		if got, err := in.Probe(ctx); err == nil && got == want {
+		if got, err := in.Probe(ctx, since); err == nil && got == want {
 			return nil
 		}
 		if time.Now().After(deadline) {

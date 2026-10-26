@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -18,6 +19,7 @@ import (
 
 	agentv1 "github.com/CodexCircle/Regulus/internal/gen/regulus/agent/v1"
 	"github.com/CodexCircle/Regulus/internal/protocol"
+	"github.com/CodexCircle/Regulus/internal/update"
 )
 
 const (
@@ -44,6 +46,14 @@ type Options struct {
 	Collector Collector
 	// Log defaults to slog.Default().
 	Log *slog.Logger
+	// UpdateDir is the agent's data directory when this agent may update itself:
+	// the downloaded release and the request for the installer go there. Empty
+	// (the built-in agent, or an agent without the installer unit) refuses the
+	// ApplyUpdate command.
+	UpdateDir string
+	// Verifier checks the signature of an update before the installer is asked;
+	// the installer checks it again as root.
+	Verifier update.Verifier
 	// MinBackoff and MaxBackoff bound the wait between reconnection attempts
 	// (defaults 1s and 30s).
 	MinBackoff, MaxBackoff time.Duration
@@ -74,6 +84,8 @@ type agent struct {
 	client agentv1.AgentServiceClient
 	system *agentv1.SystemInfo
 	id     string
+	// updating is set while an update is being fetched.
+	updating atomic.Bool
 }
 
 // Run connects to the hub over conn and serves it until ctx is cancelled, in
@@ -173,6 +185,7 @@ func (a *agent) session(ctx context.Context) (established bool, err error) {
 		a.id = welcome.GetAgentId()
 	}
 	a.log.Info("connected to the hub", "agent", a.id, "protocol_version", welcome.GetProtocolVersion())
+	a.markConnected()
 
 	heartbeat := time.NewTicker(intervalOr(welcome.GetHeartbeatInterval().AsDuration(), defaultHeartbeatInterval))
 	defer heartbeat.Stop()
@@ -195,6 +208,9 @@ func (a *agent) session(ctx context.Context) (established bool, err error) {
 			}
 		}
 	}()
+
+	// Results of commands that take a while and run beside the loop.
+	results := make(chan *agentv1.CommandResult, 4)
 
 	// Report right away so the hub has data without waiting for a full interval.
 	if err := a.sendHeartbeat(stream); err != nil {
@@ -220,7 +236,16 @@ func (a *agent) session(ctx context.Context) (established bool, err error) {
 			if cmd == nil {
 				continue // nothing else is defined for the hub to send after Welcome
 			}
+			if au, ok := cmd.GetKind().(*agentv1.Command_ApplyUpdate); ok {
+				// Fetching takes a while; heartbeats go on meanwhile.
+				a.startUpdate(ctx, cmd.GetId(), au.ApplyUpdate, results)
+				continue
+			}
 			res := a.runCommand(cmd, heartbeat, metrics)
+			if err := stream.Send(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_CommandResult{CommandResult: res}}); err != nil {
+				return true, err
+			}
+		case res := <-results:
 			if err := stream.Send(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_CommandResult{CommandResult: res}}); err != nil {
 				return true, err
 			}
@@ -230,6 +255,25 @@ func (a *agent) session(ctx context.Context) (established bool, err error) {
 			return true, ctx.Err()
 		}
 	}
+}
+
+// startUpdate runs the update in the background and delivers its result.
+func (a *agent) startUpdate(ctx context.Context, id string, au *agentv1.ApplyUpdate, results chan<- *agentv1.CommandResult) {
+	if !a.updating.CompareAndSwap(false, true) {
+		select {
+		case results <- &agentv1.CommandResult{CommandId: id, Error: "an update is already being fetched"}:
+		default:
+		}
+		return
+	}
+	go func() {
+		defer a.updating.Store(false)
+		res := a.applyUpdate(ctx, id, au)
+		select {
+		case results <- res:
+		case <-ctx.Done():
+		}
+	}()
 }
 
 func (a *agent) sendHeartbeat(stream agentv1.AgentService_ConnectClient) error {

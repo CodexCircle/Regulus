@@ -802,7 +802,42 @@ func (m *Manager) syncApply(ctx context.Context) {
 		detail += ": " + res.Message
 	}
 	m.audit(ctx, actor, event, res.Version, detail)
-	if res.Outcome == OutcomeApplied && m.opts.Stager != nil {
-		m.opts.Stager.Clear()
-	}
 }
+
+// EnsureRelease makes sure the cache holds the release of this very version,
+// signature checked, with the archive of every platform given, so the hub can
+// serve it to the agents it manages. It downloads what is missing.
+func (m *Manager) EnsureRelease(ctx context.Context, version string, plats []Platform) error {
+	if len(plats) == 0 {
+		return nil
+	}
+	if m.opts.Stager.HasArchives(version, plats...) {
+		return nil
+	}
+	if !m.opts.Enabled {
+		return fmt.Errorf("version %s is not in the cache for those servers and %w", version, ErrChecksOff)
+	}
+	want, err := ParseVersion(version)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, downloadTimeout)
+	defer cancel()
+	releases, err := m.opts.Source.Releases(ctx)
+	if err != nil {
+		return errCheckFailed{err}
+	}
+	for _, rel := range releases {
+		if rel.Version.Compare(want) != 0 {
+			continue
+		}
+		if _, err := m.opts.Stager.StagePlatforms(ctx, rel, plats...); err != nil {
+			return errCheckFailed{err}
+		}
+		return nil
+	}
+	return errCheckFailed{fmt.Errorf("the release server lists no release %s", version)}
+}
+
+// Files serves the cached release to the agents.
+func (m *Manager) Files() *Stager { return m.opts.Stager }

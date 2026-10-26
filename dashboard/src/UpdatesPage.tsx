@@ -4,8 +4,13 @@ import {
   applyUpdate,
   checkForUpdates,
   downloadUpdate,
+  fetchRollout,
   fetchUpdates,
+  startRollout,
+  stopRollout,
   saveUpdateSettings,
+  type RolloutAgent,
+  type RolloutStatus,
   type UpdateChannel,
   type UpdateMode,
   type UpdateStatus,
@@ -89,6 +94,7 @@ export function UpdatesPage() {
             onDownload={() => void run(downloadUpdate)}
             onApply={() => run(applyUpdate)}
           />
+          <Servers />
           <Settings
             key={`${status.mode}/${status.channel}/${status.window_start ?? ""}/${status.window_end ?? ""}`}
             status={status}
@@ -409,5 +415,189 @@ function Settings({
         </button>
       </form>
     </section>
+  );
+}
+
+const AGENT_STATUS: Record<RolloutAgent["status"], string> = {
+  pending: "waiting",
+  offered: "fetching the update",
+  installing: "installing, waiting for it to come back",
+  updated: "updated",
+  failed: "failed",
+  skipped: "not tried",
+};
+
+// Servers shows the managed servers that run an older version than the hub and
+// updates them to it, a few at a time, stopping at the first failure.
+function Servers() {
+  const session = useSession();
+  const expired = session?.expired;
+  const [rollout, setRollout] = useState<RolloutStatus | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [wave, setWave] = useState(1);
+
+  const fail = useCallback(
+    (err: unknown) => {
+      if (err instanceof ApiError && err.status === 401) expired?.();
+      else setError(errorMessage(err));
+    },
+    [expired],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchRollout(controller.signal).then(setRollout, (err: unknown) => {
+      if (!controller.signal.aborted) fail(err);
+    });
+    return () => controller.abort();
+  }, [fail]);
+
+  const running = rollout?.state === "running";
+  useEffect(() => {
+    if (!running) return;
+    const controller = new AbortController();
+    const timer = window.setInterval(() => {
+      fetchRollout(controller.signal).then(setRollout, () => undefined);
+    }, POLL_MS);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [running]);
+
+  const run = async (action: () => Promise<RolloutStatus>) => {
+    setError("");
+    setBusy(true);
+    try {
+      setRollout(await action());
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (rollout === null) return error ? <p role="alert">{error}</p> : null;
+
+  const behind = rollout.candidates;
+  const finished = rollout.state !== "idle" && rollout.state !== "running";
+  return (
+    <section className="panel" aria-labelledby="servers-heading">
+      <h3 id="servers-heading">Servers</h3>
+      {error && <p role="alert">{error}</p>}
+      <p>
+        The servers this hub manages are updated to the version the hub runs (
+        <strong>{rollout.target || "unknown"}</strong>). They fetch it from the
+        hub, so they need no internet access, and a server whose new version
+        does not reconnect goes back to the previous one by itself.
+      </p>
+
+      {rollout.state === "running" && (
+        <>
+          <p role="status">
+            Updating the servers, {rollout.wave_size ?? 1} at a time. It stops
+            at the first failure.
+          </p>
+          <AgentRows agents={rollout.agents} label="Update progress" />
+          <p className="row-actions">
+            <button
+              type="button"
+              onClick={() => void run(stopRollout)}
+              disabled={busy}
+            >
+              Stop
+            </button>
+          </p>
+        </>
+      )}
+
+      {rollout.state !== "running" && (
+        <>
+          {behind.length === 0 ? (
+            <p role="status">
+              Every connected server runs {rollout.target}, or is not managed by
+              an agent that can be updated.
+            </p>
+          ) : (
+            <>
+              <p role="status">
+                {behind.length}{" "}
+                {behind.length === 1 ? "server runs" : "servers run"} an older
+                version.
+              </p>
+              <ul aria-label="Servers behind">
+                {behind.map((a) => (
+                  <li key={a.id}>
+                    {a.hostname || a.id} runs {a.from}
+                  </li>
+                ))}
+              </ul>
+              <p className="row-actions">
+                <label>
+                  At a time
+                  <select
+                    value={wave}
+                    onChange={(e) => setWave(Number(e.target.value))}
+                  >
+                    <option value={1}>1</option>
+                    <option value={3}>3</option>
+                    <option value={10}>10</option>
+                    <option value={100}>All</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void run(() => startRollout(wave))}
+                  disabled={busy}
+                >
+                  Update{" "}
+                  {behind.length === 1
+                    ? "this server"
+                    : `${behind.length} servers`}{" "}
+                  to {rollout.target}
+                </button>
+              </p>
+            </>
+          )}
+          {finished && rollout.agents.length > 0 && (
+            <>
+              <p className="muted">
+                Last update of the servers:{" "}
+                {rollout.state === "done"
+                  ? "done"
+                  : rollout.state === "stopped"
+                    ? "stopped"
+                    : "stopped by a failure"}
+                {rollout.finished_at
+                  ? `, ${formatAgo(rollout.finished_at)}`
+                  : ""}
+                .
+              </p>
+              <AgentRows agents={rollout.agents} label="Last update" />
+            </>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function AgentRows({
+  agents,
+  label,
+}: {
+  agents: RolloutAgent[];
+  label: string;
+}) {
+  return (
+    <ul aria-label={label}>
+      {agents.map((a) => (
+        <li key={a.id}>
+          {a.hostname || a.id} ({a.from}): {AGENT_STATUS[a.status]}
+          {a.message && a.status === "failed" ? ` — ${a.message}` : ""}
+        </li>
+      ))}
+    </ul>
   );
 }
