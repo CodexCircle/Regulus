@@ -143,10 +143,15 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, ui fs.FS, opt
 	if src == nil {
 		src = &update.GitHubSource{Repo: ReleaseRepo, UserAgent: "regulus-hub/" + h.version}
 	}
+	applyDir := ""
+	if cfg.Updates.Apply {
+		applyDir = update.ApplyDir(cfg.DataDir)
+	}
 	h.updates = update.New(update.Options{
-		DB:     db,
-		Log:    log.With("component", "updates"),
-		Source: src,
+		ApplyDir: applyDir,
+		DB:       db,
+		Log:      log.With("component", "updates"),
+		Source:   src,
 		Stager: &update.Stager{
 			Dir:      filepath.Join(cfg.DataDir, "updates"),
 			Verifier: ver,
@@ -392,6 +397,7 @@ func apiRoutes(d Deps) []route {
 		{pattern: "PUT /api/updates/settings", handler: need(auth.PermCoreUpdate, auth.RequireJSON(http.HandlerFunc(u.settings))), needsAuth: true},
 		{pattern: "POST /api/updates/check", handler: need(auth.PermCoreUpdate, auth.RequireJSON(http.HandlerFunc(u.check))), needsAuth: true},
 		{pattern: "POST /api/updates/download", handler: need(auth.PermCoreUpdate, auth.RequireJSON(http.HandlerFunc(u.download))), needsAuth: true},
+		{pattern: "POST /api/updates/apply", handler: need(auth.PermCoreUpdate, auth.RequireJSON(http.HandlerFunc(u.apply))), needsAuth: true},
 		{pattern: "GET /api/openapi.yaml", handler: http.HandlerFunc(serveOpenAPI)},
 	}
 	for _, r := range auth.APIRoutes(d.Auth) {

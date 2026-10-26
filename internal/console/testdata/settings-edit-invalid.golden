@@ -11,6 +11,7 @@ Regulus v0.3.0  Hub ● running
    log.level          info                       file
    log.format         text                       file
    updates.check      true                       default
+   updates.apply      false                      default
    console.tui        true                       default
 
  listen  default: :8080
@@ -20,7 +21,6 @@ Regulus v0.3.0  Hub ● running
  Editing listen
  > nope
  ✗ use host:port, such as :8080 or 127.0.0.1:8080, or only the port
-
 
 
 

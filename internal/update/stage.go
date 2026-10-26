@@ -344,3 +344,9 @@ func checksumFor(sums []byte, name string) (string, error) {
 	}
 	return "", fmt.Errorf("%s does not list %s", checksumsName, name)
 }
+
+// Clear removes every staged release, for after one was installed.
+func (s *Stager) Clear() { s.prune("") }
+
+// limited reads at most n bytes of r.
+func limited(r io.Reader, n int64) io.Reader { return io.LimitReader(r, n) }

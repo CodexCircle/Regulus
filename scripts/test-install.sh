@@ -102,6 +102,7 @@ equal "uses the default without asking" "$builtin_agent" default
 SUDO=
 CONFIG_DIR=$tmp/etc
 builtin_agent=default
+self_update=0
 write_settings
 check_not "the default writes nothing" test -e "$CONFIG_DIR/regulus.env"
 printf 'REGULUS_LOG_LEVEL=debug\nREGULUS_BUILTIN_AGENT=true\n' >"$tmp/seed"
@@ -111,6 +112,18 @@ builtin_agent=false
 write_settings
 equal "replaces the answer and keeps other settings" "$(cat "$CONFIG_DIR/regulus.env")" "REGULUS_LOG_LEVEL=debug
 REGULUS_BUILTIN_AGENT=false"
+
+builtin_agent=default
+self_update=1
+write_settings
+equal "switches the update helper on and keeps the rest" "$(cat "$CONFIG_DIR/regulus.env")" "REGULUS_LOG_LEVEL=debug
+REGULUS_BUILTIN_AGENT=false
+REGULUS_UPDATES_APPLY=true"
+write_settings
+equal "does not repeat a key" "$(grep -c UPDATES_APPLY "$CONFIG_DIR/regulus.env")" 1
+SUDO=
+(systemctl() { echo called; }; self_update=0; enable_self_update; ) >/dev/null
+rm -f "$CONFIG_DIR/regulus.env"
 
 # the port to wait for
 printf 'listen: "127.0.0.1:9090" # comment\nbuiltin_agent: true\n' >"$CONFIG_DIR/config.yaml"

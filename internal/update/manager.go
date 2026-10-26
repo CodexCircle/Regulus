@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"os"
 	"sync"
 	"time"
 )
@@ -19,14 +20,12 @@ const (
 	// ModeManual only tells the administrator that a new version exists.
 	ModeManual Mode = "manual"
 	// ModeDownload also downloads and checks it, then waits to be told to
-	// apply it. The mode that applies it by itself (inside a maintenance
-	// window, with rollback) comes with the code that can apply an update.
+	// apply it.
 	ModeDownload Mode = "download"
+	// ModeAutomatic also installs it, by itself, inside the maintenance
+	// window. A version that was rolled back is not tried again.
+	ModeAutomatic Mode = "automatic"
 )
-
-// ErrAutomaticNotAvailable is returned for the automatic mode, which needs
-// the part of the update system that applies a release.
-var ErrAutomaticNotAvailable = errors.New("the automatic mode is not available yet: the hub can check for and download updates, but cannot apply them")
 
 // Errors returned by the manager.
 var (
@@ -38,24 +37,59 @@ var (
 	ErrTooSoon         = errors.New("the release server was asked a moment ago; wait a little before asking again")
 	ErrNothingToFetch  = errors.New("there is no newer release to download")
 	ErrNotReleaseBuild = errors.New("this build is not a release, so it cannot tell whether a release is newer")
+
+	ErrApplyDisabled  = errors.New("installing updates from the dashboard is turned off (updates.apply); it needs the regulus-update.path unit the installer sets up")
+	ErrNothingToApply = errors.New("there is no downloaded update to install")
+	ErrNotVerified    = errors.New("the downloaded update was not verified by its signature, so it will not be installed")
+	ErrApplying       = errors.New("an update is already being installed")
 )
 
 // Settings are the update choices an administrator makes in the dashboard.
 type Settings struct {
 	Mode    Mode    `json:"mode"`
 	Channel Channel `json:"channel"`
+	// WindowStart and WindowEnd ("15:04", the hub's local time) bound when the
+	// automatic mode may install. They may cross midnight.
+	WindowStart string `json:"window_start,omitempty"`
+	WindowEnd   string `json:"window_end,omitempty"`
 }
 
-func validMode(m Mode) bool { return m == ModeManual || m == ModeDownload }
+func validMode(m Mode) bool { return m == ModeManual || m == ModeDownload || m == ModeAutomatic }
+
+// minutesOf parses "HH:MM" into minutes since midnight.
+func minutesOf(s string) (int, bool) {
+	t, err := time.Parse("15:04", s)
+	if err != nil {
+		return 0, false
+	}
+	return t.Hour()*60 + t.Minute(), true
+}
+
+// InWindow reports whether the time falls inside the maintenance window.
+func (s Settings) InWindow(now time.Time) bool {
+	start, ok1 := minutesOf(s.WindowStart)
+	end, ok2 := minutesOf(s.WindowEnd)
+	if !ok1 || !ok2 || start == end {
+		return false
+	}
+	n := now.Hour()*60 + now.Minute()
+	if start < end {
+		return n >= start && n < end
+	}
+	return n >= start || n < end
+}
 
 // Validate reports whether the settings can be saved.
 func (s Settings) Validate() error {
-	switch {
-	case validMode(s.Mode):
-	case s.Mode == "automatic":
-		return ErrAutomaticNotAvailable
-	default:
-		return fmt.Errorf("%w: mode must be %q or %q", ErrInvalidSettings, ModeManual, ModeDownload)
+	if !validMode(s.Mode) {
+		return fmt.Errorf("%w: mode must be %q, %q or %q", ErrInvalidSettings, ModeManual, ModeDownload, ModeAutomatic)
+	}
+	if s.Mode == ModeAutomatic {
+		start, ok1 := minutesOf(s.WindowStart)
+		end, ok2 := minutesOf(s.WindowEnd)
+		if !ok1 || !ok2 || start == end {
+			return fmt.Errorf("%w: the automatic mode needs a maintenance window, two different times such as 03:00 and 05:00", ErrInvalidSettings)
+		}
 	}
 	if !s.Channel.Valid() {
 		return fmt.Errorf("%w: channel must be %q or %q", ErrInvalidSettings, Stable, Beta)
@@ -89,6 +123,8 @@ type Status struct {
 	ChecksEnabled bool    `json:"checks_enabled"`
 	Mode          Mode    `json:"mode"`
 	Channel       Channel `json:"channel"`
+	WindowStart   string  `json:"window_start,omitempty"`
+	WindowEnd     string  `json:"window_end,omitempty"`
 	// Platform is the build of the release this hub would download.
 	Platform string `json:"platform"`
 
@@ -103,6 +139,17 @@ type Status struct {
 	Staged        *Staged `json:"staged"`
 	Downloading   bool    `json:"downloading"`
 	DownloadError string  `json:"download_error,omitempty"`
+
+	// ApplyEnabled is true when this hub can have an update installed (the
+	// helper is set up; see updates.apply). ApplyAvailable adds that a
+	// verified release is waiting. Applying is true from the request until the
+	// helper has finished, and ApplyStalled when nothing picked the request up.
+	ApplyEnabled   bool `json:"apply_enabled"`
+	ApplyAvailable bool `json:"apply_available"`
+	Applying       bool `json:"applying"`
+	ApplyStalled   bool `json:"apply_stalled,omitempty"`
+	// LastApply is the outcome of the last installation.
+	LastApply *ApplyResult `json:"last_apply"`
 }
 
 // Auditor records events; *auth.Service implements it.
@@ -115,6 +162,10 @@ const (
 	EventSettings       = "update_settings_changed"
 	EventDownloaded     = "update_downloaded"
 	EventDownloadFailed = "update_download_failed"
+	EventApplyRequested = "update_apply_requested"
+	EventApplied        = "update_applied"
+	EventRolledBack     = "update_rolled_back"
+	EventApplyFailed    = "update_apply_failed"
 )
 
 // SystemActor is the actor of what the hub does by itself.
@@ -124,6 +175,18 @@ const (
 	keyMode    = "update.mode"
 	keyChannel = "update.channel"
 	keyState   = "update.state"
+	keyWinFrom = "update.window_start"
+	keyWinTo   = "update.window_end"
+	// keyReported is the time of the last result that was recorded in the
+	// audit log.
+	keyReported = "update.apply_reported"
+
+	// applyStall is how long a request may wait before the hub says that
+	// nothing is picking it up.
+	applyStall = 3 * time.Minute
+	// installingMax bounds how long an "installing" result is believed.
+	installingMax = 30 * time.Minute
+	autoTick      = 5 * time.Minute
 
 	// DefaultCheckEvery is how often the hub asks the release server.
 	DefaultCheckEvery = 6 * time.Hour
@@ -143,6 +206,9 @@ type Options struct {
 	// Version is the version the binary was built with.
 	Version      string
 	GOOS, GOARCH string
+	// ApplyDir is the directory shared with the root helper (see ApplyDir);
+	// empty when installing from the dashboard is turned off.
+	ApplyDir string
 	// Enabled is false when the hub must not contact the release server.
 	Enabled    bool
 	CheckEvery time.Duration
@@ -202,17 +268,32 @@ func (m *Manager) Run(ctx context.Context) {
 	m.mu.Lock()
 	m.base = ctx
 	m.mu.Unlock()
+	if m.opts.ApplyDir != "" {
+		// systemd watches this directory; it is the hub's alone (0700).
+		if err := os.MkdirAll(m.opts.ApplyDir, 0o700); err != nil {
+			m.opts.Log.Warn("creating the directory for update requests", "err", err)
+		}
+	}
+	// What the helper did while the hub was away (or restarting for it).
+	m.syncApply(ctx)
 	if !m.opts.Enabled {
 		return
 	}
 	timer := time.NewTimer(m.firstDelay(ctx))
 	defer timer.Stop()
+	tick := time.NewTicker(autoTick)
+	defer tick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
 		case <-m.wake:
+		case <-tick.C:
+			// Not a check: the window of the automatic mode may have opened.
+			m.syncApply(ctx)
+			m.automatic(ctx)
+			continue
 		}
 		m.cycle(ctx)
 		timer.Reset(m.opts.CheckEvery + time.Duration(rand.Int64N(int64(m.opts.CheckEvery/10)+1)))
@@ -246,14 +327,35 @@ func (m *Manager) cycle(ctx context.Context) {
 		}
 		return
 	}
-	if st.Mode != ModeDownload || !st.UpdateAvailable {
+	if st.Mode == ModeManual || !st.UpdateAvailable {
 		return
 	}
-	if st.Staged != nil && st.Staged.Version == st.Latest.Version {
+	if st.Staged == nil || st.Staged.Version != st.Latest.Version {
+		if err := m.download(ctx, SystemActor); err != nil && !errors.Is(err, ErrBusy) {
+			m.opts.Log.Warn("downloading the update", "err", err)
+			return
+		}
+	}
+	m.automatic(ctx)
+}
+
+// automatic installs the downloaded release when the mode says so and the
+// maintenance window is open. A version that already failed or was rolled
+// back is left for an administrator.
+func (m *Manager) automatic(ctx context.Context) {
+	set, err := m.Settings(ctx)
+	if err != nil || set.Mode != ModeAutomatic || m.opts.ApplyDir == "" || !set.InWindow(m.opts.Now()) {
 		return
 	}
-	if err := m.download(ctx, SystemActor); err != nil && !errors.Is(err, ErrBusy) {
-		m.opts.Log.Warn("downloading the update", "err", err)
+	st, err := m.Status(ctx)
+	if err != nil || !st.ApplyAvailable || st.Staged == nil {
+		return
+	}
+	if last := st.LastApply; last != nil && last.Version == st.Staged.Version && last.Outcome != OutcomeApplied {
+		return
+	}
+	if _, err := m.Apply(ctx, SystemActor); err != nil && !errors.Is(err, ErrApplying) {
+		m.opts.Log.Warn("installing the update", "err", err)
 	}
 }
 
@@ -279,6 +381,13 @@ func (m *Manager) Settings(ctx context.Context) (Settings, error) {
 	} else if ok && Channel(v).Valid() {
 		s.Channel = Channel(v)
 	}
+	var err error
+	if s.WindowStart, _, err = m.get(ctx, keyWinFrom); err != nil {
+		return s, err
+	}
+	if s.WindowEnd, _, err = m.get(ctx, keyWinTo); err != nil {
+		return s, err
+	}
 	return s, nil
 }
 
@@ -287,6 +396,15 @@ func (m *Manager) Settings(ctx context.Context) (Settings, error) {
 func (m *Manager) SetSettings(ctx context.Context, by string, s Settings) (Status, error) {
 	if err := s.Validate(); err != nil {
 		return Status{}, err
+	}
+	if s.Mode == ModeAutomatic && m.opts.ApplyDir == "" {
+		return Status{}, ErrApplyDisabled
+	}
+	if s.Mode != ModeAutomatic && s.WindowStart == "" && s.WindowEnd == "" {
+		// Keep the window the administrator chose before.
+		if cur, err := m.Settings(ctx); err == nil {
+			s.WindowStart, s.WindowEnd = cur.WindowStart, cur.WindowEnd
+		}
 	}
 	old, err := m.Settings(ctx)
 	if err != nil {
@@ -298,8 +416,18 @@ func (m *Manager) SetSettings(ctx context.Context, by string, s Settings) (Statu
 	if err := m.put(ctx, keyChannel, string(s.Channel)); err != nil {
 		return Status{}, err
 	}
+	if err := m.put(ctx, keyWinFrom, s.WindowStart); err != nil {
+		return Status{}, err
+	}
+	if err := m.put(ctx, keyWinTo, s.WindowEnd); err != nil {
+		return Status{}, err
+	}
 	if old != s {
-		m.audit(ctx, by, EventSettings, "updates", fmt.Sprintf("mode %s, channel %s", s.Mode, s.Channel))
+		detail := fmt.Sprintf("mode %s, channel %s", s.Mode, s.Channel)
+		if s.Mode == ModeAutomatic {
+			detail += fmt.Sprintf(", window %s-%s", s.WindowStart, s.WindowEnd)
+		}
+		m.audit(ctx, by, EventSettings, "updates", detail)
 	}
 	if old.Channel != s.Channel {
 		select {
@@ -312,6 +440,7 @@ func (m *Manager) SetSettings(ctx context.Context, by string, s Settings) (Statu
 
 // Status reports the current state.
 func (m *Manager) Status(ctx context.Context) (Status, error) {
+	m.syncApply(ctx)
 	set, err := m.Settings(ctx)
 	if err != nil {
 		return Status{}, err
@@ -326,6 +455,8 @@ func (m *Manager) Status(ctx context.Context) (Status, error) {
 		ChecksEnabled:  m.opts.Enabled,
 		Mode:           set.Mode,
 		Channel:        set.Channel,
+		WindowStart:    set.WindowStart,
+		WindowEnd:      set.WindowEnd,
 		Platform:       m.opts.GOOS + "/" + m.opts.GOARCH,
 		CheckError:     m.state.CheckError,
 		Checking:       m.checking,
@@ -346,6 +477,7 @@ func (m *Manager) Status(ctx context.Context) (Status, error) {
 			st.Staged = &staged
 		}
 	}
+	m.applyStatus(&st)
 	return st, nil
 }
 
@@ -582,4 +714,95 @@ func (m *Manager) saveState(ctx context.Context, p persisted) error {
 		return err
 	}
 	return m.put(ctx, keyState, string(data))
+}
+
+// applyStatus fills in what concerns installing. The caller holds m.mu.
+func (m *Manager) applyStatus(st *Status) {
+	if m.opts.ApplyDir == "" {
+		return
+	}
+	st.ApplyEnabled = true
+	if req, ok := ReadRequest(m.opts.ApplyDir); ok {
+		st.Applying = true
+		st.ApplyStalled = m.opts.Now().Sub(req.RequestedAt) > applyStall
+	}
+	if res, ok := ReadResult(m.opts.ApplyDir); ok {
+		if res.Outcome == OutcomeInstalling {
+			if m.opts.Now().Sub(res.At) < installingMax {
+				st.Applying = true
+			}
+		} else {
+			st.LastApply = &res
+		}
+	}
+	st.ApplyAvailable = !st.Applying && st.Staged != nil && st.Staged.Verified == VerifiedSignature
+}
+
+// Apply asks the helper that runs as root to install the downloaded release,
+// and returns at once. The hub restarts when the helper replaces it; the
+// outcome is in Status afterwards, and in the audit log.
+func (m *Manager) Apply(ctx context.Context, by string) (Status, error) {
+	if m.opts.ApplyDir == "" {
+		return Status{}, ErrApplyDisabled
+	}
+	st, err := m.Status(ctx)
+	if err != nil {
+		return Status{}, err
+	}
+	switch {
+	case st.Applying:
+		return Status{}, ErrApplying
+	case st.Staged == nil:
+		return Status{}, ErrNothingToApply
+	case st.Staged.Verified != VerifiedSignature:
+		return Status{}, ErrNotVerified
+	}
+	if err := m.opts.Stager.Verify(*st.Staged); err != nil {
+		return Status{}, err
+	}
+	if err := os.MkdirAll(m.opts.ApplyDir, 0o700); err != nil {
+		return Status{}, err
+	}
+	req := ApplyRequest{Version: st.Staged.Version, RequestedBy: by, RequestedAt: m.opts.Now().UTC()}
+	if err := WriteRequest(m.opts.ApplyDir, req); err != nil {
+		return Status{}, err
+	}
+	m.audit(ctx, by, EventApplyRequested, req.Version, fmt.Sprintf("from %s", m.opts.Version))
+	m.opts.Log.Info("update requested", "version", req.Version, "by", by)
+	return m.Status(ctx)
+}
+
+// syncApply records the helper's result in the audit log once, and forgets the
+// downloaded release when it was installed.
+func (m *Manager) syncApply(ctx context.Context) {
+	if m.opts.ApplyDir == "" {
+		return
+	}
+	res, ok := ReadResult(m.opts.ApplyDir)
+	if !ok || res.Outcome == OutcomeInstalling {
+		return
+	}
+	at := res.At.UTC().Format(time.RFC3339Nano)
+	if v, ok, err := m.get(ctx, keyReported); err != nil || (ok && v == at) {
+		return
+	}
+	if err := m.put(ctx, keyReported, at); err != nil {
+		return
+	}
+	event := map[string]string{OutcomeApplied: EventApplied, OutcomeRolledBack: EventRolledBack, OutcomeFailed: EventApplyFailed}[res.Outcome]
+	if event == "" {
+		return
+	}
+	actor := res.RequestedBy
+	if actor == "" {
+		actor = SystemActor
+	}
+	detail := "from " + res.From
+	if res.Message != "" {
+		detail += ": " + res.Message
+	}
+	m.audit(ctx, actor, event, res.Version, detail)
+	if res.Outcome == OutcomeApplied && m.opts.Stager != nil {
+		m.opts.Stager.Clear()
+	}
 }

@@ -44,6 +44,11 @@ type Updates struct {
 	// Check lets the hub ask GitHub for new releases every few hours. Turn it
 	// off on a hub that must not contact the internet.
 	Check bool `yaml:"check"`
+	// Apply lets the hub ask for a downloaded release to be installed, by the
+	// root-owned helper that systemd starts (regulus-update.path). The
+	// installer turns it on together with that unit; without the unit nothing
+	// would pick the request up.
+	Apply bool `yaml:"apply"`
 }
 
 // Console configures the interactive terminal console (`regulus`).
@@ -164,6 +169,13 @@ func LoadWith(name string, args []string, getenv func(string) string, output io.
 			return Config{}, fmt.Errorf("invalid configuration: REGULUS_UPDATES_CHECK %q is not a boolean", v)
 		}
 		cfg.Updates.Check = b
+	}
+	if v := getenv("REGULUS_UPDATES_APPLY"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid configuration: REGULUS_UPDATES_APPLY %q is not a boolean", v)
+		}
+		cfg.Updates.Apply = b
 	}
 	setIfNotEmpty(&cfg.Log.Level, getenv("REGULUS_LOG_LEVEL"))
 	setIfNotEmpty(&cfg.Log.Format, getenv("REGULUS_LOG_FORMAT"))

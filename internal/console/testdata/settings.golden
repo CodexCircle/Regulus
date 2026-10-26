@@ -11,12 +11,12 @@ Regulus v0.3.0  Hub ● running
    log.level          info                       file
    log.format         text                       file
    updates.check      true                       default
+   updates.apply      false                      default
    console.tui        true                       default
 
  listen  default: :8080
  Address of the dashboard and API: host:port, or only the port (8080)
  The hub reads it at start: restart it to apply.
-
 
 
 

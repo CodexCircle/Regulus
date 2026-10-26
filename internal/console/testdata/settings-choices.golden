@@ -11,6 +11,7 @@ Regulus v0.3.0  Hub ● running
  ▸ log.level          info                       file
    log.format         text                       file
    updates.check      true                       default
+   updates.apply      false                      default
    console.tui        true                       default
 
  log.level  default: info
@@ -21,7 +22,6 @@ Regulus v0.3.0  Hub ● running
  Editing log.level
  > info
  ✓ will be saved as info
-
 
 
 

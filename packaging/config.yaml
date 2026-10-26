@@ -30,3 +30,8 @@ log:
 # dashboard. Set to false on a hub that must not contact the internet.
 updates:
   check: true
+
+# Let the dashboard install a downloaded update. The installer turns this on
+# together with the systemd unit that does the installing as root (see
+# regulus-update.path); on its own the setting does nothing.
+  apply: false
