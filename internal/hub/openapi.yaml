@@ -351,7 +351,8 @@ paths:
         Starts the download in the background and answers at once; poll
         `GET /api/updates` (`downloading`, then `staged` or `download_error`).
         The archive is checked against the SHA-256 in the release's
-        `checksums.txt` before it is kept (`staged.verified` is `checksum`).
+        `checksums.txt`, and that file's Sigstore signature is verified, before it
+        is kept (`staged.verified` is `signature`).
         Nothing is installed. Answers 409 when there is no newer release, a
         download is already running, checks are off, or this build is not a
         release. The request needs a JSON body, which must be empty (`{}`).
@@ -1170,15 +1171,18 @@ components:
         size: { type: integer, format: int64 }
         verified:
           type: string
-          enum: [checksum]
+          enum: [checksum, signature]
           description: |
-            How far the download was checked. `checksum`: it matches the SHA-256 in
-            the release's checksums.txt, which catches a corrupt download but does
-            not prove who published it.
+            How far the download was checked. `signature`: checksums.txt carries a
+            valid Sigstore signature made by the release workflow of this
+            repository for this tag, and the archive matches it. `checksum`: only
+            the SHA-256 matched, which catches a corrupt download but does not
+            prove who published it. A hub refuses to keep a release whose
+            signature is missing or invalid, so it reports `signature`.
         staged_at: { type: string, format: date-time }
         signed:
           type: boolean
-          description: The signature bundle of checksums.txt was published and kept; it is not verified yet.
+          description: The signature bundle of checksums.txt was published and kept next to it.
     UpdateStatus:
       type: object
       required: [current_version, release_build, checks_enabled, mode, channel, platform, checked_at, checking, latest, update_available, staged, downloading]

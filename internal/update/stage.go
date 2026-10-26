@@ -23,7 +23,10 @@ const (
 	// VerifiedChecksum: the archive matches the SHA-256 in the release's
 	// checksums.txt. That catches a corrupted or truncated download, but both
 	// files come from the same place, so it does not prove who made them.
+	// A Stager without a Verifier stops here.
 	VerifiedChecksum = "checksum"
+	// VerifiedSignature (see signature.go) is the same plus a valid signature
+	// of checksums.txt by the release workflow.
 )
 
 // Names of the files of a release (see .goreleaser.yaml).
@@ -53,7 +56,7 @@ type Staged struct {
 	Verified string    `json:"verified"`
 	StagedAt time.Time `json:"staged_at"`
 	// Signed is true when the signature bundle of checksums.txt was published
-	// and kept next to it, for whoever applies the update to check.
+	// and kept next to it. Verified says whether it was checked.
 	Signed bool `json:"signed"`
 }
 
@@ -68,6 +71,9 @@ type Stager struct {
 	Dir    string
 	Client *http.Client
 	Now    func() time.Time
+	// Verifier, if set, checks the signature of checksums.txt before anything
+	// else is downloaded; a release without a valid signature is refused.
+	Verifier Verifier
 }
 
 func (s *Stager) client() *http.Client {
@@ -126,6 +132,24 @@ func (s *Stager) Stage(ctx context.Context, rel Release, goos, goarch string) (S
 		return Staged{}, err
 	}
 
+	var bundleData []byte
+	if bundle, ok := rel.Asset(bundleName); ok {
+		bundleData, err = s.fetchSmall(ctx, bundle.URL)
+		if err != nil && s.Verifier != nil {
+			return Staged{}, fmt.Errorf("download %s: %w", bundleName, err)
+		}
+	}
+	verified := VerifiedChecksum
+	if s.Verifier != nil {
+		if bundleData == nil {
+			return Staged{}, fmt.Errorf("release %s has no %s, so its origin cannot be verified", rel.Tag, bundleName)
+		}
+		if err := s.Verifier.Verify(ctx, rel.Tag, sumsData, bundleData); err != nil {
+			return Staged{}, err
+		}
+		verified = VerifiedSignature
+	}
+
 	got, size, err := s.fetchFile(ctx, archive.URL, filepath.Join(work, archiveName), maxArchive)
 	if err != nil {
 		return Staged{}, fmt.Errorf("download %s: %w", archiveName, err)
@@ -140,16 +164,12 @@ func (s *Stager) Stage(ctx context.Context, rel Release, goos, goarch string) (S
 		return Staged{}, err
 	}
 
-	st := Staged{Version: rel.Version.String(), Tag: rel.Tag, Archive: archiveName, SHA256: got, Size: size, Verified: VerifiedChecksum}
-	if bundle, ok := rel.Asset(bundleName); ok {
-		// The bundle is optional here: it is only kept. A release without it
-		// can be downloaded but never counts as signed.
-		if data, err := s.fetchSmall(ctx, bundle.URL); err == nil {
-			if err := os.WriteFile(filepath.Join(work, bundleName), data, 0o600); err != nil {
-				return Staged{}, err
-			}
-			st.Signed = true
+	st := Staged{Version: rel.Version.String(), Tag: rel.Tag, Archive: archiveName, SHA256: got, Size: size, Verified: verified}
+	if bundleData != nil {
+		if err := os.WriteFile(filepath.Join(work, bundleName), bundleData, 0o600); err != nil {
+			return Staged{}, err
 		}
+		st.Signed = true
 	}
 	if s.Now != nil {
 		st.StagedAt = s.Now().UTC()

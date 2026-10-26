@@ -138,13 +138,17 @@ function Version({ status, busy, onCheck, onDownload }: { status: UpdateStatus; 
       {staged && (
         <div role="status" aria-label="Downloaded update">
           <p>
-            Version <strong>{staged.version}</strong> is downloaded ({formatBytes(staged.size)}, {staged.archive}). Its SHA-256 matches the release's checksum
-            list. It is <strong>not installed</strong>: updating from the dashboard is not available yet.
+            Version <strong>{staged.version}</strong> is downloaded ({formatBytes(staged.size)}, {staged.archive}).{" "}
+            {staged.verified === "signature"
+              ? "Its signature was checked: it was made by this project's release workflow for this version, and the file matches it."
+              : "Its SHA-256 matches the release's checksum list."}{" "}
+            It is <strong>not installed</strong>: updating from the dashboard is not available yet.
           </p>
-          <p className="muted">
-            The checksum list comes from the same place as the file, so it catches a damaged download but does not prove who published it.
-            {staged.signed ? " The release's signature file is kept, but is not checked yet." : " This release has no signature file."}
-          </p>
+          {staged.verified !== "signature" && (
+            <p className="muted">
+              The checksum list comes from the same place as the file, so it catches a damaged download but does not prove who published it.
+            </p>
+          )}
         </div>
       )}
       {status.downloading && <p role="status">Downloading…</p>}

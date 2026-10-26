@@ -141,6 +141,14 @@ describe("UpdatesPage", () => {
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
   });
 
+  it("says when the signature of the download was checked", async () => {
+    mockHub({ "GET /api/updates": [{ data: { ...staged, staged: { ...staged.staged!, verified: "signature" } } }] });
+    renderPage();
+    const box = await screen.findByRole("status", { name: "Downloaded update" });
+    expect(box).toHaveTextContent("Its signature was checked");
+    expect(box).not.toHaveTextContent("does not prove who published it");
+  });
+
   it("shows a failed download", async () => {
     mockHub({ "GET /api/updates": [{ data: { ...newer, download_error: "regulus_0.2.0_linux_amd64.tar.gz does not match its checksum" } }] });
     renderPage();

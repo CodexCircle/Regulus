@@ -48,8 +48,9 @@ type Hub struct {
 	auth      *auth.Service
 	fleet     *fleet.Service
 	updates   *update.Manager
-	updateSrc update.Source // nil: the GitHub releases of ReleaseRepo
-	agentAddr atomic.Value  // string: where the agent listener is bound, once it is
+	updateSrc update.Source   // nil: the GitHub releases of ReleaseRepo
+	updateVer update.Verifier // nil: the Sigstore signature of the release workflow
+	agentAddr atomic.Value    // string: where the agent listener is bound, once it is
 	agents    *agentServer
 	transport *inproc.Transport // lets the built-in agent reach the hub without a network port
 }
@@ -67,6 +68,12 @@ func WithVersion(version string) Option {
 // useful in tests.
 func WithUpdateSource(src update.Source) Option {
 	return func(h *Hub) { h.updateSrc = src }
+}
+
+// WithUpdateVerifier replaces the check of the signature of downloaded
+// releases. Only for tests: a hub without it never trusts an unsigned release.
+func WithUpdateVerifier(v update.Verifier) Option {
+	return func(h *Hub) { h.updateVer = v }
 }
 
 // WithAgentIntervals sets the heartbeat and metrics intervals the hub asks
@@ -128,15 +135,22 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger, ui fs.FS, opt
 		opt(h)
 	}
 	h.agents.hubVersion = h.version
+	ver := h.updateVer
+	if ver == nil {
+		ver = &update.SigstoreVerifier{Trust: update.PublicTrust(filepath.Join(cfg.DataDir, "tuf"))}
+	}
 	src := h.updateSrc
 	if src == nil {
 		src = &update.GitHubSource{Repo: ReleaseRepo, UserAgent: "regulus-hub/" + h.version}
 	}
 	h.updates = update.New(update.Options{
-		DB:      db,
-		Log:     log.With("component", "updates"),
-		Source:  src,
-		Stager:  &update.Stager{Dir: filepath.Join(cfg.DataDir, "updates")},
+		DB:     db,
+		Log:    log.With("component", "updates"),
+		Source: src,
+		Stager: &update.Stager{
+			Dir:      filepath.Join(cfg.DataDir, "updates"),
+			Verifier: ver,
+		},
 		Audit:   authn,
 		Version: h.version,
 		GOOS:    runtime.GOOS,

@@ -78,6 +78,9 @@ signs:
     args:
       - sign-blob
       - --yes
+      # The hub verifies this file in-process and reads the Sigstore bundle
+      # format; cosign 2 writes an older layout unless asked.
+      - --new-bundle-format
       - --bundle=${signature}
       - ${artifact}
 
