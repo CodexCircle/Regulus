@@ -48,6 +48,30 @@ check "accepts a stable version" valid_version 1.2.3
 check "accepts a beta version" valid_version 0.3.0-beta.1
 check "accepts a snapshot version" valid_version 0.0.0-SNAPSHOT-ade16df
 check_not "rejects a word" valid_version latest
+
+# channels
+equal "channel of a release" "$(channel_of 1.2.3)" stable
+equal "channel of a beta" "$(channel_of 1.3.0-beta.2)" beta
+equal "channel of a release candidate" "$(channel_of 1.3.0-RC.1)" beta
+equal "channel of an alpha" "$(channel_of 1.4.0-alpha.1)" alpha
+equal "channel of another pre-release" "$(channel_of 1.4.0-dev.5)" alpha
+check_not "stable does not offer a beta" offers stable 1.3.0-beta.1
+check "beta offers a release" offers beta 1.2.3
+check_not "beta does not offer an alpha" offers beta 1.4.0-alpha.1
+check "alpha offers a beta" offers alpha 1.3.0-beta.1
+tags='v0.2.0
+v0.3.0-beta.10
+v0.3.0-beta.9
+v0.4.0-alpha.1
+v0.1.0
+v0.3.0-beta.2
+not-a-version'
+equal "newest stable" "$(printf '%s\n' "$tags" | newest_on_channel stable)" 0.2.0
+equal "newest beta (numeric order)" "$(printf '%s\n' "$tags" | newest_on_channel beta)" 0.3.0-beta.10
+equal "newest alpha" "$(printf '%s\n' "$tags" | newest_on_channel alpha)" 0.4.0-alpha.1
+equal "a release is newer than its beta" "$(printf 'v0.3.0-beta.10\nv0.3.0\n' | newest_on_channel beta)" 0.3.0
+equal "a beta is newer than an alpha of the same version" "$(printf 'v0.3.0-beta.1\nv0.3.0-alpha.4\n' | newest_on_channel alpha)" 0.3.0-beta.1
+equal "no release on the channel" "$(printf 'v0.3.0-alpha.1\n' | newest_on_channel stable)" ""
 check_not "rejects an empty version" valid_version ""
 check_not "rejects shell characters" valid_version '1.2.3;rm'
 check_not "rejects a path" valid_version ../1.2.3

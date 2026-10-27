@@ -99,8 +99,15 @@ release:
   # Published so that .../releases/latest/download/install.sh always works.
   extra_files:
     - glob: packaging/install.sh
-  # Tags such as v1.2.0-beta.1 are published as pre-releases (beta channel).
+  # Tags with a suffix (v1.2.0-beta.1, v1.2.0-alpha.1) are published as
+  # pre-releases; GitHub's "latest" is always the newest stable release.
   prerelease: auto
+  header: |
+    Install this version on Ubuntu Server:
+
+    ```sh
+    curl -fsSL https://github.com/CodexCircle/Regulus/releases/download/{{ .Tag }}/install.sh | sh -s -- --version {{ .Version }}
+    ```
 
 changelog:
   sort: asc

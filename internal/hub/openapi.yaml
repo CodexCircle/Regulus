@@ -301,7 +301,7 @@ paths:
               required: [mode, channel]
               properties:
                 mode: { type: string, enum: [manual, download, automatic] }
-                channel: { type: string, enum: [stable, beta] }
+                channel: { type: string, enum: [stable, beta, alpha] }
                 window_start: { type: string, example: "03:00" }
                 window_end: { type: string, example: "05:00" }
       responses:
@@ -1273,11 +1273,15 @@ components:
   schemas:
     UpdateInfo:
       type: object
-      required: [version, tag, prerelease, url, published_at]
+      required: [version, tag, prerelease, channel, url, published_at]
       properties:
         version: { type: string, example: "0.2.0" }
         tag: { type: string, example: "v0.2.0" }
         prerelease: { type: boolean }
+        channel:
+          type: string
+          enum: [stable, beta, alpha]
+          description: The channel of this release (beta for -beta and -rc versions, alpha for other pre-releases).
         url: { type: string, description: Page of the release. }
         notes: { type: string, description: Release notes as plain text (cut at 8 KiB). }
         published_at: { type: string, format: date-time }
@@ -1313,7 +1317,7 @@ components:
         release_build: { type: boolean }
         checks_enabled: { type: boolean }
         mode: { type: string, enum: [manual, download, automatic] }
-        channel: { type: string, enum: [stable, beta] }
+        channel: { type: string, enum: [stable, beta, alpha] }
         window_start: { type: string }
         window_end: { type: string }
         platform: { type: string, example: linux/amd64 }

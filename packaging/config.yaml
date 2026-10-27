@@ -26,7 +26,7 @@ log:
   format: text # text, json
 
 # Look for new releases on GitHub every few hours (api.github.com). What to do
-# when one is found, and the channel (stable or beta), are chosen in the
+# when one is found, and the channel (stable, beta or alpha), are chosen in the
 # dashboard. Set to false on a hub that must not contact the internet.
 updates:
   check: true

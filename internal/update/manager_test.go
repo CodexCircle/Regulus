@@ -133,6 +133,9 @@ func TestDefaults(t *testing.T) {
 	if got := newRig(t, "0.2.0-beta.1", "").status(t).Channel; got != Beta {
 		t.Errorf("channel of a beta build = %q", got)
 	}
+	if got := newRig(t, "0.2.0-alpha.1", "").status(t).Channel; got != Alpha {
+		t.Errorf("channel of an alpha build = %q", got)
+	}
 }
 
 func TestCheckFindsANewerRelease(t *testing.T) {

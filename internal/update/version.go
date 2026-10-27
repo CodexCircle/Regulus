@@ -72,8 +72,24 @@ func (v Version) String() string {
 	return s
 }
 
-// Prerelease reports whether the version is a pre-release (the beta channel).
+// Prerelease reports whether the version is a pre-release (beta or alpha).
 func (v Version) Prerelease() bool { return len(v.Pre) > 0 }
+
+// Channel is the channel a release of this version belongs to: Stable for a
+// release, Beta for a pre-release named beta or rc (1.5.0-beta.1,
+// 1.5.0-rc.1), and Alpha for any other pre-release (1.5.0-alpha.1), so an
+// unknown kind is never offered to more cautious channels.
+func (v Version) Channel() Channel {
+	if !v.Prerelease() {
+		return Stable
+	}
+	switch strings.ToLower(v.Pre[0]) {
+	case "beta", "rc":
+		return Beta
+	default:
+		return Alpha
+	}
+}
 
 // Compare returns -1, 0 or 1 as v is older than, equal to or newer than o,
 // following SemVer precedence: a pre-release is older than its release.

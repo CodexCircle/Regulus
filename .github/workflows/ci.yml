@@ -35,6 +35,14 @@ jobs:
         if: failure()
         run: grep -E '^(--- FAIL|FAIL|panic:)|_test\.go:[0-9]+:' go-test.log | head -40 | sed 's/^/::error::/' || true
 
+  scripts:
+    name: Scripts (install and release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh scripts/test-install.sh
+      - run: sh scripts/test-next-version.sh
+
   dashboard:
     name: Dashboard (lint, typecheck, test, build)
     runs-on: ubuntu-latest
