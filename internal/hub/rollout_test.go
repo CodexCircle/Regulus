@@ -51,7 +51,9 @@ func startRolloutHub(t *testing.T, mutate ...func(*config.Config)) (*Hub, releas
 	go func() { done <- h.Serve(ctx, ln) }()
 	t.Cleanup(func() {
 		cancel()
-		<-done
+		if err := <-done; err != nil {
+			t.Errorf("Serve returned %v", err)
+		}
 		_ = h.Close()
 	})
 	waitFor(t, "the agent listener", func() bool { return h.AgentAddr() != "" })

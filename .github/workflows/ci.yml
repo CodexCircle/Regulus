@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Lets a maintainer run CI by hand (Actions tab, "Run workflow").
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -25,7 +27,13 @@ jobs:
         with:
           version: v2.15.0
       - run: go vet ./...
-      - run: go test -race ./...
+      - name: go test -race ./...
+        run: |
+          set -o pipefail
+          go test -race ./... 2>&1 | tee go-test.log
+      - name: Report failing tests
+        if: failure()
+        run: grep -E '^(--- FAIL|FAIL|panic:)|_test\.go:[0-9]+:' go-test.log | head -40 | sed 's/^/::error::/' || true
 
   dashboard:
     name: Dashboard (lint, typecheck, test, build)
