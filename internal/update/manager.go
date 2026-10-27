@@ -602,7 +602,8 @@ func (m *Manager) Download(ctx context.Context, by string) (Status, error) {
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		m.stage(base, by)
+		// stage records the error in m.stageErr, which Status reports.
+		_ = m.stage(base, by)
 	}()
 	return m.Status(ctx)
 }
