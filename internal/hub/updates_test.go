@@ -104,14 +104,17 @@ func TestUpdatesAPIFollowsTheFlow(t *testing.T) {
 		t.Fatalf("GET: status = %d, body = %s", rec.Code, rec.Body)
 	}
 	st := decodeStatus(t, rec)
-	if st.CurrentVersion != "0.1.0" || st.Mode != update.ModeManual || st.Channel != update.Stable || !st.ChecksEnabled || st.UpdateAvailable {
+	if st.CurrentVersion != "0.1.0" || st.Mode != update.ModeDownload || st.Channel != update.Stable || !st.ChecksEnabled || st.UpdateAvailable {
 		t.Fatalf("initial status = %+v", st)
 	}
 
-	// Choose the download mode.
-	rec = admin.do("PUT", "/api/updates/settings", map[string]string{"mode": "download", "channel": "stable"})
-	if st := decodeStatus(t, rec); rec.Code != http.StatusOK || st.Mode != update.ModeDownload {
-		t.Fatalf("PUT settings: status = %d, body = %s", rec.Code, rec.Body)
+	// Change the mode and back (download is the default; saving it unchanged
+	// is not a change and is not audited).
+	for _, mode := range []update.Mode{update.ModeManual, update.ModeDownload} {
+		rec = admin.do("PUT", "/api/updates/settings", map[string]string{"mode": string(mode), "channel": "stable"})
+		if st := decodeStatus(t, rec); rec.Code != http.StatusOK || st.Mode != mode {
+			t.Fatalf("PUT settings %s: status = %d, body = %s", mode, rec.Code, rec.Body)
+		}
 	}
 
 	rec = admin.do("POST", "/api/updates/check", struct{}{})
