@@ -360,7 +360,7 @@ func TestSectionsByKeyAndMouse(t *testing.T) {
 		t.Errorf("tab key: %d", m.tab)
 	}
 	m = sendKey(t, m, key(tea.KeyShiftTab), key(tea.KeyShiftTab))
-	if m.tab != tabHealth {
+	if m.tab != tabActions {
 		t.Errorf("shift+tab wraps: %d", m.tab)
 	}
 	// Click on "Logs" in the tab bar (third line).
@@ -483,5 +483,80 @@ func TestCollectReportsABrokenConfiguration(t *testing.T) {
 	}
 	if !bad {
 		t.Errorf("health: %+v", snap.Health)
+	}
+}
+
+// systemWith returns the fake system with the running hub's agent address and
+// CA fingerprint replaced.
+func systemWith(agentAddr, fingerprint string) System {
+	sys := fakeSystem()
+	fetch := sys.Fetch
+	sys.Fetch = func(ctx context.Context, dir string) (localstatus.Status, error) {
+		st, err := fetch(ctx, dir)
+		st.AgentAddr, st.CAFingerprint = agentAddr, fingerprint
+		return st, err
+	}
+	return sys
+}
+
+func TestActionsTabListsWhatTheConsoleCanDo(t *testing.T) {
+	m := New(Options{System: systemWith(":8443", "sha256:abcd"), ConfigFile: "testdata/config.yaml", Unicode: true})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = settle(t, next.(Model), next.(Model).collect())
+	m = sendKey(t, m, rune1('5'))
+	if m.tab != tabActions {
+		t.Fatalf("tab = %d", m.tab)
+	}
+	view := m.View()
+	for _, want := range []string{
+		"5 Actions",
+		"r  Restart the service", "p  Reset the administrator password", "a  Turn on remote agents",
+		"already on (:8443)",           // agents are on
+		"sudo regulus hub reset-admin", // no reset hook here
+		"Adding a server", "192.168.1.20:8443", "sha256:abcd", "Servers → Add a server",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the Actions tab does not show %q:\n%s", want, view)
+		}
+	}
+	// Turning agents on again is refused with the reason.
+	m = sendKey(t, m, rune1('a'))
+	if m.confirm != "" || !m.noticeIsErr || !strings.Contains(m.notice, "already on") {
+		t.Errorf("confirm = %q, notice = %q", m.confirm, m.notice)
+	}
+}
+
+func TestTurningRemoteAgentsOnFromTheConsole(t *testing.T) {
+	file := copyConfig(t)
+	restarted := 0
+	m := New(Options{System: systemWith("", ""), ConfigFile: file, Unicode: true, Hooks: Hooks{
+		Restart: func(context.Context) error { restarted++; return nil },
+	}})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = settle(t, next.(Model), next.(Model).collect())
+
+	// Select the action in the Actions tab and confirm it.
+	m = sendKey(t, m, rune1('5'), key(tea.KeyDown), key(tea.KeyDown), key(tea.KeyEnter))
+	if m.confirm != "agents" || !strings.Contains(m.View(), "Turn on remote agents on port 8443") {
+		t.Fatalf("confirm = %q\n%s", m.confirm, m.View())
+	}
+	m = sendKey(t, m, rune1('y'))
+	if restarted != 1 || m.noticeIsErr || !strings.Contains(m.notice, "Remote agents are on") {
+		t.Errorf("restarted = %d, notice = %q", restarted, m.notice)
+	}
+	data, _ := os.ReadFile(file)
+	if !strings.Contains(string(data), `agent_listen: ":8443"`) {
+		t.Errorf("agent_listen was not written:\n%s", data)
+	}
+}
+
+func TestTurningRemoteAgentsOnWithoutRestartAsksForIt(t *testing.T) {
+	file := copyConfig(t)
+	m := New(Options{System: systemWith("", ""), ConfigFile: file, Unicode: true})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = settle(t, next.(Model), next.(Model).collect())
+	m = sendKey(t, m, rune1('a'), rune1('y'))
+	if !m.needsRestart || !strings.Contains(m.notice, "agent_listen") {
+		t.Errorf("needsRestart = %v, notice = %q", m.needsRestart, m.notice)
 	}
 }

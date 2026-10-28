@@ -16,13 +16,14 @@ const maxSocketPath = 107
 // localStatus describes the running hub for the tools on the same machine.
 func (h *Hub) localStatus(addr string) localstatus.Status {
 	st := localstatus.Status{
-		Version:      h.version,
-		StartedAt:    h.startedAt,
-		Addr:         addr,
-		AgentAddr:    h.AgentAddr(),
-		BuiltinAgent: h.cfg.BuiltinAgent,
-		SetupToken:   h.auth.SetupToken(),
-		Agents:       []localstatus.Agent{},
+		Version:       h.version,
+		StartedAt:     h.startedAt,
+		Addr:          addr,
+		AgentAddr:     h.AgentAddr(),
+		CAFingerprint: h.fleet.CA().Fingerprint(),
+		BuiltinAgent:  h.cfg.BuiltinAgent,
+		SetupToken:    h.auth.SetupToken(),
+		Agents:        []localstatus.Agent{},
 	}
 	now := time.Now()
 	for _, a := range h.Agents() {

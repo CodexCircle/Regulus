@@ -1,11 +1,12 @@
 # Console and command line
 
-Run `regulus` on the server (or `regulus console`) to open a full-screen console, in the spirit of the Claude Code and Gemini CLIs. It has four sections, reached with `tab`, the arrow keys, `1`-`4` or the mouse:
+Run `regulus` on the server (or `regulus console`) to open a full-screen console, in the spirit of the Claude Code and Gemini CLIs. It has five sections, reached with `tab`, the arrow keys, `1`-`5` or the mouse:
 
 - **Status:** whether the hub runs (and the state of its systemd unit), version, uptime, the dashboard address and port (with the addresses of this machine on the network), the agent port, the data directory and database size, the configuration file and the connected agents. While no administrator exists it shows the one-time **setup token**, and `p` makes a one-time password reset link for the administrator (after a confirmation), so a server without a browser nearby is still manageable.
 - **Settings:** every setting with its description, default, current value and where the value comes from (`default`, `file` or `environment`). `enter` edits one; the text is checked as you type, `tab` cycles through the allowed choices, and `enter` writes the change into the YAML file, keeping its comments. The console says whether the hub must be restarted and offers it with `r` (`sudo systemctl restart regulus`).
 - **Logs:** the last lines of the hub's log from journald, refreshed every two seconds, with a level filter on `f`.
 - **Health:** the configuration is valid, the hub answers, the ports are free or served by the hub, the data directory is writable, the database exists.
+- **Actions:** what the console can do, each with its key, what it needs and why it is not available when it is not: restart the service (`r`), reset the administrator password (`p`), turn on remote agents (`a`: writes `agent_listen: ":8443"` and restarts the hub). The keys work from every section, and each asks before doing anything. While remote agents are on it also shows what a new server needs: the hub's agent addresses and CA fingerprint (the token comes from the dashboard, **Servers → Add a server**).
 
 The live data (agents, uptime, setup token) comes from the running hub through a Unix socket in the data directory (`regulus.sock`, mode `0600`, owned by the user that runs the hub), not through the web login. With the package install the data directory is private to `regulus`, so open the console with `sudo -u regulus regulus` to see it all, or with `sudo regulus` (changes to the configuration file need root as well). Without access to the socket the console still shows the settings and tells you what is missing.
 

@@ -1,6 +1,6 @@
 Regulus v0.3.0  Hub ● running
 
- 1 Status   2 Settings   3 Logs   4 Health
+ 1 Status   2 Settings   3 Logs   4 Health   5 Actions
 ────────────────────────────────────────────────────────────────────────────────
  Hub             running, up 3h 12m  (service: active)
  Version         v0.3.0

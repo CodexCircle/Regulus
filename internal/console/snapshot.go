@@ -54,14 +54,16 @@ type Snapshot struct {
 	// Running is true when the hub answered on its local socket.
 	Running bool `json:"running"`
 
-	Listen       string   `json:"listen"`
-	Port         string   `json:"port"`
-	URL          string   `json:"url"`
-	LANURLs      []string `json:"lan_urls,omitempty"`
-	AgentListen  string   `json:"agent_listen,omitempty"`
-	DataDir      string   `json:"data_dir"`
-	DatabaseSize int64    `json:"database_bytes"`
-	BuiltinAgent bool     `json:"builtin_agent"`
+	Listen      string   `json:"listen"`
+	Port        string   `json:"port"`
+	URL         string   `json:"url"`
+	LANURLs     []string `json:"lan_urls,omitempty"`
+	AgentListen string   `json:"agent_listen,omitempty"`
+	// CAFingerprint is what a new agent pins, from the running hub.
+	CAFingerprint string `json:"ca_fingerprint,omitempty"`
+	DataDir       string `json:"data_dir"`
+	DatabaseSize  int64  `json:"database_bytes"`
+	BuiltinAgent  bool   `json:"builtin_agent"`
 	// LogLevel and Format are shown in the header of the logs.
 	LogLevel string `json:"log_level"`
 
@@ -187,6 +189,7 @@ func Collect(ctx context.Context, sys System, configFile, version string) Snapsh
 		if live.AgentAddr != "" {
 			snap.AgentListen = live.AgentAddr
 		}
+		snap.CAFingerprint = live.CAFingerprint
 	}
 	snap.Health = healthChecks(snap, cfg, fetchErr)
 	return snap

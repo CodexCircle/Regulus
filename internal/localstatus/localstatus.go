@@ -28,9 +28,11 @@ type Status struct {
 	StartedAt time.Time `json:"started_at"`
 	// Addr is where the dashboard is bound; AgentAddr where remote agents
 	// connect, or "" while that is off.
-	Addr         string `json:"addr"`
-	AgentAddr    string `json:"agent_addr,omitempty"`
-	BuiltinAgent bool   `json:"builtin_agent"`
+	Addr      string `json:"addr"`
+	AgentAddr string `json:"agent_addr,omitempty"`
+	// CAFingerprint is what a new agent pins to trust this hub.
+	CAFingerprint string `json:"ca_fingerprint,omitempty"`
+	BuiltinAgent  bool   `json:"builtin_agent"`
 	// SetupToken is the one-time token to create the first admin; it is
 	// empty once the admin exists.
 	SetupToken string  `json:"setup_token,omitempty"`
