@@ -108,10 +108,13 @@ func TestUpdatesAPIFollowsTheFlow(t *testing.T) {
 		t.Fatalf("initial status = %+v", st)
 	}
 
-	// Save the settings (download is already the default).
-	rec = admin.do("PUT", "/api/updates/settings", map[string]string{"mode": "download", "channel": "stable"})
-	if st := decodeStatus(t, rec); rec.Code != http.StatusOK || st.Mode != update.ModeDownload {
-		t.Fatalf("PUT settings: status = %d, body = %s", rec.Code, rec.Body)
+	// Change the mode and back (download is the default; saving it unchanged
+	// is not a change and is not audited).
+	for _, mode := range []update.Mode{update.ModeManual, update.ModeDownload} {
+		rec = admin.do("PUT", "/api/updates/settings", map[string]string{"mode": string(mode), "channel": "stable"})
+		if st := decodeStatus(t, rec); rec.Code != http.StatusOK || st.Mode != mode {
+			t.Fatalf("PUT settings %s: status = %d, body = %s", mode, rec.Code, rec.Body)
+		}
 	}
 
 	rec = admin.do("POST", "/api/updates/check", struct{}{})
