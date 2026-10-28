@@ -92,7 +92,7 @@ func (s Settings) Validate() error {
 		}
 	}
 	if !s.Channel.Valid() {
-		return fmt.Errorf("%w: channel must be %q or %q", ErrInvalidSettings, Stable, Beta)
+		return fmt.Errorf("%w: channel must be %q, %q or %q", ErrInvalidSettings, Stable, Beta, Alpha)
 	}
 	return nil
 }
@@ -102,13 +102,14 @@ type Info struct {
 	Version     string    `json:"version"`
 	Tag         string    `json:"tag"`
 	Prerelease  bool      `json:"prerelease"`
+	Channel     Channel   `json:"channel"`
 	URL         string    `json:"url"`
 	Notes       string    `json:"notes,omitempty"`
 	PublishedAt time.Time `json:"published_at"`
 }
 
 func infoOf(r Release) *Info {
-	return &Info{Version: r.Version.String(), Tag: r.Tag, Prerelease: r.Version.Prerelease(), URL: r.URL, Notes: r.Notes, PublishedAt: r.PublishedAt}
+	return &Info{Version: r.Version.String(), Tag: r.Tag, Prerelease: r.Version.Prerelease(), Channel: r.Version.Channel(), URL: r.URL, Notes: r.Notes, PublishedAt: r.PublishedAt}
 }
 
 // Status is what the hub knows about updates, as the API reports it.
@@ -364,12 +365,13 @@ func (m *Manager) automatic(ctx context.Context) {
 func (m *Manager) Close() { m.wg.Wait() }
 
 // Settings returns the saved choices, with the defaults for what was never
-// chosen: manual mode, and the beta channel for a build that is itself a
-// pre-release.
+// chosen: download mode (a new release is downloaded and checked, and waits
+// for an administrator to install it), and the channel of the running build (a hub that runs
+// a beta follows the beta channel, one that runs an alpha the alpha channel).
 func (m *Manager) Settings(ctx context.Context) (Settings, error) {
-	s := Settings{Mode: ModeManual, Channel: Stable}
-	if m.release && m.current.Prerelease() {
-		s.Channel = Beta
+	s := Settings{Mode: ModeDownload, Channel: Stable}
+	if m.release {
+		s.Channel = m.current.Channel()
 	}
 	if v, ok, err := m.get(ctx, keyMode); err != nil {
 		return s, err
@@ -469,7 +471,13 @@ func (m *Manager) Status(ctx context.Context) (Status, error) {
 	}
 	// An answer found on another channel says nothing about this one.
 	if m.state.Latest != nil && m.state.Channel == set.Channel {
-		st.Latest = m.state.Latest
+		latest := *m.state.Latest
+		if latest.Channel == "" { // saved by a version without channels
+			if v, err := ParseVersion(latest.Version); err == nil {
+				latest.Channel = v.Channel()
+			}
+		}
+		st.Latest = &latest
 		st.UpdateAvailable = m.newer(*m.state.Latest)
 	}
 	if m.opts.Stager != nil {
@@ -602,7 +610,8 @@ func (m *Manager) Download(ctx context.Context, by string) (Status, error) {
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		m.stage(base, by)
+		// stage records the error in m.stageErr, which Status reports.
+		_ = m.stage(base, by)
 	}()
 	return m.Status(ctx)
 }

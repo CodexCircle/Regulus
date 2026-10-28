@@ -58,6 +58,23 @@ func TestParseCPUTimes(t *testing.T) {
 	}
 }
 
+func TestFirstCPUValueOverATooShortIntervalIsTheAverageSinceBoot(t *testing.T) {
+	proc := t.TempDir()
+	writeProc(t, proc, map[string]string{"stat": statSample, "meminfo": meminfoSample})
+	c := newLinuxCollector(proc, func(string) (uint64, uint64, error) { return 0, 0, errors.New("no") })
+
+	// One busy and one idle tick since the collector was created: over that
+	// interval the share would read 50%.
+	writeProc(t, proc, map[string]string{"stat": "cpu  101 10 50 801 40 5 5 0 0 0\n"})
+	r, err := c.Collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := r.GetCpu().GetUsagePercent(), 100*171.0/1012; math.Abs(got-want) > 1e-9 {
+		t.Errorf("cpu usage = %v, want the average since boot %v", got, want)
+	}
+}
+
 func TestCPUUsagePercent(t *testing.T) {
 	tests := []struct {
 		name      string

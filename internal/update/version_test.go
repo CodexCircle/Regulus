@@ -71,3 +71,24 @@ func TestParseBuildVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestVersionChannel(t *testing.T) {
+	for in, want := range map[string]Channel{
+		"1.4.0":            Stable,
+		"1.5.0-beta.1":     Beta,
+		"1.5.0-rc.2":       Beta,
+		"1.5.0-alpha.1":    Alpha,
+		"1.5.0-Alpha":      Alpha,
+		"1.5.0-dev.3":      Alpha,
+		"1.4.0+build.7":    Stable,
+		"1.5.0-beta.1+abc": Beta,
+	} {
+		v, err := ParseVersion(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := v.Channel(); got != want {
+			t.Errorf("Channel(%s) = %q, want %q", in, got, want)
+		}
+	}
+}

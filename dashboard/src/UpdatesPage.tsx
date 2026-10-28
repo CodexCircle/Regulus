@@ -151,7 +151,8 @@ function Version({
             <div role="status" aria-label="Update available">
               <p>
                 <strong>Version {latest.version}</strong>
-                {latest.prerelease && " (beta)"} is available.
+                {latest.channel !== "stable" && ` (${latest.channel})`} is
+                available.
                 {latest.url.startsWith("https://") && (
                   <>
                     {" "}
@@ -407,7 +408,10 @@ function Settings({
             onChange={(e) => setChannel(e.target.value as UpdateChannel)}
           >
             <option value="stable">Stable</option>
-            <option value="beta">Beta (pre-releases too)</option>
+            <option value="beta">Beta (releases and betas)</option>
+            <option value="alpha">
+              Alpha (every release, alphas included)
+            </option>
           </select>
         </label>
         <button type="submit" disabled={!changed || !valid}>

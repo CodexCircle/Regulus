@@ -17,7 +17,7 @@ make lint         # golangci-lint and ESLint
 make smoke        # starts bin/regulus and checks it end to end
 ```
 
-See the [README](README.md#development) for configuration and the project layout.
+See the [README](README.md#development) for configuration and the project layout, and [docs/decisions.md](docs/decisions.md) for the reasons behind the main choices and the open questions. AI coding agents: see [AGENTS.md](AGENTS.md).
 
 ## How we work
 
@@ -27,6 +27,7 @@ See the [README](README.md#development) for configuration and the project layout
 - **Run `make lint test` before pushing.** CI runs the same checks and must be green to merge.
 - **Protobuf**: after editing a `.proto` file run `make proto` and commit the generated code in `internal/gen`. CI fails if it is out of date.
 - **Language**: code, comments, commit messages and issues are in English. User-facing documents (README, this guide) are in English followed by Italian. Issues are written in English followed by Italian.
+- **Decisions**: a pull request that makes or changes a design decision updates [docs/decisions.md](docs/decisions.md) too.
 - Keep changes focused. Unrelated clean-ups belong in their own pull request.
 
 ## Pull request checklist
@@ -52,7 +53,7 @@ Grazie per l'aiuto a Regulus. Questa guida spiega come preparare l'ambiente, com
 
 ## Preparazione
 
-Requisiti: Go 1.26+, Node.js 22+, `make`. Per il lint serve `golangci-lint` v2. I comandi sono quelli della sezione inglese qui sopra; configurazione e struttura del progetto sono nel [README](README.md#sviluppo).
+Requisiti: Go 1.26+, Node.js 22+, `make`. Per il lint serve `golangci-lint` v2. I comandi sono quelli della sezione inglese qui sopra; configurazione e struttura del progetto sono nel [README](README.md#sviluppo), i motivi delle scelte principali e le questioni aperte in [docs/decisions.md](docs/decisions.md#italiano). Per gli agenti AI: vedi [AGENTS.md](AGENTS.md).
 
 ## Come lavoriamo
 
@@ -62,6 +63,7 @@ Requisiti: Go 1.26+, Node.js 22+, `make`. Per il lint serve `golangci-lint` v2. 
 - **Esegui `make lint test` prima del push.** La CI esegue gli stessi controlli e deve essere verde per fare il merge.
 - **Protobuf**: dopo aver modificato un file `.proto` esegui `make proto` e committa il codice generato in `internal/gen`. La CI fallisce se non è aggiornato.
 - **Lingua**: codice, commenti, messaggi di commit e issue sono in inglese. I documenti per gli utenti (README, questa guida) sono in inglese seguito dall'italiano. Le issue sono scritte in inglese seguito dall'italiano.
+- **Decisioni**: una pull request che prende o cambia una decisione di progetto aggiorna anche [docs/decisions.md](docs/decisions.md#italiano).
 - Mantieni le modifiche mirate: le pulizie non correlate vanno in una pull request a parte.
 
 ## Checklist della pull request

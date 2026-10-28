@@ -7,6 +7,9 @@
 #
 #   curl -fsSL https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh | sh
 #
+# The address above serves the script of the latest stable release. Every
+# release also carries its own copy, at .../releases/download/<tag>/install.sh.
+#
 # Options go after "sh -s --", for example:
 #   ... | sh -s -- --no-builtin-agent
 #   ... | sh -s -- --role agent --hub hub.example:8443 --token TOKEN --ca-fingerprint sha256:...
@@ -32,8 +35,10 @@ Usage: install.sh [options]
   --ca-fingerprint FP    agent role: the hub's CA fingerprint, sha256:... as shown with
                          the token; the agent sends the token only to a hub that has it
   --version VERSION      install this version, such as 0.2.0 or 0.3.0-beta.1
-                         (default: the latest stable release)
-  --beta                 install the latest pre-release (beta channel)
+                         (default: the latest release of the channel)
+  --channel CHANNEL      stable (default), beta or alpha: stable offers releases only,
+                         beta also betas and release candidates, alpha every release
+  --beta, --alpha        the same as --channel beta, --channel alpha
   --builtin-agent        include the built-in agent (manage the hub's own server)
   --no-builtin-agent     run only the hub
   --no-self-update       do not set up installing updates from the dashboard or, for an
@@ -95,18 +100,54 @@ fetch() {
 	fi
 }
 
-# latest_version prints the newest version (without the leading v): the latest
-# stable release, or with $channel=beta the newest release of any kind.
+# channel_of VERSION prints the channel of a version, as the hub decides it:
+# stable for a release, beta for -beta and -rc pre-releases, alpha for any
+# other pre-release.
+channel_of() {
+	case "$1" in
+		*-*) ;;
+		*)
+			echo stable
+			return
+			;;
+	esac
+	pre=${1#*-}
+	case "$(printf '%s' "${pre%%.*}" | tr '[:upper:]' '[:lower:]')" in
+		beta | rc) echo beta ;;
+		*) echo alpha ;;
+	esac
+}
+
+# offers CHANNEL VERSION succeeds when CHANNEL offers VERSION: stable only
+# releases, beta releases and betas, alpha everything.
+offers() {
+	case "$1:$(channel_of "$2")" in
+		stable:stable | beta:stable | beta:beta | alpha:*) return 0 ;;
+	esac
+	return 1
+}
+
+# newest_on_channel CHANNEL reads tags (v1.2.3, one per line) and prints the
+# newest version CHANNEL offers, without the leading v, in SemVer order
+# (a pre-release sorts before its release).
+newest_on_channel() {
+	while IFS= read -r t; do
+		v=${t#v}
+		valid_version "$v" && offers "$1" "$v" && printf '%s\n' "$v"
+	done | sed 's/-/~/' | sort -V | sed 's/~/-/' | tail -n 1
+}
+
+# latest_version prints the newest version on $channel (without the leading v).
 latest_version() {
-	if [ "$channel" = beta ]; then
-		have curl || die "curl is needed to look up the latest beta"
-		tag=$(curl -fsSL "$API_URL?per_page=1" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
+	if [ "$channel" != stable ]; then
+		have curl || die "curl is needed to look up the latest $channel release"
+		tag=$(curl -fsSL "$API_URL?per_page=100" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | newest_on_channel "$channel")
 	else
 		have curl || die "curl is needed to look up the latest release"
 		# /releases/latest redirects to /releases/tag/<tag>.
 		tag=$(curl -fsSIL -o /dev/null -w '%{url_effective}' "$LATEST_URL" | sed -n 's|.*/tag/||p')
 	fi
-	[ -n "$tag" ] || die "could not find the latest release; use --version"
+	[ -n "$tag" ] || die "could not find a $channel release; use --version, or --channel beta or alpha if only pre-releases exist"
 	echo "${tag#v}"
 }
 
@@ -411,7 +452,13 @@ main() {
 				ca_fingerprint=$2
 				shift
 				;;
+			--channel)
+				[ $# -ge 2 ] || die "--channel needs a value"
+				channel=$2
+				shift
+				;;
 			--beta) channel=beta ;;
+			--alpha) channel=alpha ;;
 			--builtin-agent) builtin_agent=true ;;
 			--no-builtin-agent) builtin_agent=false ;;
 			--no-self-update) self_update=0 ;;
@@ -433,6 +480,11 @@ main() {
 		esac
 		shift
 	done
+
+	case "$channel" in
+		stable | beta | alpha) ;;
+		*) die "invalid --channel $channel: use stable, beta or alpha" ;;
+	esac
 
 	case "$role" in
 		hub)

@@ -30,7 +30,9 @@ type statfsFunc func(path string) (total, used uint64, err error)
 
 // LinuxCollector reads CPU, memory, disk, network and uptime metrics from
 // /proc and statfs. CPU usage is computed between two consecutive calls, so
-// the first report covers the time since the collector was created.
+// the first report covers the time since the collector was created; when that
+// is too short to mean anything (the first report usually follows at once),
+// it is the average since boot instead.
 type LinuxCollector struct {
 	proc   string
 	statfs statfsFunc
@@ -68,7 +70,11 @@ func (c *LinuxCollector) Collect(context.Context) (*agentv1.MetricsReport, error
 	var usage float64
 	c.mu.Lock()
 	if err == nil {
-		usage = cpuUsagePercent(c.prevCPU, now)
+		prev := c.prevCPU
+		if now.total-prev.total < minCPUJiffies {
+			prev = cpuTimes{} // too short an interval: average since boot
+		}
+		usage = cpuUsagePercent(prev, now)
 		c.prevCPU = now
 	}
 	c.mu.Unlock()
@@ -137,6 +143,11 @@ func parseCPUTimes(content string) (cpuTimes, error) {
 	}
 	return cpuTimes{}, errors.New("no cpu line in /proc/stat")
 }
+
+// minCPUJiffies is the shortest interval, in clock ticks summed over all CPUs
+// (100 a second per CPU on most kernels), over which a CPU share is computed.
+// Over a few ticks one busy tick reads as 50% on an idle server.
+const minCPUJiffies = 100
 
 // cpuUsagePercent is the share of busy time between two samples, 0 to 100.
 func cpuUsagePercent(prev, now cpuTimes) float64 {
