@@ -42,7 +42,7 @@ Agents open the connection to the hub, so no inbound ports are needed on managed
 
 ## Supported platforms
 
-Ubuntu Server (22.04 and 24.04, amd64 and arm64) is the reference platform. Debian and RHEL-like distributions follow.
+Ubuntu Server LTS (22.04, 24.04 and 26.04, amd64 and arm64) is the reference platform; so far a release has been tested on 26.04 amd64. Debian and RHEL-like distributions follow.
 
 ## Roadmap
 
@@ -55,7 +55,7 @@ Third-party plugins come after the plugin system is stable. Work is tracked in t
 
 ## Installation (Ubuntu Server)
 
-The hub installs on Ubuntu Server 22.04 and 24.04 (amd64 and arm64; other Debian-based systems with systemd should work too). One command downloads the `.deb` of the latest release, verifies its checksum and signature, installs it, starts the service and prints where to open the dashboard and the one-time setup token:
+The hub installs on Ubuntu Server 22.04, 24.04 and 26.04 (amd64 and arm64; other Debian-based systems with systemd should work too). One command downloads the `.deb` of the latest release, verifies its checksum and signature, installs it, starts the service and prints where to open the dashboard and the one-time setup token:
 
 ```sh
 curl -fsSL https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh | sh
@@ -291,7 +291,7 @@ Gli agent aprono la connessione verso l'hub, quindi non servono porte in ingress
 
 ## Piattaforme supportate
 
-Ubuntu Server (22.04 e 24.04, amd64 e arm64) è la piattaforma di riferimento. Seguiranno Debian e le distribuzioni RHEL-like.
+Ubuntu Server LTS (22.04, 24.04 e 26.04, amd64 e arm64) è la piattaforma di riferimento; per ora una release è stata provata su 26.04 amd64. Seguiranno Debian e le distribuzioni RHEL-like.
 
 ## Roadmap
 
@@ -304,7 +304,7 @@ I plug-in di terze parti arriveranno dopo la stabilizzazione del sistema di plug
 
 ## Installazione (Ubuntu Server)
 
-L'hub si installa su Ubuntu Server 22.04 e 24.04 (amd64 e arm64; dovrebbe funzionare anche su altri sistemi basati su Debian con systemd). Un solo comando scarica il `.deb` dell'ultima release, ne verifica checksum e firma, lo installa, avvia il servizio e mostra dove aprire la dashboard e il token di setup monouso:
+L'hub si installa su Ubuntu Server 22.04, 24.04 e 26.04 (amd64 e arm64; dovrebbe funzionare anche su altri sistemi basati su Debian con systemd). Un solo comando scarica il `.deb` dell'ultima release, ne verifica checksum e firma, lo installa, avvia il servizio e mostra dove aprire la dashboard e il token di setup monouso:
 
 ```sh
 curl -fsSL https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh | sh
