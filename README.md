@@ -58,10 +58,13 @@ Third-party plugins come after the plugin system is stable. Work is tracked in t
 The hub installs on Ubuntu Server 22.04 and 24.04 (amd64 and arm64; other Debian-based systems with systemd should work too). One command downloads the `.deb` of the latest release, verifies its checksum and signature, installs it, starts the service and prints where to open the dashboard and the one-time setup token:
 
 ```sh
-curl -fsSL https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh | sh
+curl -fsSLO https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh
+sh install.sh
 ```
 
-The installer asks whether to include the **built-in agent** (so the hub's own server is managed like the others). To answer in advance, or in a script, add options after `sh -s --`: `--builtin-agent`, `--no-builtin-agent`, `--yes` (no questions), `--channel beta` or `--channel alpha` (latest release of that channel; also `--beta`, `--alpha`), `--version 0.2.0`, `--require-signature` (fail unless the signature can be verified with [cosign](https://docs.sigstore.dev/cosign/)). Without cosign the installer verifies the checksum only and says so. If you prefer not to pipe a script into a shell, download the `.deb` from the [releases](https://github.com/CodexCircle/Regulus/releases), verify it as shown under [Releases](#releases) and run `sudo apt install ./regulus_*.deb`.
+The same in one line is `curl -fsSL …/install.sh | sh`, with options after `sh -s --`; if the `-s` gets lost, `sh` takes the first option for a file name ("cannot open --version"), so the two steps are safer. Until the first stable release is out, `latest` has nothing to serve: use the command at the top of the notes of a [pre-release](https://github.com/CodexCircle/Regulus/releases).
+
+The installer asks whether to include the **built-in agent** (so the hub's own server is managed like the others). To answer in advance, or in a script, add options after `sh install.sh` (or `sh -s --` in the one-line form): `--builtin-agent`, `--no-builtin-agent`, `--yes` (no questions), `--channel beta` or `--channel alpha` (latest release of that channel; also `--beta`, `--alpha`), `--version 0.2.0`, `--require-signature` (fail unless the signature can be verified with [cosign](https://docs.sigstore.dev/cosign/)). Without cosign the installer verifies the checksum only and says so. If you prefer not to pipe a script into a shell, download the `.deb` from the [releases](https://github.com/CodexCircle/Regulus/releases), verify it as shown under [Releases](#releases) and run `sudo apt install ./regulus_*.deb`.
 
 What the package sets up:
 
@@ -307,10 +310,13 @@ I plug-in di terze parti arriveranno dopo la stabilizzazione del sistema di plug
 L'hub si installa su Ubuntu Server 22.04 e 24.04 (amd64 e arm64; dovrebbe funzionare anche su altri sistemi basati su Debian con systemd). Un solo comando scarica il `.deb` dell'ultima release, ne verifica checksum e firma, lo installa, avvia il servizio e mostra dove aprire la dashboard e il token di setup monouso:
 
 ```sh
-curl -fsSL https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh | sh
+curl -fsSLO https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh
+sh install.sh
 ```
 
-L'installer chiede se includere l'**agent integrato** (così il server dell'hub è gestito come gli altri). Per rispondere in anticipo, o in uno script, aggiungi opzioni dopo `sh -s --`: `--builtin-agent`, `--no-builtin-agent`, `--yes` (nessuna domanda), `--channel beta` o `--channel alpha` (ultima release di quel canale; anche `--beta`, `--alpha`), `--version 0.2.0`, `--require-signature` (fallisce se la firma non si può verificare con [cosign](https://docs.sigstore.dev/cosign/)). Senza cosign l'installer verifica solo il checksum e lo dice. Se preferisci non passare uno script a una shell, scarica il `.deb` dalle [release](https://github.com/CodexCircle/Regulus/releases), verificalo come descritto in [Rilasci](#rilasci) ed esegui `sudo apt install ./regulus_*.deb`.
+Lo stesso su una riga è `curl -fsSL …/install.sh | sh`, con le opzioni dopo `sh -s --`; se si perde `-s`, `sh` prende la prima opzione per un nome di file ("cannot open --version"), quindi i due passaggi sono più sicuri. Finché non esce la prima release stabile, `latest` non ha nulla da servire: usa il comando in cima alle note di una [pre-release](https://github.com/CodexCircle/Regulus/releases).
+
+L'installer chiede se includere l'**agent integrato** (così il server dell'hub è gestito come gli altri). Per rispondere in anticipo, o in uno script, aggiungi opzioni dopo `sh install.sh` (o dopo `sh -s --` nella forma su una riga): `--builtin-agent`, `--no-builtin-agent`, `--yes` (nessuna domanda), `--channel beta` o `--channel alpha` (ultima release di quel canale; anche `--beta`, `--alpha`), `--version 0.2.0`, `--require-signature` (fallisce se la firma non si può verificare con [cosign](https://docs.sigstore.dev/cosign/)). Senza cosign l'installer verifica solo il checksum e lo dice. Se preferisci non passare uno script a una shell, scarica il `.deb` dalle [release](https://github.com/CodexCircle/Regulus/releases), verificalo come descritto in [Rilasci](#rilasci) ed esegui `sudo apt install ./regulus_*.deb`.
 
 Cosa prepara il pacchetto:
 
