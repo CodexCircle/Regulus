@@ -130,6 +130,8 @@ export interface Enrollment {
   expires_at: string;
   ca_fingerprint: string;
   agent_port: number;
+  // The release the hub runs; absent on a development build.
+  hub_version?: string;
 }
 
 export const createEnrollment = (name: string) =>

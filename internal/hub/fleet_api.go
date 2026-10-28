@@ -11,6 +11,7 @@ import (
 
 	"github.com/CodexCircle/Regulus/internal/auth"
 	"github.com/CodexCircle/Regulus/internal/fleet"
+	"github.com/CodexCircle/Regulus/internal/update"
 )
 
 // ErrAgentsOff is returned when remote agents are not enabled.
@@ -75,7 +76,8 @@ func (h *Hub) Registry(ctx context.Context) ([]fleet.Agent, error) {
 }
 
 type fleetHandlers struct {
-	fleet FleetControl
+	fleet   FleetControl
+	version string
 }
 
 func (f fleetHandlers) createToken(w http.ResponseWriter, r *http.Request) {
@@ -100,13 +102,19 @@ func (f fleetHandlers) createToken(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeJSONError(w, http.StatusInternalServerError, "internal error")
 	default:
-		writeJSONBody(w, http.StatusCreated, map[string]any{
+		body := map[string]any{
 			"token":          grant.Token,
 			"name":           grant.Name,
 			"expires_at":     grant.ExpiresAt.UTC(),
 			"ca_fingerprint": grant.CAFingerprint,
 			"agent_port":     grant.AgentPort,
-		})
+		}
+		// A release hub names its version, so the new agent installs the same
+		// one; a development build has no release to point to.
+		if v, ok := update.ParseBuildVersion(f.version); ok {
+			body["hub_version"] = v.String()
+		}
+		writeJSONBody(w, http.StatusCreated, body)
 	}
 }
 

@@ -236,7 +236,7 @@ func newAPI(t *testing.T, h *Hub, role auth.Role) *api {
 	}
 	return &api{
 		t:       t,
-		handler: NewHandler(Deps{UI: fstest.MapFS{}, Agents: h, Layouts: h, Log: quiet(), Auth: h.auth, Fleet: h, Updates: h.updates, Rollout: h}),
+		handler: NewHandler(Deps{UI: fstest.MapFS{}, Agents: h, Layouts: h, Log: quiet(), Auth: h.auth, Fleet: h, Updates: h.updates, Rollout: h, Version: h.version}),
 		cookie:  &http.Cookie{Name: auth.CookieName, Value: session},
 	}
 }
@@ -266,8 +266,9 @@ func TestEnrollmentAPI(t *testing.T) {
 		CAFingerprint string `json:"ca_fingerprint"`
 		AgentPort     int    `json:"agent_port"`
 		ExpiresAt     string `json:"expires_at"`
+		HubVersion    string `json:"hub_version"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &grant); err != nil || grant.Token == "" || grant.Name != "db1" || grant.AgentPort == 0 || grant.ExpiresAt == "" {
+	if err := json.Unmarshal(rec.Body.Bytes(), &grant); err != nil || grant.Token == "" || grant.Name != "db1" || grant.AgentPort == 0 || grant.ExpiresAt == "" || grant.HubVersion != "9.9.9" {
 		t.Fatalf("body = %s (%v)", rec.Body, err)
 	}
 	if !strings.HasSuffix(h.AgentAddr(), ":"+strconv.Itoa(grant.AgentPort)) {

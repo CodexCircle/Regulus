@@ -131,6 +131,7 @@ describe("ServersPage", () => {
       expires_at: now,
       ca_fingerprint: "sha256:abcd",
       agent_port: 7443,
+      hub_version: "0.1.0-alpha.1",
     };
     const calls = mockHub({
       "GET /api/agents?all=true": () => ({ data: [] }),
@@ -146,7 +147,7 @@ describe("ServersPage", () => {
     const options = `--hub ${host}:7443 --token tok123 --ca-fingerprint sha256:abcd`;
     const install = (await screen.findByLabelText("Install command")) as HTMLInputElement;
     expect(install.value).toBe(
-      `curl -fsSL https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh | sh -s -- --role agent ${options}`,
+      `curl -fsSLO https://github.com/CodexCircle/Regulus/releases/download/v0.1.0-alpha.1/install.sh && sh install.sh --version 0.1.0-alpha.1 --role agent ${options}`,
     );
     expect((screen.getByLabelText("Agent command") as HTMLInputElement).value).toBe(
       `regulus agent ${options} --data-dir /var/lib/regulus-agent`,
@@ -170,8 +171,13 @@ describe("ServersPage", () => {
 
   it("builds the commands from the grant", () => {
     const grant = { token: "t", name: "", expires_at: now, ca_fingerprint: "sha256:f", agent_port: 1 };
+    // A development hub has no release to point to: the latest stable one.
     expect(installCommand(grant, "hub.lan")).toBe(
-      "curl -fsSL https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh | sh -s -- --role agent --hub hub.lan:1 --token t --ca-fingerprint sha256:f",
+      "curl -fsSLO https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh && sh install.sh --role agent --hub hub.lan:1 --token t --ca-fingerprint sha256:f",
+    );
+    // A release hub pins its own version, from its own release.
+    expect(installCommand({ ...grant, hub_version: "0.2.0-beta.3" }, "hub.lan")).toBe(
+      "curl -fsSLO https://github.com/CodexCircle/Regulus/releases/download/v0.2.0-beta.3/install.sh && sh install.sh --version 0.2.0-beta.3 --role agent --hub hub.lan:1 --token t --ca-fingerprint sha256:f",
     );
     expect(agentCommand(grant, "hub.lan")).toBe(
       "regulus agent --hub hub.lan:1 --token t --ca-fingerprint sha256:f --data-dir /var/lib/regulus-agent",

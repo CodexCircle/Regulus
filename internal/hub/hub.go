@@ -219,7 +219,7 @@ func (h *Hub) Close() error {
 // Serve serves HTTP on ln until ctx is cancelled, then shuts down gracefully.
 func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 	srv := &http.Server{
-		Handler:           NewHandler(Deps{UI: h.ui, Agents: h, Layouts: h, Log: h.log, Auth: h.auth, Fleet: h, Updates: h.updates, Rollout: h}),
+		Handler:           NewHandler(Deps{UI: h.ui, Agents: h, Layouts: h, Log: h.log, Auth: h.auth, Fleet: h, Updates: h.updates, Rollout: h, Version: h.version}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -389,6 +389,9 @@ type Deps struct {
 	// Rollout updates the managed servers to the version of the hub. May be nil
 	// in tests; the endpoints then answer 404.
 	Rollout RolloutControl
+	// Version is the version the hub was built with. The enrollment answer
+	// carries it when it is a release, so a new agent installs the same one.
+	Version string
 }
 
 // route is a protected API endpoint.
@@ -404,7 +407,7 @@ type route struct {
 // ones of the auth package. They must all be described in openapi.yaml.
 func apiRoutes(d Deps) []route {
 	h := layoutHandlers{layouts: d.Layouts, log: d.Log}
-	f := fleetHandlers{fleet: d.Fleet}
+	f := fleetHandlers{fleet: d.Fleet, version: d.Version}
 	u := updateHandlers{updates: d.Updates}
 	r := rolloutHandlers{rollout: d.Rollout}
 	// Without authentication (tests that exercise the handlers alone) there is
