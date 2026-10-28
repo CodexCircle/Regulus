@@ -365,10 +365,11 @@ func (m *Manager) automatic(ctx context.Context) {
 func (m *Manager) Close() { m.wg.Wait() }
 
 // Settings returns the saved choices, with the defaults for what was never
-// chosen: manual mode, and the channel of the running build (a hub that runs
+// chosen: download mode (a new release is downloaded and checked, and waits
+// for an administrator to install it), and the channel of the running build (a hub that runs
 // a beta follows the beta channel, one that runs an alpha the alpha channel).
 func (m *Manager) Settings(ctx context.Context) (Settings, error) {
-	s := Settings{Mode: ModeManual, Channel: Stable}
+	s := Settings{Mode: ModeDownload, Channel: Stable}
 	if m.release {
 		s.Channel = m.current.Channel()
 	}

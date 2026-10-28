@@ -104,11 +104,11 @@ func TestUpdatesAPIFollowsTheFlow(t *testing.T) {
 		t.Fatalf("GET: status = %d, body = %s", rec.Code, rec.Body)
 	}
 	st := decodeStatus(t, rec)
-	if st.CurrentVersion != "0.1.0" || st.Mode != update.ModeManual || st.Channel != update.Stable || !st.ChecksEnabled || st.UpdateAvailable {
+	if st.CurrentVersion != "0.1.0" || st.Mode != update.ModeDownload || st.Channel != update.Stable || !st.ChecksEnabled || st.UpdateAvailable {
 		t.Fatalf("initial status = %+v", st)
 	}
 
-	// Choose the download mode.
+	// Save the settings (download is already the default).
 	rec = admin.do("PUT", "/api/updates/settings", map[string]string{"mode": "download", "channel": "stable"})
 	if st := decodeStatus(t, rec); rec.Code != http.StatusOK || st.Mode != update.ModeDownload {
 		t.Fatalf("PUT settings: status = %d, body = %s", rec.Code, rec.Body)

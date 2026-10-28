@@ -123,7 +123,7 @@ func (r *rig) waitStaged(t *testing.T) Status {
 
 func TestDefaults(t *testing.T) {
 	st := newRig(t, "0.1.0", "").status(t)
-	if st.Mode != ModeManual || st.Channel != Stable || !st.ReleaseBuild || !st.ChecksEnabled || st.Latest != nil || st.UpdateAvailable || st.CheckedAt != nil {
+	if st.Mode != ModeDownload || st.Channel != Stable || !st.ReleaseBuild || !st.ChecksEnabled || st.Latest != nil || st.UpdateAvailable || st.CheckedAt != nil {
 		t.Errorf("status = %+v", st)
 	}
 	if st.Platform != "linux/amd64" || st.CurrentVersion != "0.1.0" {
@@ -386,10 +386,8 @@ func TestStateSurvivesARestart(t *testing.T) {
 }
 
 func TestBackgroundDownloadInDownloadMode(t *testing.T) {
+	// Download is the default: nothing needs to be chosen.
 	r := newRig(t, "0.1.0", "0.2.0")
-	if _, err := r.m.SetSettings(t.Context(), "admin", Settings{Mode: ModeDownload, Channel: Stable}); err != nil {
-		t.Fatal(err)
-	}
 	r.m.cycle(t.Context())
 	st := r.status(t)
 	if st.Staged == nil || st.Staged.Version != "0.2.0" {
@@ -410,6 +408,9 @@ func TestBackgroundDownloadInDownloadMode(t *testing.T) {
 
 func TestBackgroundCheckInManualModeDownloadsNothing(t *testing.T) {
 	r := newRig(t, "0.1.0", "0.2.0")
+	if _, err := r.m.SetSettings(t.Context(), "admin", Settings{Mode: ModeManual, Channel: Stable}); err != nil {
+		t.Fatal(err)
+	}
 	r.m.cycle(t.Context())
 	st := r.status(t)
 	if !st.UpdateAvailable || st.Staged != nil || st.Downloading {
