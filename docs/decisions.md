@@ -25,7 +25,7 @@ Apache-2.0 was preferred to AGPL-3.0. A permissive license makes it easier for o
 
 Ubuntu Server comes first because it is the system used for the first real tests. The order is:
 
-1. Ubuntu LTS 22.04 and 24.04, amd64 and arm64, `.deb` package;
+1. Ubuntu LTS 22.04, 24.04 and 26.04, amd64 and arm64, `.deb` package (26.04 amd64 is the one tested on a real machine so far, #81; whether 22.04 stays is open in #89);
 2. Debian, with the same `.deb`;
 3. RHEL-like distributions, `.rpm` package.
 
@@ -105,7 +105,7 @@ Apache-2.0 è stata preferita ad AGPL-3.0. Una licenza permissiva rende più fac
 
 Ubuntu Server viene prima perché è il sistema usato per le prime prove reali. L'ordine è:
 
-1. Ubuntu LTS 22.04 e 24.04, amd64 e arm64, pacchetto `.deb`;
+1. Ubuntu LTS 22.04, 24.04 e 26.04, amd64 e arm64, pacchetto `.deb` (finora su una macchina reale è stata provata 26.04 amd64, #81; se tenere 22.04 è aperto nella #89);
 2. Debian, con lo stesso `.deb`;
 3. distribuzioni RHEL-like, pacchetto `.rpm`.
 
