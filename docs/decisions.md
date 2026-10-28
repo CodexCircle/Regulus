@@ -53,6 +53,12 @@ Some issues were moved after they were written, so their title names an earlier 
 
 Third-party plugins (#23) have no milestone: they come after the plugin system is stable.
 
+## Releases and channels
+
+Three channels: **stable** (`v0.3.0`), **beta** (`v0.3.0-beta.N`; `-rc.N` counts as beta) and **alpha** (`v0.3.0-alpha.N`; any other pre-release counts as alpha, so an unknown kind never reaches a more cautious channel). Each channel also offers the more stable ones: alpha sees everything, beta sees betas and releases, stable only releases. A hub starts on the channel of the version it runs.
+
+Releases are published from the Actions tab (**Publish release**), not by typing tags, so that versions always follow SemVer order: a version goes through its alphas, then its betas, then the release, and no alpha comes after a beta of the same version. The workflow refuses a commit on which CI has not passed. It must start the release workflow **on the tag**, because the hub only trusts a signature made by `release.yml@refs/tags/<tag>`.
+
 ## Updates
 
 **Goal: install once.** After the first installation, an administrator should never have to install anything by hand from a terminal: hub, agents and (later) plugins are updated from the dashboard. Today this holds for hub and agents. Still missing: plugin updates (#19, #20) and two exceptions the README lists (an agent installed before the update feature, and a release that changes the systemd units or the configuration file).
@@ -126,6 +132,12 @@ Alcune issue sono state spostate dopo essere state scritte, quindi il titolo ind
 - **Ruoli (#61) e console da terminale (#52) in M3**; **azioni privilegiate (#60) e inventario dei server (#62) in M4**; **AI Support (#63) in M6**.
 
 I plugin di terze parti (#23) non hanno milestone: arrivano dopo che il sistema di plugin è stabile.
+
+## Release e canali
+
+Tre canali: **stable** (`v0.3.0`), **beta** (`v0.3.0-beta.N`; `-rc.N` conta come beta) e **alpha** (`v0.3.0-alpha.N`; qualsiasi altra pre-release conta come alpha, così un tipo sconosciuto non arriva mai a un canale più prudente). Ogni canale offre anche quelli più stabili: alpha vede tutto, beta vede beta e release, stable solo le release. Un hub parte sul canale della versione che esegue.
+
+Le release si pubblicano dalla scheda Actions (**Publish release**), non scrivendo i tag a mano, così le versioni seguono sempre l'ordine SemVer: una versione passa dalle sue alpha, poi dalle beta, poi dalla release, e nessuna alpha arriva dopo una beta della stessa versione. Il workflow rifiuta un commit su cui la CI non è passata. Deve avviare il workflow di release **sul tag**, perché l'hub si fida solo di una firma fatta da `release.yml@refs/tags/<tag>`.
 
 ## Aggiornamenti
 

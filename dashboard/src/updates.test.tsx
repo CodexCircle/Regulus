@@ -47,6 +47,7 @@ const newer: UpdateStatus = {
     version: "0.2.0",
     tag: "v0.2.0",
     prerelease: false,
+    channel: "stable",
     url: "https://github.com/CodexCircle/Regulus/releases/tag/v0.2.0",
     notes: "Adds updates.",
     published_at: now,
@@ -177,6 +178,34 @@ describe("UpdatesPage", () => {
     expect(
       screen.getByRole("button", { name: "Download 0.2.0" }),
     ).toBeEnabled();
+  });
+
+  it("names the channel of a pre-release", async () => {
+    mockHub({
+      "GET /api/updates": [
+        {
+          data: {
+            ...newer,
+            channel: "alpha",
+            latest: {
+              ...newer.latest!,
+              version: "0.3.0-alpha.1",
+              tag: "v0.3.0-alpha.1",
+              prerelease: true,
+              channel: "alpha",
+            },
+          },
+        },
+      ],
+    });
+    renderPage();
+    const box = await screen.findByRole("status", { name: "Update available" });
+    expect(box).toHaveTextContent(
+      "Version 0.3.0-alpha.1 (alpha) is available.",
+    );
+    expect(screen.getByRole("combobox", { name: "Channel" })).toHaveValue(
+      "alpha",
+    );
   });
 
   it("does not link a release page that is not https", async () => {

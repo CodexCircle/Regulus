@@ -138,6 +138,21 @@ func TestLatestByChannel(t *testing.T) {
 	if r, _ := Latest(append(releases, mk("0.3.0")...), Beta); r.Tag != "v0.3.0" {
 		t.Errorf("beta after 0.3.0 = %v, want v0.3.0", r.Tag)
 	}
+	// Alpha releases are offered on the alpha channel only; alpha also takes
+	// betas and releases, whichever is newest.
+	withAlpha := append(mk("0.4.0-alpha.1"), releases...)
+	if r, _ := Latest(withAlpha, Alpha); r.Tag != "v0.4.0-alpha.1" {
+		t.Errorf("alpha = %v, want v0.4.0-alpha.1", r.Tag)
+	}
+	if r, _ := Latest(withAlpha, Beta); r.Tag != "v0.3.0-beta.2" {
+		t.Errorf("beta with an alpha listed = %v, want v0.3.0-beta.2", r.Tag)
+	}
+	if r, _ := Latest(withAlpha, Stable); r.Tag != "v0.2.0" {
+		t.Errorf("stable with an alpha listed = %v, want v0.2.0", r.Tag)
+	}
+	if r, _ := Latest(append(withAlpha, mk("0.4.0-beta.1")...), Alpha); r.Tag != "v0.4.0-beta.1" {
+		t.Errorf("alpha after 0.4.0-beta.1 = %v, want v0.4.0-beta.1", r.Tag)
+	}
 	if _, ok := Latest(mk("0.3.0-beta.1"), Stable); ok {
 		t.Error("stable found a release among pre-releases only")
 	}

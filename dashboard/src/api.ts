@@ -434,12 +434,13 @@ export const saveSecurity = (policy: TwoFactorPolicy) =>
 
 // Updates of Regulus itself (see internal/update and GET /api/updates).
 export type UpdateMode = "manual" | "download" | "automatic";
-export type UpdateChannel = "stable" | "beta";
+export type UpdateChannel = "stable" | "beta" | "alpha";
 
 export interface UpdateInfo {
   version: string;
   tag: string;
   prerelease: boolean;
+  channel: UpdateChannel;
   url: string;
   notes?: string;
   published_at: string;

@@ -1,0 +1,90 @@
+name: Publish release
+
+# Run by hand from the Actions tab ("Run workflow", on main). It works out the
+# next version for the chosen channel (scripts/next-version.sh), tags the
+# commit and starts the release workflow on that tag, which builds, signs and
+# publishes the release:
+#
+#   stable  v0.3.0          offered to every hub; GitHub marks it "Latest"
+#   beta    v0.3.0-beta.2   offered to hubs on the beta and alpha channels
+#   alpha   v0.3.0-alpha.1  offered to hubs on the alpha channel only
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Channel of the release
+        type: choice
+        options: [alpha, beta, stable]
+        default: beta
+      bump:
+        description: Part of the version to raise when a new version starts (ignored while a version is in alpha or beta)
+        type: choice
+        options: [minor, patch, major]
+        default: minor
+      version:
+        description: Version X.Y.Z to publish instead of the computed one (optional)
+        type: string
+        required: false
+
+permissions:
+  contents: write # push the tag
+  actions: write # start the release workflow
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Run this workflow on main, not on ${GITHUB_REF}."
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # all tags
+
+      - name: Check that CI passed on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          conclusion=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&status=completed&per_page=1" --jq '.workflow_runs[0].conclusion // ""')
+          if [ "$conclusion" != success ]; then
+            echo "::error::CI has not passed on ${GITHUB_SHA} (latest result: ${conclusion:-none}). Run the CI workflow on main and try again when it is green."
+            exit 1
+          fi
+
+      - name: Work out the version
+        id: version
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          BUMP: ${{ inputs.bump }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          version=$(git tag -l 'v*' | sh scripts/next-version.sh "$CHANNEL" "$BUMP" "$VERSION")
+          echo "tag=v$version" >>"$GITHUB_OUTPUT"
+          echo "Publishing v$version ($CHANNEL) from ${GITHUB_SHA}" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Tag the commit
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Regulus $TAG ($CHANNEL)"
+          git push origin "refs/tags/$TAG"
+
+      # A tag pushed with the workflow token does not start other workflows,
+      # so the release workflow is started explicitly, on the tag.
+      - name: Start the release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh workflow run release.yml --ref "$TAG"
+          echo "Release workflow started on $TAG: https://github.com/$GITHUB_REPOSITORY/actions/workflows/release.yml" >>"$GITHUB_STEP_SUMMARY"

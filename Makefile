@@ -13,6 +13,7 @@ lint:
 
 test:
 	sh scripts/test-install.sh
+	sh scripts/test-next-version.sh
 	go vet ./...
 	go test -race ./...
 	cd dashboard && npm ci && npm run typecheck && npm test

@@ -1,10 +1,14 @@
 name: Release
 
-# Publishes a GitHub Release when a version tag is pushed: v1.2.0 is a stable
-# release, v1.2.0-beta.1 a pre-release (beta channel).
+# Publishes a GitHub Release for a version tag: v1.2.0 is a stable release,
+# v1.2.0-beta.1 (or -rc.1) a beta, v1.2.0-alpha.1 an alpha. It runs when a tag
+# is pushed, or when "Publish release" (publish-release.yml) starts it on the
+# tag it made. It must run on the tag: the hub only accepts a signature made by
+# release.yml@refs/tags/<tag>.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write # create the release and upload assets
@@ -13,6 +17,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
         with:

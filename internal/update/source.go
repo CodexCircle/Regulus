@@ -54,18 +54,36 @@ type Channel string
 const (
 	// Stable offers releases only.
 	Stable Channel = "stable"
-	// Beta offers pre-releases too, whichever is newest.
+	// Beta offers releases and beta pre-releases, whichever is newest.
 	Beta Channel = "beta"
+	// Alpha offers every release, alpha pre-releases included.
+	Alpha Channel = "alpha"
 )
 
 // Valid reports whether c is a known channel.
-func (c Channel) Valid() bool { return c == Stable || c == Beta }
+func (c Channel) Valid() bool { return c == Stable || c == Beta || c == Alpha }
+
+// rank orders the channels from the most conservative: a channel offers the
+// releases whose own channel ranks at most as high.
+func (c Channel) rank() int {
+	switch c {
+	case Stable:
+		return 0
+	case Beta:
+		return 1
+	default:
+		return 2
+	}
+}
+
+// Offers reports whether a release of version v is offered on channel c.
+func (c Channel) Offers(v Version) bool { return v.Channel().rank() <= c.rank() }
 
 // Latest returns the newest release on the channel, or ok = false when there
 // is none.
 func Latest(releases []Release, channel Channel) (best Release, ok bool) {
 	for _, r := range releases {
-		if channel == Stable && r.Version.Prerelease() {
+		if !channel.Offers(r.Version) {
 			continue
 		}
 		if !ok || r.Version.Compare(best.Version) > 0 {
