@@ -157,6 +157,56 @@ describe("ServersPage", () => {
     await waitFor(() => expect(calls.filter((c) => c.path === "/api/agents?all=true").length).toBeGreaterThan(1));
   });
 
+  it("says when remote agents are off and lets an administrator turn them on", async () => {
+    const off = { enabled: false, ca_fingerprint: "sha256:f", editable: true };
+    const on = { enabled: true, port: 8443, source: "dashboard", ca_fingerprint: "sha256:f", editable: false };
+    const calls = mockHub({
+      "GET /api/agents?all=true": () => ({ data: [] }),
+      "GET /api/agents/listener": () => ({ data: off }),
+      "PUT /api/agents/listener": () => ({ data: on }),
+    });
+    const user = userEvent.setup();
+    renderAs(admin, <ServersPage />);
+
+    expect(await screen.findByRole("heading", { name: "Remote agents are off" })).toBeInTheDocument();
+    // No token while it could not work.
+    expect(screen.queryByRole("heading", { name: "Add a server" })).not.toBeInTheDocument();
+
+    const port = screen.getByLabelText("Port for remote agents");
+    await user.clear(port);
+    await user.type(port, "80");
+    expect(screen.getByRole("button", { name: "Turn on remote agents" })).toBeDisabled();
+    await user.clear(port);
+    await user.type(port, "8443");
+    await user.click(screen.getByRole("button", { name: "Turn on remote agents" }));
+
+    expect(await screen.findByRole("heading", { name: "Add a server" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Remote agents are off" })).not.toBeInTheDocument();
+    expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ port: 8443 });
+  });
+
+  it("tells a viewer that remote agents are off, without the form", async () => {
+    mockHub({
+      "GET /api/agents?all=true": () => ({ data: [] }),
+      "GET /api/agents/listener": () => ({ data: { enabled: false, ca_fingerprint: "sha256:f", editable: true } }),
+    });
+    renderAs(viewer, <ServersPage />);
+    expect(await screen.findByRole("heading", { name: "Remote agents are off" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Turn on remote agents" })).not.toBeInTheDocument();
+  });
+
+  it("shows why remote agents could not be turned on", async () => {
+    mockHub({
+      "GET /api/agents?all=true": () => ({ data: [] }),
+      "GET /api/agents/listener": () => ({ data: { enabled: false, ca_fingerprint: "sha256:f", editable: true } }),
+      "PUT /api/agents/listener": () => ({ status: 409, data: { error: "the port cannot be opened" } }),
+    });
+    const user = userEvent.setup();
+    renderAs(admin, <ServersPage />);
+    await user.click(await screen.findByRole("button", { name: "Turn on remote agents" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("the port cannot be opened");
+  });
+
   it("shows why a token could not be created", async () => {
     mockHub({
       "GET /api/agents?all=true": () => ({ data: [] }),

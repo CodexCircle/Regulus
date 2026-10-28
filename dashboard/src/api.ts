@@ -134,6 +134,20 @@ export interface Enrollment {
   hub_version?: string;
 }
 
+// Whether remote agents can connect, and where (see GET /api/agents/listener).
+export interface AgentListener {
+  enabled: boolean;
+  port?: number;
+  source?: "config" | "dashboard";
+  ca_fingerprint: string;
+  // Whether the dashboard may turn the listener on (not when the configuration sets it).
+  editable: boolean;
+}
+
+export const fetchAgentListener = () => request<AgentListener>("GET", "/api/agents/listener");
+
+export const enableRemoteAgents = (port: number) => request<AgentListener>("PUT", "/api/agents/listener", { port });
+
 export const createEnrollment = (name: string) =>
   request<Enrollment>("POST", "/api/enrollment-tokens", { name });
 

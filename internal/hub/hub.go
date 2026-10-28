@@ -56,6 +56,7 @@ type Hub struct {
 	updateSrc update.Source   // nil: the GitHub releases of ReleaseRepo
 	updateVer update.Verifier // nil: the Sigstore signature of the release workflow
 	agentAddr atomic.Value    // string: where the agent listener is bound, once it is
+	listener  listenerState   // the agent listener, started by Serve or from the dashboard
 	agents    *agentServer
 	transport *inproc.Transport // lets the built-in agent reach the hub without a network port
 }
@@ -230,13 +231,10 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 	go func() { _ = grpcSrv.Serve(h.transport.Listener()) }()
 	defer grpcSrv.Stop() // agent streams are long-lived, so a graceful stop would wait forever
 
-	if h.cfg.AgentListen != "" {
-		stopNet, err := h.serveAgents()
-		if err != nil {
-			return err
-		}
-		defer stopNet()
+	if err := h.startAgentListener(ctx); err != nil {
+		return err
 	}
+	defer h.stopAgentListener()
 
 	if h.cfg.BuiltinAgent {
 		stopAgent, err := h.startBuiltinAgent(ctx)
@@ -296,12 +294,12 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 // serveAgents starts the listener for remote agents: gRPC over TLS 1.3 with
 // the hub's own CA. Streams need the client certificate of an enrolled agent;
 // only Enroll works without one. The returned function stops it.
-func (h *Hub) serveAgents() (stop func(), err error) {
+func (h *Hub) serveAgents(addr string) (stop func(), err error) {
 	cert, err := h.fleet.CA().ServerCertificate(time.Now())
 	if err != nil {
 		return nil, fmt.Errorf("agent listener certificate: %w", err)
 	}
-	ln, err := net.Listen("tcp", h.cfg.AgentListen)
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("agent listener: %w", err)
 	}
@@ -408,6 +406,7 @@ type route struct {
 func apiRoutes(d Deps) []route {
 	h := layoutHandlers{layouts: d.Layouts, log: d.Log}
 	f := fleetHandlers{fleet: d.Fleet, version: d.Version}
+	l := listenerHandlers{fleet: d.Fleet}
 	u := updateHandlers{updates: d.Updates}
 	r := rolloutHandlers{rollout: d.Rollout}
 	// Without authentication (tests that exercise the handlers alone) there is
@@ -425,6 +424,8 @@ func apiRoutes(d Deps) []route {
 		{pattern: "GET /api/layout", handler: http.HandlerFunc(h.get)},
 		{pattern: "PUT /api/layout", handler: need(auth.PermLayoutEdit, auth.RequireJSON(http.HandlerFunc(h.put)))},
 		{pattern: "GET /api/stream", handler: need(auth.PermServersRead, streamHandler(d.Agents))},
+		{pattern: "GET /api/agents/listener", handler: need(auth.PermServersRead, http.HandlerFunc(l.get)), needsAuth: true},
+		{pattern: "PUT /api/agents/listener", handler: need(auth.PermServersManage, auth.RequireJSON(http.HandlerFunc(l.put))), needsAuth: true},
 		{pattern: "POST /api/enrollment-tokens", handler: need(auth.PermServersManage, auth.RequireJSON(http.HandlerFunc(f.createToken))), needsAuth: true},
 		{pattern: "PATCH /api/agents/{id}", handler: need(auth.PermServersManage, auth.RequireJSON(http.HandlerFunc(f.rename))), needsAuth: true},
 		{pattern: "DELETE /api/agents/{id}", handler: need(auth.PermServersManage, auth.RequireJSON(http.HandlerFunc(f.revoke))), needsAuth: true},

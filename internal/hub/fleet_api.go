@@ -15,7 +15,7 @@ import (
 )
 
 // ErrAgentsOff is returned when remote agents are not enabled.
-var ErrAgentsOff = errors.New("remote agents are off: set agent_listen in the configuration")
+var ErrAgentsOff = errors.New("remote agents are off: turn them on in Servers, or set agent_listen in the configuration")
 
 // Enrollment is what an admin needs to add a server: the token, valid once,
 // and what the agent must trust.
@@ -33,6 +33,8 @@ type FleetControl interface {
 	CreateEnrollment(ctx context.Context, by, name string) (Enrollment, error)
 	RevokeAgent(ctx context.Context, by, id string) error
 	RenameAgent(ctx context.Context, by, id, name string) error
+	AgentListener(ctx context.Context) (AgentListener, error)
+	EnableAgents(ctx context.Context, by string, port int) (AgentListener, error)
 }
 
 // CreateEnrollment makes a one-time enrollment token.

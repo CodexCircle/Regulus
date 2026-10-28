@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -450,5 +451,98 @@ func TestAPIChecksPermissions(t *testing.T) {
 		if rec := tc.who.do(tc.method, tc.path, tc.body); rec.Code != tc.want {
 			t.Errorf("%s %s: status = %d, want %d (%s)", tc.method, tc.path, rec.Code, tc.want, rec.Body)
 		}
+	}
+}
+
+// freePort returns a port nothing listens on right now.
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+	return port
+}
+
+func decodeListener(t *testing.T, rec *httptest.ResponseRecorder) AgentListener {
+	t.Helper()
+	var st AgentListener
+	if err := json.Unmarshal(rec.Body.Bytes(), &st); err != nil {
+		t.Fatalf("body = %s (%v)", rec.Body, err)
+	}
+	return st
+}
+
+func TestTurningRemoteAgentsOnFromTheAPI(t *testing.T) {
+	cfg := config.Default()
+	cfg.BuiltinAgent = false
+	h := startHubWithConfig(t, cfg) // no agent_listen
+	admin := newAPI(t, h, auth.RoleAdmin)
+
+	rec := admin.do("GET", "/api/agents/listener", nil)
+	if st := decodeListener(t, rec); rec.Code != http.StatusOK || st.Enabled || !st.Editable || st.CAFingerprint == "" {
+		t.Fatalf("off: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	if rec := admin.do("PUT", "/api/agents/listener", map[string]int{"port": 80}); rec.Code != http.StatusBadRequest {
+		t.Errorf("privileged port: status = %d, want 400", rec.Code)
+	}
+
+	port := freePort(t)
+	rec = admin.do("PUT", "/api/agents/listener", map[string]int{"port": port})
+	st := decodeListener(t, rec)
+	if rec.Code != http.StatusOK || !st.Enabled || st.Port != port || st.Source != ListenerFromDashboard || st.Editable {
+		t.Fatalf("on: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	if !strings.HasSuffix(h.AgentAddr(), ":"+strconv.Itoa(port)) {
+		t.Errorf("listener at %q, want port %d", h.AgentAddr(), port)
+	}
+	if rec := admin.do("PUT", "/api/agents/listener", map[string]int{"port": port}); rec.Code != http.StatusConflict {
+		t.Errorf("turning it on twice: status = %d, want 409", rec.Code)
+	}
+	if rec := admin.do("POST", "/api/enrollment-tokens", map[string]string{}); rec.Code != http.StatusCreated {
+		t.Errorf("token once agents are on: status = %d, body = %s", rec.Code, rec.Body)
+	}
+
+	// Kept for the next start, and audited.
+	if saved, err := h.savedAgentListen(t.Context()); err != nil || saved != ":"+strconv.Itoa(port) {
+		t.Errorf("saved = %q, %v", saved, err)
+	}
+	entries, err := h.auth.Audit(t.Context(), 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range entries {
+		found = found || (e.Event == EventAgentsListenerOn && e.Actor == "admin")
+	}
+	if !found {
+		t.Errorf("no %s event by admin in %+v", EventAgentsListenerOn, entries)
+	}
+}
+
+func TestRemoteAgentsListenerSetInTheConfigurationWins(t *testing.T) {
+	h := startRemoteHub(t) // agent_listen in the configuration
+	admin := newAPI(t, h, auth.RoleAdmin)
+	rec := admin.do("GET", "/api/agents/listener", nil)
+	if st := decodeListener(t, rec); !st.Enabled || st.Source != ListenerFromConfig || st.Editable {
+		t.Errorf("body = %s", rec.Body)
+	}
+	if rec := admin.do("PUT", "/api/agents/listener", map[string]int{"port": freePort(t)}); rec.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409", rec.Code)
+	}
+}
+
+func TestOnlyServerManagersTurnRemoteAgentsOn(t *testing.T) {
+	cfg := config.Default()
+	cfg.BuiltinAgent = false
+	h := startHubWithConfig(t, cfg)
+	viewer := newAPI(t, h, auth.RoleViewer)
+	if rec := viewer.do("GET", "/api/agents/listener", nil); rec.Code != http.StatusOK {
+		t.Errorf("viewer reading: status = %d, want 200", rec.Code)
+	}
+	if rec := viewer.do("PUT", "/api/agents/listener", map[string]int{"port": freePort(t)}); rec.Code != http.StatusForbidden {
+		t.Errorf("viewer turning on: status = %d, want 403", rec.Code)
 	}
 }
