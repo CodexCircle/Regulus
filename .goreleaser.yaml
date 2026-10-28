@@ -103,15 +103,34 @@ release:
   # pre-releases; GitHub's "latest" is always the newest stable release.
   prerelease: auto
   header: |
-    Install this version on Ubuntu Server:
+    Install this version on Ubuntu Server 22.04 or newer:
 
     ```sh
-    curl -fsSL https://github.com/CodexCircle/Regulus/releases/download/{{ .Tag }}/install.sh | sh -s -- --version {{ .Version }}
+    curl -fsSLO https://github.com/CodexCircle/Regulus/releases/download/{{ .Tag }}/install.sh
+    sh install.sh --version {{ .Version }}
     ```
 
+    Read `install.sh --help` for the options (built-in agent, agent role, channel).
+
+# In git log order (newest first), short hashes, grouped by Conventional
+# Commit type.
 changelog:
-  sort: asc
+  sort: ""
+  abbrev: 7
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Other changes
+      order: 999
   filters:
     exclude:
-      - "^docs:"
-      - "^test:"
+      - "^docs"
+      - "^test"
+      - "^ci"
+      - "^build\\(deps"
+      - "^Merge "
+      - "^Initial commit$"

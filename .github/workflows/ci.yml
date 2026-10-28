@@ -35,6 +35,16 @@ jobs:
         if: failure()
         run: grep -E '^(--- FAIL|FAIL|panic:)|_test\.go:[0-9]+:' go-test.log | head -40 | sed 's/^/::error::/' || true
 
+  release-config:
+    name: Release configuration (goreleaser check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: check
+
   scripts:
     name: Scripts (install and release)
     runs-on: ubuntu-latest
