@@ -1,7 +1,5 @@
 # Plugins (design draft)
 
-**English** · [Italiano](#italiano)
-
 > **Status: draft.** Nothing here is implemented yet. It gathers what has been decided in the plugin issues (#19, #20, #21, #22, #23, #63, #68) and the proposals still to be confirmed, so that the work in milestone M6 starts from one place. Points marked *proposed* may change.
 
 ## Core and plugins are versioned separately
@@ -48,54 +46,3 @@ Later, after the internal plugin system is stable: extra index sources, an **all
 2. **Tag format.** Is `plugin/<id>/vX.Y.Z` confirmed, and does the release workflow publish plugins from those tags?
 3. **Plugin signatures.** Do internal plugins use the same Sigstore keyless signature as core releases?
 4. **Skill parameters.** JSON Schema is the candidate (#68); also undecided: several risk levels per skill, and how the assistant discovers a server's skills.
-
----
-
-# Italiano
-
-> **Stato: bozza.** Nulla di quanto segue è ancora implementato. Raccoglie quanto deciso nelle issue sui plugin (#19, #20, #21, #22, #23, #63, #68) e le proposte ancora da confermare, così il lavoro della milestone M6 parte da un unico posto. I punti segnati *proposta* possono cambiare.
-
-## Core e plugin hanno versioni separate
-
-Il **core** (hub, agent, dashboard) ha un solo numero di versione e una sola release (`vX.Y.Z`). Ogni **plugin** ha la sua versione e viene rilasciato per conto suo, con tag del tipo `plugin/<id>/vX.Y.Z` *(proposta)*. Un plugin si può quindi aggiornare senza aggiornare il core, e viceversa.
-
-## Manifest (`plugin.yaml`) — #19, #68
-
-Ogni plugin dichiara:
-
-- `id` e `version`;
-- `requires`: l'intervallo di versioni del core con cui funziona;
-- i suoi componenti: lato agent, lato hub, widget della dashboard;
-- i **permessi** di cui ha bisogno. Diventano permessi assegnabili ai ruoli come gli altri (#61), quindi `operator` e i ruoli personalizzati possono usare i plugin;
-- `provides`: i punti di integrazione che offre ad altri plugin;
-- `skills`: operazioni strutturate che offre all'assistente AI (nome, schema dei parametri, permesso, livello di rischio, come annullarle). Vedi #68.
-
-## Runtime — #19
-
-Un plugin gira come **processo separato** che parla gRPC con l'host tramite un socket locale. L'host lo sorveglia e lo riavvia; un plugin che si blocca non deve toccare l'agent. Poiché il confine è gRPC, un plugin non deve per forza essere scritto in Go.
-
-## Indice, installazione e aggiornamenti — #20
-
-- La CI pubblica un `index.json` con ogni plugin, le sue versioni, i **checksum** e la **compatibilità** (`requires`). Il formato ha un campo `source` per aggiungere altre fonti in futuro (#23).
-- L'hub installa, aggiorna e rimuove i plugin dalla dashboard, mostra i permessi richiesti prima dell'installazione, verifica le firme e distribuisce il plugin agli agent che ne hanno bisogno.
-- Le stesse tre modalità di aggiornamento del core (`manual`, `download`, `automatic`), con la possibilità di sceglierla per singolo plugin.
-- La versione di un plugin si può **fissare**, e la versione precedente viene tenuta per il **rollback**.
-
-## Widget della dashboard — #21
-
-I plugin forniscono widget come moduli JavaScript serviti dall'hub e registrati a runtime. Un widget guasto rompe solo il proprio riquadro.
-
-## Struttura nella repository — #22
-
-I plugin interni stanno in `plugins/<id>/` in questa repository *(proposta)*, con un plugin di esempio e una guida per scriverne.
-
-## Plugin di terze parti — #23
-
-In un secondo momento, quando il sistema di plugin interni è stabile: fonti aggiuntive per l'indice, una **allowlist dei firmatari fidati**, avvisi per i plugin non firmati e permessi isolati. Fino ad allora i formati restano pronti per questo.
-
-## Questioni aperte
-
-1. **Dipendenze tra plugin.** Cosa succede quando si aggiorna o si rimuove un plugin da cui altri dipendono (tramite `provides`)? Bloccare, avvisare o aggiornare insieme i dipendenti? La #20 non lo dice ancora.
-2. **Formato dei tag.** `plugin/<id>/vX.Y.Z` è confermato, e il workflow di release pubblica i plugin da quei tag?
-3. **Firme dei plugin.** I plugin interni usano la stessa firma Sigstore keyless delle release del core?
-4. **Parametri delle skill.** JSON Schema è il candidato (#68); da decidere anche più livelli di rischio per skill e come l'assistente scopre le skill di un server.
