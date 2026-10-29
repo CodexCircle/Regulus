@@ -1,3 +1,9 @@
+// twofactor.go is the two-factor (TOTP) part of Service: the policy (who must use
+// it), enrollment (BeginTwoFactor, EnableTwoFactor), recovery codes, turning it
+// off, and the second step of sign-in (CompleteLogin). The TOTP arithmetic is in
+// totp.go, the storage in store_twofactor.go, the routes in twofactor_http.go.
+// See docs/code-map.md.
+
 package auth
 
 import (

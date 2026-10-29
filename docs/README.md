@@ -14,6 +14,7 @@ Find what you need by what you want to do. For what Regulus is, see the [README]
 | use the API | [HTTP API](http-api.md) and `internal/hub/openapi.yaml` (also served at `/api/openapi.yaml`) |
 | learn what the dashboard offers | [Dashboard](dashboard.md) |
 | understand how the parts fit together | [Architecture](architecture.md), with diagrams and the code map |
+| find my way in the biggest source files | [Code map](code-map.md) |
 | look up a term | [Glossary](glossary.md) |
 | read the guide to hub promotion, redundancy and failover (skeleton, not implemented) | [Hub redundancy](hub-redundancy.md) |
 | understand why a choice was made | [Design decisions](decisions.md) |

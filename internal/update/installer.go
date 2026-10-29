@@ -1,3 +1,10 @@
+// installer.go is the root helper behind `regulus update-apply`: Installer.Apply
+// re-verifies a staged release, replaces the executable, restarts the service,
+// watches that the new version is healthy, and rolls back if it is not. Reading
+// order: Installer and defaults, Apply, fetchVerified, restartAndWatch,
+// rollback, then the safe file helpers at the end. The request and result files
+// it exchanges with the hub are in apply.go. See docs/code-map.md.
+
 package update
 
 import (
