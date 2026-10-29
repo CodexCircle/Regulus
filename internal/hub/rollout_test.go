@@ -95,6 +95,18 @@ func decodeRollout(t *testing.T, rec interface {
 	return st
 }
 
+// waitInstalling waits until the agent has answered the hub's update command.
+// The installer restarts the agent only after that, so a test that restarts the
+// agent earlier would race with the answer and see "disconnected before
+// answering" instead of the outcome it means to test.
+func waitInstalling(t *testing.T, admin *api) {
+	t.Helper()
+	waitFor(t, "the agent to be installing", func() bool {
+		st := decodeRollout(t, admin.do("GET", "/api/updates/rollout", nil))
+		return len(st.Agents) == 1 && st.Agents[0].Status == AgentInstalling
+	})
+}
+
 func waitRollout(t *testing.T, admin *api, state string) RolloutStatus {
 	t.Helper()
 	var st RolloutStatus
@@ -136,7 +148,8 @@ func TestRolloutUpdatesAnAgentBehind(t *testing.T) {
 	if err != nil || !strings.HasPrefix(string(archive), "archive of 9.9.9") {
 		t.Errorf("archive in the agent = %q, %v", archive, err)
 	}
-	if st := decodeRollout(t, admin.do("GET", "/api/updates/rollout", nil)); st.State != RolloutRunning || st.Agents[0].Status != AgentInstalling {
+	waitInstalling(t, admin)
+	if st := decodeRollout(t, admin.do("GET", "/api/updates/rollout", nil)); st.State != RolloutRunning {
 		t.Errorf("while installing: %+v", st)
 	}
 	if rec := admin.do("POST", "/api/updates/rollout", map[string]any{}); rec.Code != http.StatusConflict {
@@ -206,6 +219,7 @@ func TestRolloutNoticesAnAgentThatCameBackRolledBack(t *testing.T) {
 
 	admin.do("POST", "/api/updates/rollout", map[string]any{})
 	waitFor(t, "the request", func() bool { _, ok := update.ReadRequest(update.ApplyDir(dir)); return ok })
+	waitInstalling(t, admin)
 	// The installer rolled back: the old version is running again.
 	_ = os.Remove(filepath.Join(update.ApplyDir(dir), "request.json"))
 	stop()
