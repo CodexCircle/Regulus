@@ -34,8 +34,9 @@ type Verifier interface {
 }
 
 // trustedRootJSON is a snapshot of the public Sigstore trusted root, used when
-// the up-to-date one cannot be fetched. Refresh it with `go generate`-style
-// steps described in the README when Sigstore rotates its keys; a stale
+// the up-to-date one cannot be fetched. Refresh it when Sigstore rotates
+// its keys (the hub already follows rotations through the TUF cache, see
+// docs/updates.md); a stale
 // snapshot only makes verification fail, never pass.
 //
 //go:embed trusted_root.json

@@ -1,0 +1,16 @@
+# Remote agents
+
+Besides the built-in agent, a server can run `regulus agent` and be managed from the hub. The agent always connects **out** to the hub (gRPC over TLS 1.3), so the managed server needs no open port.
+
+1. **Turn on the listener.** Remote agents are off by default. Set `agent_listen: ":8443"` (or `--agent-listen`, `REGULUS_AGENT_LISTEN`) and restart the hub. Open that port in the firewall only towards the servers you manage.
+2. **Make a token.** An admin opens **Servers → Add a server** in the dashboard, optionally names the server and gets the command to run, with a one-time token valid for one hour, the port and the **CA fingerprint** of the hub (the same thing `POST /api/enrollment-tokens` returns). The token is shown once.
+3. **Enroll the agent** on the other server, once. On Ubuntu or Debian the easiest way is the installer command shown by the dashboard (see [Installation](installation.md)); by hand, with the binary already there:
+   ```sh
+   regulus agent --hub HUB_HOST:8443 --token TOKEN --ca-fingerprint sha256:... --data-dir /var/lib/regulus-agent
+   ```
+   The agent first checks that the hub's certificate is signed by a CA with that fingerprint (so the token is never sent to an impostor), creates its own key, and the hub signs its certificate. The key stays on the agent. From then on the agent only needs `--hub` and the saved credentials; the same options can go in a YAML file (`--config`: `hub`, `data_dir`, `log`) or in `REGULUS_AGENT_*` variables.
+4. **Revoke** an agent from its server page or with `DELETE /api/agents/{id}`: its connection is closed and it can never connect again; the process stops with an error. To use that server again, delete its data directory and enroll with a new token.
+
+How it is protected: the hub creates its own certificate authority at the first start (`pki/` in the data directory, `ca.key` readable by the owner only). Tokens are random, stored only as a hash, single use, expire after an hour and are rate limited (10 wrong attempts per 15 minutes per address). Every connection needs the client certificate of an enrolled, not revoked agent, and the agent id comes from the certificate, not from what the agent says. Client certificates last five years; there is no renewal yet. Creating tokens, renaming and revoking agents need `servers.manage` and go to the audit log.
+
+**Versions.** An agent and the hub agree on a protocol version when the agent connects (the agent sends the range it speaks, the hub picks the highest both understand). On top of that the hub accepts agents of **its own release series and the previous one**: the same minor version, one minor behind (hub 0.3.x takes 0.3.x and 0.2.x), or any release of the previous major. Updating the hub first is therefore safe: its agents keep working until they are updated too. The **Servers** page marks agents that are behind the hub, or ahead of it (update the hub). An agent further behind is refused with a message that says so and the server is listed as `incompatible` with the reason. A refusal because of versions does not stop the agent service: it asks again every few seconds, so it connects by itself once the agent or the hub is updated. A revoked agent still stops for good. Development builds are never judged.
