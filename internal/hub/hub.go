@@ -1,3 +1,9 @@
+// hub.go builds and runs the Hub. Reading order: Hub and its Options, New (opens
+// the database, builds the services), Serve (starts everything and runs HTTP),
+// serveAgents (the TLS listener for remote agents), startBuiltinAgent, then the
+// accessors the API uses, and at the end the HTTP route table (Deps,
+// apiRoutes, NewHandler). See docs/code-map.md.
+
 package hub
 
 import (

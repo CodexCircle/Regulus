@@ -1,3 +1,9 @@
+// agents.go is the hub side of the agent-hub contract: agentServer implements
+// AgentService. Reading order: AgentInfo, agentServer and session, Connect (the
+// handshake: readHello, version checks, register), serve and handle (heartbeats
+// and metrics), sendCommand with its pending-result bookkeeping, and reject. See
+// docs/code-map.md.
+
 package hub
 
 import (

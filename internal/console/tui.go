@@ -1,3 +1,10 @@
+// tui.go is the Bubble Tea model of the interactive console (tabs Status,
+// Settings, Logs, Health). Reading order: Options and Model, New and Run, Update
+// with its key, mouse and edit handlers, View with its section bodies
+// (statusBody, settingsBody, logsBody, healthBody). The strings are in
+// strings.go and the data it shows is built in snapshot.go. See
+// docs/code-map.md.
+
 package console
 
 import (

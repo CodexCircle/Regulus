@@ -1,3 +1,8 @@
+// rollout.go updates the connected agents to the hub's version, a wave at a time
+// (StartRollout, StopRollout, runRollout, updateAgent, autoRollout), and at the
+// end serves the release files that agents fetch (agentServer.FetchUpdate). The
+// agent side is internal/agent/update.go. See docs/code-map.md.
+
 package hub
 
 import (

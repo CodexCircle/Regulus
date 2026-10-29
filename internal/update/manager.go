@@ -1,3 +1,11 @@
+// manager.go is the Manager of updates, the part of package update that the hub
+// drives. Reading order: the types an administrator sees (Mode, Settings, Info,
+// Status), New and Run (the periodic loop: cycle, automatic), the entry points
+// for the API (Settings, SetSettings, Status, Check, Download, Apply), the
+// download and staging steps, the state kept in the settings table (get, put,
+// load, saveState), and EnsureRelease and Files for the rollout to agents.
+// See docs/code-map.md.
+
 package update
 
 import (

@@ -1,3 +1,9 @@
+// console.go holds the commands that share the console code: `regulus`/`console`
+// and `status` (consoleCommand), and `config` (configCommand), with the terminal
+// detection, flags and environment they share, and the helpers that reset the
+// administrator from the console. The `hub` and `agent` commands are in
+// main.go and agent.go. See docs/code-map.md.
+
 package main
 
 import (

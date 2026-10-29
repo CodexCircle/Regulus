@@ -279,6 +279,8 @@ There is no TLS on the dashboard port; put a reverse proxy in front outside a tr
 
 ## Code map
 
+For a reading map of the biggest files, see [code-map.md](code-map.md).
+
 | Path | Responsibility |
 |---|---|
 | `cmd/regulus` | the single executable; chooses the role by subcommand |
