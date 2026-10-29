@@ -1,5 +1,3 @@
-// Package hub implements the Regulus hub: the HTTP server that serves the
-// dashboard and, in later phases, the API and the agent connections.
 package hub
 
 import (

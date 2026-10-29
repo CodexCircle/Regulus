@@ -1,4 +1,7 @@
-// Package storage opens the hub database (SQLite) and applies its migrations.
+// Package storage opens the hub database and applies its migrations
+// (migrations/*.sql, embedded, applied in order and recorded). Only SQLite is
+// implemented today, through a pure Go driver; PostgreSQL is planned (#122).
+// The other packages receive a *sql.DB and own their own tables.
 package storage
 
 import (

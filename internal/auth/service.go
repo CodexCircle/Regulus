@@ -1,6 +1,3 @@
-// Package auth implements the hub's local accounts: first-run setup of the
-// admin, password hashing, login sessions and the HTTP middleware that
-// protects the API.
 package auth
 
 import (

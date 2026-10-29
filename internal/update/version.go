@@ -1,7 +1,3 @@
-// Package update finds, downloads and verifies new releases of Regulus. The
-// hub drives it (see the design in the README): it asks the release source
-// what is newest on the chosen channel and keeps a verified copy in a local
-// cache, ready for whoever applies it.
 package update
 
 import (
