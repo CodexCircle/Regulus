@@ -29,9 +29,9 @@ What the package sets up:
 **Installing an agent on another server.** The same installer sets up the agent role. In the dashboard open **Servers → Add a server**, which shows the command with a one-time token and the hub's CA fingerprint, and run it on the new server (Ubuntu or Debian, as a user that can use `sudo`):
 
 ```sh
-curl -fsSL https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh | sh -s -- --role agent --hub HUB_HOST:8443 --token TOKEN --ca-fingerprint sha256:...
+curl -fsSLO https://github.com/CodexCircle/Regulus/releases/download/vVERSION/install.sh && sh install.sh --version VERSION --role agent --hub HUB_HOST:8443 --token TOKEN --ca-fingerprint sha256:...
 ```
 
-It verifies and installs the same package, enrolls the server as the `regulus` user (the token is sent only to a hub whose CA has that fingerprint), then enables and starts `regulus-agent.service`; the server shows as online within seconds. The hub must have the agent listener on (see [Remote agents](remote-agents.md)). Keep the token off the command line with `REGULUS_AGENT_TOKEN=... sh -s -- --role agent ...`. Install the same version as the hub: add `--version`. If the hub revokes the agent, the service stops and is not restarted (exit status 3).
+It verifies and installs the same package, enrolls the server as the `regulus` user (the token is sent only to a hub whose CA has that fingerprint), then enables and starts `regulus-agent.service`; the server shows as online within seconds. The hub must have the agent listener on (see [Remote agents](remote-agents.md)). `VERSION` is the version the hub runs: the dashboard fills it in, so the agent matches the hub even when only pre-releases exist. Keep the token off the command line with `REGULUS_AGENT_TOKEN=... sh install.sh --role agent ...`. If the hub revokes the agent, the service stops and is not restarted (exit status 3).
 
 The dashboard speaks plain HTTP on port 8080. Before exposing the hub beyond a trusted network, put a reverse proxy with TLS in front of it and set `listen: 127.0.0.1:8080` in `/etc/regulus/config.yaml`.

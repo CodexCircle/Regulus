@@ -254,6 +254,10 @@ paths:
                     type: string
                     example: "sha256:0f2a...e9"
                   agent_port: { type: integer }
+                  hub_version:
+                    type: string
+                    example: "0.1.0-alpha.1"
+                    description: The release the hub runs, so the new agent installs the same version. Absent on a development build.
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }

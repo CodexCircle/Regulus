@@ -16,15 +16,22 @@ export function ServersPage() {
   );
 }
 
-const INSTALL_SCRIPT_URL = "https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh";
+const RELEASES_URL = "https://github.com/CodexCircle/Regulus/releases";
 
 const enrollOptions = (grant: Enrollment, hubHost: string) =>
   [`--hub ${hubHost}:${grant.agent_port}`, `--token ${grant.token}`, `--ca-fingerprint ${grant.ca_fingerprint}`].join(" ");
 
 // installCommand installs Regulus on a clean Ubuntu or Debian server as an
-// agent and enrolls it, in one go.
+// agent and enrolls it. It downloads the script first and then runs it (piping
+// it into sh breaks as soon as "-s" is lost), and installs the version the hub
+// runs, from that release, so the agent matches the hub even before a stable
+// release exists. A development hub has no release: it falls back to the
+// latest stable one.
 export function installCommand(grant: Enrollment, hubHost: string): string {
-  return `curl -fsSL ${INSTALL_SCRIPT_URL} | sh -s -- --role agent ${enrollOptions(grant, hubHost)}`;
+  const v = grant.hub_version;
+  const script = v ? `${RELEASES_URL}/download/v${v}/install.sh` : `${RELEASES_URL}/latest/download/install.sh`;
+  const version = v ? `--version ${v} ` : "";
+  return `curl -fsSLO ${script} && sh install.sh ${version}--role agent ${enrollOptions(grant, hubHost)}`;
 }
 
 // agentCommand enrolls and runs the agent on a server that already has the
@@ -72,7 +79,7 @@ function AddServer({ onAdded }: { onAdded: () => void }) {
       {grant && (
         <div role="status" aria-label="Enrollment token">
           <p>
-            Run this on the server you want to add (Ubuntu or Debian, as a user that can use sudo). It installs Regulus, enrolls the server and starts the
+            Run this on the server you want to add (Ubuntu or Debian, as a user that can use sudo). It installs Regulus{grant.hub_version ? ` ${grant.hub_version}, the version of this hub,` : ""} enrolls the server and starts the
             agent. The token works once and expires at {new Date(grant.expires_at).toLocaleString()}. It is not shown again.
           </p>
           <CommandBox label="Install command" command={installCommand(grant, host)} />
