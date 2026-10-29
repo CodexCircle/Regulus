@@ -1,6 +1,3 @@
-// Package agent is the client side of the agent-hub contract. The same code
-// runs inside the hub (the built-in agent, over the in-process transport) and,
-// later, on remote servers.
 package agent
 
 import (

@@ -1,4 +1,5 @@
-// Package logging builds the structured logger used across Regulus.
+// Package logging builds the structured logger (log/slog) used across Regulus
+// from the log section of the configuration.
 package logging
 
 import (

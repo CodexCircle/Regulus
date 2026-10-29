@@ -1,4 +1,5 @@
-// Package webui embeds the compiled dashboard so the hub can serve it.
+// Package webui embeds the compiled dashboard (the dashboard/ directory, built
+// by `make build`) so the hub can serve it. It contains no logic.
 package webui
 
 import (
