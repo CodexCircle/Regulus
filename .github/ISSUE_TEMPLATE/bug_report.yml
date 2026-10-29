@@ -6,7 +6,7 @@ body:
     id: what
     attributes:
       label: What happened?
-      description: What you did, what you expected and what happened instead. English first, Italian after if you like.
+      description: What you did, what you expected and what happened instead.
     validations:
       required: true
   - type: textarea

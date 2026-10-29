@@ -6,7 +6,7 @@ body:
     id: problem
     attributes:
       label: Problem or need
-      description: What are you trying to do? English first, Italian after if you like.
+      description: What are you trying to do?
     validations:
       required: true
   - type: textarea
