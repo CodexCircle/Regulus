@@ -10,6 +10,8 @@ package console
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -30,8 +32,12 @@ const (
 	tabSettings
 	tabLogs
 	tabHealth
+	tabActions
 	tabCount
 )
+
+// remoteAgentsListen is what the "turn on remote agents" action writes.
+const remoteAgentsListen = ":8443"
 
 // Hooks are the actions that need more than the console knows how to do; the
 // command supplies them. A nil hook hides its key.
@@ -79,10 +85,13 @@ type Model struct {
 	// body scroll of the status and health tabs
 	scroll int
 
+	// actions tab
+	actSel int
+
 	notice       string
 	noticeIsErr  bool
 	needsRestart bool
-	confirm      string // "restart", "reset" or ""
+	confirm      string // "restart", "reset", "agents" or ""
 	resetLink    string
 }
 
@@ -184,6 +193,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) operationDone(msg opMsg) (tea.Model, tea.Cmd) {
 	switch {
+	case msg.err != nil && msg.kind == "agents":
+		m.say("Could not turn on remote agents: "+msg.err.Error()+". Open the console with sudo, or set agent_listen by hand.", true)
+	case msg.kind == "agents-saved":
+		m.needsRestart = true
+		m.say("Saved agent_listen = "+remoteAgentsListen+". "+T.RestartHint, false)
+		return m, m.collect()
+	case msg.kind == "agents":
+		m.needsRestart = false
+		m.say("Remote agents are on, port 8443. Open it in the firewall towards the servers you manage.", false)
+		return m, m.collect()
 	case msg.err != nil && msg.kind == "restart":
 		m.say("Could not restart: "+msg.err.Error()+". Run: sudo systemctl restart "+ServiceUnit, true)
 	case msg.err != nil:
@@ -244,7 +263,7 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.switchTo((m.tab + 1) % tabCount)
 	case "shift+tab", "left", "h":
 		return m.switchTo((m.tab + tabCount - 1) % tabCount)
-	case "1", "2", "3", "4":
+	case "1", "2", "3", "4", "5":
 		return m.switchTo(tab(k[0] - '1'))
 	case "up", "k":
 		return m.move(-1)
@@ -258,17 +277,16 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.tab == tabSettings && m.loaded && len(m.snap.Settings) > 0 {
 			return m.startEdit()
 		}
+		if m.tab == tabActions && m.loaded {
+			return m.ask(m.actions()[m.actSel].key)
+		}
 	case "f":
 		if m.tab == tabLogs {
 			m.logLevel = (m.logLevel + 1) % len(T.LogFilters)
 			m.logScroll = 0
 		}
-	case "r":
-		m.confirm = "restart"
-	case "p":
-		if m.opt.Hooks.ResetAdmin != nil {
-			m.confirm = "reset"
-		}
+	case "r", "p", "a":
+		return m.ask(k)
 	case "esc":
 		m.notice, m.resetLink = "", ""
 	}
@@ -297,6 +315,9 @@ func (m Model) move(delta int) (tea.Model, tea.Cmd) {
 		}
 	case tabLogs:
 		m.logScroll = max(0, m.logScroll-delta)
+	case tabActions:
+		n := len(m.actions())
+		m.actSel = clamp(m.actSel+delta, 0, n-1)
 	default:
 		m.scroll = max(0, m.scroll+delta)
 	}
@@ -321,6 +342,23 @@ func (m Model) answer(k string) (tea.Model, tea.Cmd) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			return opMsg{kind: "restart", err: hooks.Restart(ctx)}
+		}
+	case "agents":
+		file := m.snap.ConfigFile
+		m.say("Turning on remote agents…", false)
+		return m, func() tea.Msg {
+			if _, err := config.SetFile(file, "agent_listen", remoteAgentsListen); err != nil {
+				return opMsg{kind: "agents", err: err}
+			}
+			if hooks.Restart == nil {
+				return opMsg{kind: "agents-saved"}
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := hooks.Restart(ctx); err != nil {
+				return opMsg{kind: "agents-saved"}
+			}
+			return opMsg{kind: "agents"}
 		}
 	case "reset":
 		m.say("Making the link…", false)
@@ -438,7 +476,7 @@ func (m Model) height0() int {
 }
 
 func (m Model) tabLabel(t tab) string {
-	name := [...]string{T.TabStatus, T.TabSettings, T.TabLogs, T.TabHealth}[t]
+	name := [...]string{T.TabStatus, T.TabSettings, T.TabLogs, T.TabHealth, T.TabActions}[t]
 	label := fmt.Sprintf(" %d %s ", int(t)+1, name)
 	if t == m.tab {
 		return tabOn.Render(label)
@@ -520,6 +558,8 @@ func (m Model) footer(w int) []string {
 		status = warnStyle.Render(T.RestartAsk + " " + T.HelpConfirm)
 	case m.confirm == "reset":
 		status = warnStyle.Render(T.ResetAsk + " " + T.HelpConfirm)
+	case m.confirm == "agents":
+		status = warnStyle.Render(T.AgentsAsk + " " + T.HelpConfirm)
 	case m.notice != "":
 		style := goodStyle
 		if m.noticeIsErr {
@@ -562,6 +602,8 @@ func (m Model) body(w int) []string {
 		return m.logsBody()
 	case tabHealth:
 		return m.healthBody()
+	case tabActions:
+		return m.actionsBody()
 	}
 	return m.statusBody()
 }
@@ -748,4 +790,101 @@ func (m Model) healthBody() []string {
 
 func clamp(v, lo, hi int) int {
 	return max(lo, min(v, hi))
+}
+
+// action is a line of the Actions tab.
+type action struct {
+	key, title, info string
+	// why is set when the action cannot run here, and says why.
+	why string
+}
+
+// actions lists what the console can do, in the order of the Actions tab.
+func (m Model) actions() []action {
+	restart := action{key: "r", title: T.ActRestart, info: T.ActRestartInfo}
+	if m.opt.Hooks.Restart == nil {
+		restart.why = "run: sudo systemctl restart " + ServiceUnit
+	}
+	reset := action{key: "p", title: T.ActReset, info: T.ActResetInfo}
+	if m.opt.Hooks.ResetAdmin == nil {
+		reset.why = "run the console as root, or run: sudo regulus hub reset-admin"
+	}
+	agents := action{key: "a", title: T.ActAgents, info: T.ActAgentsInfo, why: m.agentsBlocker()}
+	return []action{restart, reset, agents}
+}
+
+// agentsBlocker says why remote agents cannot be turned on from here, or ""
+// when they can.
+func (m Model) agentsBlocker() string {
+	switch {
+	case !m.loaded:
+		return T.Loading
+	case m.snap.AgentListen != "":
+		return "already on (" + m.snap.AgentListen + ")"
+	case m.snap.ConfigFile == "":
+		return "there is no configuration file: start the console with --config FILE"
+	}
+	for _, e := range m.snap.Settings {
+		if e.Key == "agent_listen" && e.Origin == config.OriginEnv {
+			return "REGULUS_AGENT_LISTEN overrides the configuration file"
+		}
+	}
+	return ""
+}
+
+// ask asks to confirm the action with key k, or says why it cannot run.
+func (m Model) ask(k string) (tea.Model, tea.Cmd) {
+	switch k {
+	case "r":
+		m.confirm = "restart"
+	case "p":
+		if m.opt.Hooks.ResetAdmin != nil {
+			m.confirm = "reset"
+		}
+	case "a":
+		if why := m.agentsBlocker(); why != "" {
+			m.say(T.ActAgents+": "+why+".", true)
+			return m, nil
+		}
+		m.confirm = "agents"
+	}
+	return m, nil
+}
+
+func (m Model) actionsBody() []string {
+	out := []string{" " + mutedStyle.Render(T.ActionsIntro), ""}
+	for i, a := range m.actions() {
+		marker := "  "
+		title := fmt.Sprintf("%s  %s", a.key, a.title)
+		if i == m.actSel {
+			marker = m.sym("▸ ", "> ")
+			title = selectStyle.Render(title)
+		}
+		out = append(out, " "+marker+title)
+		out = append(out, "      "+mutedStyle.Render(a.info))
+		if a.why != "" {
+			out = append(out, "      "+warnStyle.Render(T.ActUnavailable+": "+a.why))
+		}
+	}
+
+	if m.snap.AgentListen == "" {
+		return out
+	}
+	out = append(out, "", " "+headStyle.Render(T.NewAgentTitle), " "+T.NewAgentText)
+	_, port, err := net.SplitHostPort(m.snap.AgentListen)
+	if err != nil {
+		port = strings.TrimPrefix(m.snap.AgentListen, ":")
+	}
+	for _, u := range m.snap.LANURLs {
+		if p, err := url.Parse(u); err == nil && p.Hostname() != "" {
+			out = append(out, kv(T.NewAgentAddress, net.JoinHostPort(p.Hostname(), port)))
+		}
+	}
+	fp := m.snap.CAFingerprint
+	if fp == "" {
+		fp = mutedStyle.Render("shown while the hub runs")
+	}
+	out = append(out, kv(T.NewAgentFingerprint, fp))
+	out = append(out, " "+mutedStyle.Render(T.NewAgentToken))
+	return out
 }
