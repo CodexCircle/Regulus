@@ -28,6 +28,8 @@ Regulus is built around **plugins**. The base installation provides a simple das
 
 Agents open the connection to the hub, so no inbound ports are needed on managed servers and everything works behind NAT or firewalls. For how the parts work together (trust, data, updates), see [docs/architecture.md](docs/architecture.md).
 
+The words used here (hub, agent, built-in agent, role, channel…) are defined in the [glossary](docs/glossary.md).
+
 ## Tech stack
 
 | Component | Technology |
