@@ -28,7 +28,7 @@ Regulus is built around **plugins**. The base installation provides a simple das
  Agent    Agent    Agent    one agent per managed server
 ```
 
-Agents open the connection to the hub, so no inbound ports are needed on managed servers and everything works behind NAT or firewalls.
+Agents open the connection to the hub, so no inbound ports are needed on managed servers and everything works behind NAT or firewalls. For how the parts work together (trust, data, updates), see [docs/architecture.md](docs/architecture.md).
 
 ## Tech stack
 
@@ -38,7 +38,7 @@ Agents open the connection to the hub, so no inbound ports are needed on managed
 | Dashboard | [React](https://react.dev/) with TypeScript and Vite, embedded in the binary |
 | Communication | gRPC with Protobuf as the contract, mTLS between agent and hub |
 | Plugins | Separate processes talking gRPC with the host, plus JavaScript modules for dashboard widgets |
-| Data | SQLite by default, PostgreSQL optional |
+| Data | SQLite today; PostgreSQL is planned (#122, #123, #124) |
 
 ## Supported platforms
 
