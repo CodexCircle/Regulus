@@ -216,6 +216,57 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/agents/listener:
+    get:
+      tags: [agents]
+      summary: Whether remote agents can connect, and where (needs servers.read)
+      description: |
+        Remote agents connect to their own listener (gRPC over TLS). It is on when
+        the configuration sets `agent_listen` (`source: config`, which cannot be
+        changed here) or after it was turned on from the dashboard
+        (`source: dashboard`, kept for the next start).
+      responses:
+        "200":
+          description: The state of the listener.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentListener" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      tags: [agents]
+      summary: Turn remote agents on (needs servers.manage)
+      description: |
+        Starts the listener on `port` on every address of the server, without a
+        restart, keeps it for the next start and records it in the audit log.
+        The port must be 1024 to 65535 (the hub has no privileges). Answers 409
+        when remote agents are already on, when the configuration sets
+        `agent_listen`, or when the port cannot be opened. Open the port in the
+        firewall towards the servers to manage. The request needs a JSON body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [port]
+              properties:
+                port: { type: integer, minimum: 1024, maximum: 65535, example: 8443 }
+      responses:
+        "200":
+          description: Remote agents are on.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentListener" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Already on, set in the configuration, or the port cannot be opened.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/enrollment-tokens:
     post:
       tags: [agents]
@@ -1275,6 +1326,15 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    AgentListener:
+      type: object
+      required: [enabled, ca_fingerprint, editable]
+      properties:
+        enabled: { type: boolean }
+        port: { type: integer, description: Where remote agents connect, when enabled. }
+        source: { type: string, enum: [config, dashboard], description: What turned the listener on. }
+        ca_fingerprint: { type: string, example: "sha256:0f2a...e9", description: What an agent pins to trust this hub. }
+        editable: { type: boolean, description: Whether the dashboard may turn the listener on. }
     UpdateInfo:
       type: object
       required: [version, tag, prerelease, channel, url, published_at]

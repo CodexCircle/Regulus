@@ -2,7 +2,7 @@
 
 Besides the built-in agent, a server can run `regulus agent` and be managed from the hub. The agent always connects **out** to the hub (gRPC over TLS 1.3), so the managed server needs no open port.
 
-1. **Turn on the listener.** Remote agents are off by default. Set `agent_listen: ":8443"` (or `--agent-listen`, `REGULUS_AGENT_LISTEN`) and restart the hub. Open that port in the firewall only towards the servers you manage.
+1. **Turn on the listener.** Remote agents are off by default. In the dashboard, **Servers** says so and someone with `servers.manage` turns them on with a port (8443 by default): the hub starts listening at once, keeps it after a restart and records it in the audit log (`GET`/`PUT /api/agents/listener`). Alternatively set `agent_listen: ":8443"` (or `--agent-listen`, `REGULUS_AGENT_LISTEN`) and restart the hub; the configuration always wins and cannot be changed from the dashboard. Open that port in the firewall only towards the servers you manage.
 2. **Make a token.** An admin opens **Servers → Add a server** in the dashboard, optionally names the server and gets the command to run, with a one-time token valid for one hour, the port and the **CA fingerprint** of the hub (the same thing `POST /api/enrollment-tokens` returns). The token is shown once.
 3. **Enroll the agent** on the other server, once. On Ubuntu or Debian the easiest way is the installer command shown by the dashboard (see [Installation](installation.md)); by hand, with the binary already there:
    ```sh
