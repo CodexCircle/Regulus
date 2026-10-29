@@ -32,7 +32,7 @@ See the [README](README.md#development) for configuration and the project layout
 
 - [ ] The change is covered by tests, or you explain why it is not.
 - [ ] `make lint test` passes locally.
-- [ ] Documentation is updated (README, comments, this guide) when behavior changes.
+- [ ] Documentation is updated (README, comments, this guide) when behavior changes. If you change what a package does, its package comment (`doc.go` or the file with `// Package ...`) still matches.
 - [ ] Every new or changed user-facing GUI string has both an English and an Italian text.
 - [ ] The description says what changed and why, and how you tested it.
 

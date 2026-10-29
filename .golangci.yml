@@ -4,6 +4,13 @@ linters:
   default: standard
   enable:
     - misspell
+    - revive
+
+  settings:
+    revive:
+      # Only this rule: every package must have an accurate comment (#119).
+      rules:
+        - name: package-comments
 
 formatters:
   enable:

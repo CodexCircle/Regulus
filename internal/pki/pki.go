@@ -2,7 +2,8 @@
 // client certificates of enrolled agents and the certificate the hub shows
 // them, and gives the agents what they need to trust the hub without a public
 // certificate: they pin the fingerprint of the CA. agent.go holds what the
-// agent side needs (its key and certificate request). Which agents exist, their
+// agent side needs (generating its key and the TLS configuration that pins the
+// CA fingerprint). Which agents exist, their
 // tokens and their revocation are in package fleet.
 package pki
 
