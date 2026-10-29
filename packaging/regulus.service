@@ -21,7 +21,7 @@ StateDirectoryMode=0750
 UMask=0077
 
 # Hardening: the hub reads /proc and statfs and needs no privileges. See the
-# privilege model in the README before loosening any of this.
+# privilege model in docs/installation.md before loosening any of this.
 NoNewPrivileges=true
 CapabilityBoundingSet=
 AmbientCapabilities=

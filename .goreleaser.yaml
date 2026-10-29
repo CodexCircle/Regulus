@@ -38,7 +38,7 @@ nfpms:
     formats: [deb, rpm]
     bindir: /usr/bin
     # Ubuntu Server is the reference platform. The package runs the hub as the
-    # unprivileged system user "regulus"; see packaging/ and the README.
+    # unprivileged system user "regulus"; see packaging/ and docs/installation.md.
     contents:
       - src: packaging/regulus.service
         dst: /usr/lib/systemd/system/regulus.service

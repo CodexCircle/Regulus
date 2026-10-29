@@ -15,7 +15,7 @@ make lint         # golangci-lint and ESLint
 make smoke        # starts bin/regulus and checks it end to end
 ```
 
-See the [README](README.md#development) for configuration and the project layout, and [docs/decisions.md](docs/decisions.md) for the reasons behind the main choices and the open questions. AI coding agents: see [AGENTS.md](AGENTS.md).
+See [docs/development.md](docs/development.md) and [docs/configuration.md](docs/configuration.md) for development and configuration, [docs/architecture.md](docs/architecture.md) for the project layout, and [docs/decisions.md](docs/decisions.md) for the reasons behind the main choices and the open questions. AI coding agents: see [AGENTS.md](AGENTS.md).
 
 ## How we work
 

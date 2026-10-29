@@ -1,6 +1,6 @@
 # Architecture
 
-How Regulus fits together **today**, written for someone who has not seen the code. [README.md](../README.md) says what Regulus is and how to use it, [decisions.md](decisions.md) says why things are the way they are and what is open. This page says how the parts work, and links each statement to the code or to an issue.
+How Regulus fits together **today**, written for someone who has not seen the code. [README.md](../README.md) says what Regulus is, and the [documentation index](README.md) says where to read how to use it, [decisions.md](decisions.md) says why things are the way they are and what is open. This page says how the parts work, and links each statement to the code or to an issue.
 
 Status words used below: **implemented** (the code exists and has tests), **planned** or **designed** (an issue or document exists, no code), **unverified** (the code exists but has not run on a real system; see #81). Nothing on this page is described as verified on a real machine: the release, the packages and the update path have not been tested on one yet (#81).
 
@@ -266,7 +266,7 @@ There is no TLS on the dashboard port; put a reverse proxy in front outside a tr
 
 ## 9. Packaging and deployment
 
-`install.sh` and the `.deb` / `.rpm` / `tar.gz` built by GoReleaser from `.github/workflows/release.yml` install `/usr/bin/regulus`, the systemd units (`packaging/`), `/etc/regulus/config.yaml`, and the service user `regulus`. `install.sh --role agent --hub … --token … --ca-fingerprint …` sets up an agent. The user-facing steps are in the README until they move into `docs/` (#117). *Unverified on a real Ubuntu system (#81).*
+`install.sh` and the `.deb` / `.rpm` / `tar.gz` built by GoReleaser from `.github/workflows/release.yml` install `/usr/bin/regulus`, the systemd units (`packaging/`), `/etc/regulus/config.yaml`, and the service user `regulus`. `install.sh --role agent --hub … --token … --ca-fingerprint …` sets up an agent. The user-facing steps are in [installation.md](installation.md). *Unverified on a real Ubuntu system (#81).*
 
 ## 10. What does not exist yet
 
@@ -306,4 +306,4 @@ There is no TLS on the dashboard port; put a reverse proxy in front outside a tr
 
 - Agent certificate renewal (5-year certificates, no renewal): opened as #128.
 - The README claimed PostgreSQL support that did not exist; corrected in the same pull request as this page.
-- The README's code map omitted `internal/pki` and `internal/fleet`; this page has the complete map and the README's copy is handled in #117.
+- The README's code map omitted `internal/pki` and `internal/fleet`; this page has the complete map and the README's copy was removed in #117.

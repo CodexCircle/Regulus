@@ -2,7 +2,7 @@
 
 Everything an agent needs to work on Regulus is in this repository. Read these before starting:
 
-- [README.md](README.md): what Regulus does and how each part works.
+- [README.md](README.md): what Regulus is. The [documentation index](docs/README.md) lists every other page (installation, configuration, updates, console, authentication, remote agents, API, dashboard).
 - [CONTRIBUTING.md](CONTRIBUTING.md): setup, commands, branches, commits, language.
 - [docs/architecture.md](docs/architecture.md): how hub, agents, trust, data and updates fit together, with diagrams.
 - [docs/glossary.md](docs/glossary.md): what each term means today; add new terms here.
