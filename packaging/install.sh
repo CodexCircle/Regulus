@@ -23,6 +23,7 @@ DEFAULT_BASE_URL="https://github.com/$REPO/releases/download"
 LATEST_URL="https://github.com/$REPO/releases/latest"
 API_URL="https://api.github.com/repos/$REPO/releases"
 CONFIG_DIR=/etc/regulus
+DATA_DIR=/var/lib/regulus
 
 usage() {
 	cat <<'EOF'
@@ -44,13 +45,36 @@ Usage: install.sh [options]
   --no-self-update       do not set up installing updates from the dashboard or, for an
                          agent, from the hub (by default a systemd unit is set up that
                          installs, as root, only updates whose signature it checks again)
-  --yes, -y              do not ask anything: the default is the built-in agent
+  --database TYPE        hub role: sqlite (default, nothing to set up) or postgres, a
+                         PostgreSQL server you prepared (see docs/database.md). It is
+                         chosen here and kept by later runs; moving data to the other one
+                         is a separate feature
+  --db-host HOST         PostgreSQL: host name or address (required with postgres)
+  --db-port PORT         PostgreSQL: port (default 5432)
+  --db-name NAME         PostgreSQL: database name (default regulus)
+  --db-user USER         PostgreSQL: user (default regulus)
+  --db-sslmode MODE      PostgreSQL: disable, allow, prefer (default), require,
+                         verify-ca or verify-full
+  --db-sslrootcert FILE  PostgreSQL: CA file, for verify-ca and verify-full
+  --database-password-file FILE
+                         PostgreSQL: file whose first line is the password. The password is
+                         never an option: it would show in the process list and the shell
+                         history. Without the file the installer uses REGULUS_DATABASE_PASSWORD
+                         from the environment, or asks on the terminal without echo. It is
+                         written only to /etc/regulus/regulus.env (0640, root:regulus)
+  --yes, -y              do not ask anything: the defaults are the built-in agent and SQLite
   --require-signature    fail if the signature cannot be verified (needs cosign)
   --base-url URL         download from URL/v<version>/ instead of GitHub Releases
   -h, --help             show this help
 
-Without --builtin-agent or --no-builtin-agent the installer asks, when it has
-a terminal to ask on. The agent role never asks anything.
+Without --builtin-agent or --no-builtin-agent, or without --database, the
+installer asks, when it has a terminal to ask on; without one, or with --yes,
+the answers are the built-in agent and SQLite. The agent role never asks
+anything and has no database.
+
+With --database postgres the installer connects to a PostgreSQL that already
+exists; it does not install PostgreSQL or create the role and the database.
+It checks the connection (regulus db check) before it installs anything.
 EOF
 }
 
@@ -330,6 +354,297 @@ ask_builtin_agent() {
 	esac
 }
 
+# quiet_trace turns off `set -x`, so a password is never printed by it.
+quiet_trace() {
+	case $- in
+		*x*) set +x ;;
+	esac
+}
+
+# can_ask succeeds when the user can be asked: there is a terminal and --yes
+# was not given. The subshell keeps a missing terminal from ending the script.
+can_ask() {
+	[ "$assume_yes" != 1 ] && ( : </dev/tty ) 2>/dev/null
+}
+
+# ask_value VAR LABEL DEFAULT sets VAR to the answer when it is empty.
+ask_value() {
+	eval "cur=\${$1}"
+	[ -z "$cur" ] || return 0
+	if [ -n "$3" ]; then
+		printf '%s [%s]: ' "$2" "$3" >/dev/tty
+	else
+		printf '%s: ' "$2" >/dev/tty
+	fi
+	read -r ans </dev/tty || ans=
+	[ -n "$ans" ] || ans=$3
+	eval "$1=\$ans"
+}
+
+# valid_db_host accepts a host name, an IPv4 address or an IPv6 address.
+valid_db_host() {
+	case "$1" in
+		"" | *[!0-9A-Za-z.:_-]*) return 1 ;;
+		-* | .*) return 1 ;;
+	esac
+}
+
+# valid_db_port accepts 1 to 65535.
+valid_db_port() {
+	case "$1" in
+		"" | *[!0-9]*) return 1 ;;
+	esac
+	[ "${#1}" -le 5 ] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+# valid_db_ident accepts a database or role name that is safe in the
+# environment file: letters, digits, underscore, dot, dollar and hyphen.
+valid_db_ident() {
+	case "$1" in
+		"" | *[!-0-9A-Za-z_.$]*) return 1 ;;
+		-*) return 1 ;;
+	esac
+}
+
+# valid_db_sslmode accepts the libpq modes.
+valid_db_sslmode() {
+	case "$1" in
+		disable | allow | prefer | require | verify-ca | verify-full) return 0 ;;
+	esac
+	return 1
+}
+
+# valid_db_path accepts an absolute path without characters that need quoting.
+valid_db_path() {
+	case "$1" in
+		/*) ;;
+		*) return 1 ;;
+	esac
+	case "$1" in
+		*[!0-9A-Za-z_./-]*) return 1 ;;
+	esac
+}
+
+# check_database_args validates the database options of the hub role, so a typo
+# is caught before anything is downloaded.
+check_database_args() {
+	db_options=$db_host$db_port$db_name$db_user$db_sslmode$db_sslrootcert$db_password_file
+	if [ "$role" = agent ]; then
+		[ -z "$database$db_options" ] || die "--database and the --db-* options are for the hub role: the agent has no database"
+		return 0
+	fi
+	case "$database" in
+		"" | sqlite | postgres) ;;
+		*) die "invalid --database $database: use sqlite or postgres" ;;
+	esac
+	if [ "$database" = sqlite ] && [ -n "$db_options" ]; then
+		die "the --db-* options and --database-password-file are for --database postgres"
+	fi
+	if [ -z "$database" ] && [ -n "$db_options" ]; then
+		die "the --db-* options and --database-password-file need --database postgres"
+	fi
+	[ -z "$db_host" ] || valid_db_host "$db_host" || die "invalid --db-host: use a host name or an IP address"
+	[ -z "$db_port" ] || valid_db_port "$db_port" || die "invalid --db-port: use a number from 1 to 65535"
+	[ -z "$db_name" ] || valid_db_ident "$db_name" || die "invalid --db-name: use letters, digits and _ . \$ - only"
+	[ -z "$db_user" ] || valid_db_ident "$db_user" || die "invalid --db-user: use letters, digits and _ . \$ - only"
+	[ -z "$db_sslmode" ] || valid_db_sslmode "$db_sslmode" || die "invalid --db-sslmode $db_sslmode: use disable, allow, prefer, require, verify-ca or verify-full"
+	[ -z "$db_sslrootcert" ] || valid_db_path "$db_sslrootcert" || die "invalid --db-sslrootcert: use the absolute path of the CA file"
+	[ -z "$db_password_file" ] || [ -f "$db_password_file" ] || die "--database-password-file: $db_password_file is not a file"
+	[ -z "$db_password_file" ] || [ -r "$db_password_file" ] || die "--database-password-file: cannot read $db_password_file"
+}
+
+# env_file_value KEY prints the value KEY has in the service's environment
+# file, without quotes. The file is readable by root and the regulus group.
+env_file_value() {
+	[ -f "$CONFIG_DIR/regulus.env" ] || return 0
+	$SUDO cat "$CONFIG_DIR/regulus.env" 2>/dev/null | sed -n "s/^$1=//p" | tail -n 1 | sed 's/^"\(.*\)"$/\1/'
+}
+
+# existing_backend prints the database an earlier installation of the hub
+# uses (sqlite or postgres), or none when there is no hub installed here.
+existing_backend() {
+	if [ -r "$CONFIG_DIR/role" ] && [ "$(head -n 1 "$CONFIG_DIR/role")" = agent ]; then
+		echo none
+		return 0
+	fi
+	found=0
+	if have dpkg && dpkg -s regulus 2>/dev/null | grep -q '^Status: install ok installed'; then
+		found=1
+	elif $SUDO test -e "$DATA_DIR/regulus.db"; then
+		found=1
+	elif [ -f "$CONFIG_DIR/regulus.env" ] && [ -n "$(env_file_value REGULUS_DATABASE_TYPE)" ]; then
+		found=1
+	fi
+	if [ "$found" = 0 ]; then
+		echo none
+		return 0
+	fi
+	current=$(env_file_value REGULUS_DATABASE_TYPE)
+	if [ -z "$current" ] && [ -r "$CONFIG_DIR/config.yaml" ]; then
+		current=$(sed -n '/^database:/,/^[^ #]/s/^[ ]*type: *"\{0,1\}\([a-z]*\).*/\1/p' "$CONFIG_DIR/config.yaml" | head -n 1)
+	fi
+	case "$current" in
+		postgres) echo postgres ;;
+		*) echo sqlite ;;
+	esac
+}
+
+# ask_database asks which database to use, and the PostgreSQL connection data
+# that was not given as options, when the user can be asked.
+ask_database() {
+	if [ -z "$database" ]; then
+		can_ask || return 0
+		printf 'Database: SQLite (default, nothing to set up) or PostgreSQL that you already prepared? [S/p] ' >/dev/tty
+		read -r answer </dev/tty || answer=
+		case "$answer" in
+			[pP]*) database=postgres ;;
+			*) database=sqlite ;;
+		esac
+	fi
+	[ "$database" = postgres ] || return 0
+	if can_ask; then
+		ask_value db_host "PostgreSQL host" ""
+		ask_value db_port "PostgreSQL port" 5432
+		ask_value db_name "Database name" regulus
+		ask_value db_user "User" regulus
+		ask_value db_sslmode "TLS mode (disable, allow, prefer, require, verify-ca, verify-full)" prefer
+	fi
+}
+
+# read_password_file FILE prints the first line of FILE.
+read_password_file() {
+	quiet_trace
+	IFS= read -r pw <"$1" || true
+	pw=${pw%"$(printf '\r')"}
+	printf '%s' "$pw"
+}
+
+# load_database_password sets $db_password from the file, the environment or
+# the terminal. It never takes it from a command-line argument.
+load_database_password() {
+	quiet_trace
+	db_password=
+	if [ -n "$db_password_file" ]; then
+		mode=$(stat -c %a "$db_password_file" 2>/dev/null || true)
+		case "$mode" in
+			*[1-7]) warn "$db_password_file can be read by other users: restrict it (chmod 600)" ;;
+		esac
+		db_password=$(read_password_file "$db_password_file")
+		[ -n "$db_password" ] || die "--database-password-file: $db_password_file is empty"
+	elif [ -n "${REGULUS_DATABASE_PASSWORD:-}" ]; then
+		db_password=$REGULUS_DATABASE_PASSWORD
+		# Not for apt and the package scripts to inherit.
+		unset REGULUS_DATABASE_PASSWORD
+	elif [ "$db_keep" != 1 ] && can_ask; then
+		db_password=$(
+			trap 'stty echo </dev/tty 2>/dev/null' EXIT INT TERM
+			printf 'Password of %s on %s (not shown): ' "$db_user" "$db_host" >/dev/tty
+			stty -echo </dev/tty
+			IFS= read -r pw </dev/tty || pw=
+			printf '%s' "$pw"
+		)
+		printf '\n' >/dev/tty
+	fi
+	case "$db_password" in
+		*[![:print:]]*) die "the database password has a character that cannot be stored (control characters and line breaks are not allowed)" ;;
+	esac
+	if [ -z "$db_password" ] && [ "$db_keep" != 1 ] && [ "$existing" = none ]; then
+		die "the PostgreSQL password is needed: use --database-password-file FILE, set REGULUS_DATABASE_PASSWORD, or run this on a terminal to be asked"
+	fi
+}
+
+# prepare_database decides the database of this installation before anything
+# is downloaded: it asks what was not given, fills the defaults, and refuses to
+# change the backend of an installation that already has data.
+prepare_database() {
+	db_keep=0
+	existing=$(existing_backend)
+	if [ "$existing" != none ]; then
+		if [ -z "$database" ]; then
+			database=$existing
+		elif [ "$database" != "$existing" ]; then
+			die "this server already uses $existing, and --database $database would change it. Nothing was changed. Moving the data to another database is a separate feature (#124), not something a second run of the installer does. Run the installer without --database to keep $existing"
+		fi
+		if [ "$database" = postgres ] && [ -z "$db_options" ]; then
+			db_keep=1
+		fi
+	else
+		ask_database
+		[ -n "$database" ] || database=sqlite
+	fi
+	[ "$database" = postgres ] || return 0
+
+	if [ "$db_keep" != 1 ]; then
+		# Defaults only for a new installation. Changing an existing one
+		# touches only what was given.
+		if [ "$existing" = none ]; then
+			[ -n "$db_port" ] || db_port=5432
+			[ -n "$db_name" ] || db_name=regulus
+			[ -n "$db_user" ] || db_user=regulus
+			[ -n "$db_sslmode" ] || db_sslmode=prefer
+			[ -n "$db_host" ] || die "--db-host is needed with --database postgres: the host of the PostgreSQL server you prepared"
+		fi
+		[ -z "$db_host" ] || valid_db_host "$db_host" || die "invalid PostgreSQL host"
+		[ -z "$db_port" ] || valid_db_port "$db_port" || die "invalid PostgreSQL port: use a number from 1 to 65535"
+		[ -z "$db_name" ] || valid_db_ident "$db_name" || die "invalid database name: use letters, digits and _ . \$ - only"
+		[ -z "$db_user" ] || valid_db_ident "$db_user" || die "invalid user: use letters, digits and _ . \$ - only"
+		[ -z "$db_sslmode" ] || valid_db_sslmode "$db_sslmode" || die "invalid TLS mode $db_sslmode"
+		case "$db_sslmode" in
+			verify-ca | verify-full)
+				[ -n "$db_sslrootcert" ] || warn "$db_sslmode without --db-sslrootcert uses the system's CA list"
+				;;
+		esac
+	fi
+	load_database_password
+}
+
+# quote_env_value prints VALUE for a systemd environment file: in double
+# quotes, with backslash and double quote escaped.
+quote_env_value() {
+	quiet_trace
+	printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+}
+
+# precheck_database tries the PostgreSQL settings with the new binary taken
+# out of the verified package, before anything is installed or written. The
+# password goes in the environment of that one process, never in its arguments.
+precheck_database() {
+	[ "$database" = postgres ] || return 0
+	[ "$db_keep" != 1 ] || return 0
+	[ -n "$db_password" ] || return 0 # an earlier password stays: checked after the install
+	have dpkg-deb || die "dpkg-deb not found"
+	mkdir -p "$work/pkg"
+	dpkg-deb -x "$work/$file" "$work/pkg" || die "could not read $file"
+	bin=$work/pkg/usr/bin/regulus
+	[ -x "$bin" ] || die "$file has no /usr/bin/regulus"
+	"$bin" db -h >/dev/null 2>&1 || die "Regulus $version cannot use PostgreSQL: choose a release that has it, or use --database sqlite"
+	say "Checking the PostgreSQL connection..."
+	quiet_trace
+	if ! out=$(
+		REGULUS_DATABASE_TYPE=postgres REGULUS_DATABASE_HOST=$db_host REGULUS_DATABASE_PORT=$db_port \
+			REGULUS_DATABASE_NAME=$db_name REGULUS_DATABASE_USER=$db_user REGULUS_DATABASE_SSLMODE=$db_sslmode \
+			REGULUS_DATABASE_SSLROOTCERT=$db_sslrootcert REGULUS_DATABASE_PASSWORD=$db_password \
+			"$bin" db check --env-file /dev/null 2>&1
+	); then
+		printf '%s\n' "$out" >&2
+		die "the database cannot be used with these settings, so nothing was installed or changed. Fix the cause above (see docs/database.md for what to prepare) and run the installer again"
+	fi
+	say "$out"
+}
+
+# check_database_installed runs the check again with the installed binary and
+# the settings the service reads, and says what to do when it fails.
+check_database_installed() {
+	[ "$database" = postgres ] || return 0
+	if out=$($SUDO /usr/bin/regulus db check 2>&1); then
+		printf '%s\n' "$out" | sed -n 's/^Database: /  Database:    /p'
+		return 0
+	fi
+	printf '%s\n' "$out" >&2
+	say "" >&2
+	die "the hub is installed but cannot use its PostgreSQL database. Fix the cause above (settings are in $CONFIG_DIR/regulus.env), check with 'sudo regulus db check', then run 'sudo systemctl restart regulus'"
+}
+
 # set_env_value stores KEY=VALUE in the environment file the service reads,
 # replacing an earlier value of KEY. Run it once per key, with $tmp_env set up
 # by write_settings.
@@ -343,16 +658,35 @@ set_env_value() {
 # agent answer is left out when it is the default, so config.yaml stays in
 # charge; the update helper is switched on unless it was declined.
 write_settings() {
-	[ "$builtin_agent" = default ] && [ "$self_update" != 1 ] && return 0
+	write_db=0
+	[ "$database" = postgres ] && [ "$db_keep" != 1 ] && write_db=1
+	[ "$builtin_agent" = default ] && [ "$self_update" != 1 ] && [ "$write_db" = 0 ] && return 0
 	$SUDO mkdir -p "$CONFIG_DIR"
 	tmp_env=$(mktemp)
 	if [ -f "$CONFIG_DIR/regulus.env" ]; then
-		cat "$CONFIG_DIR/regulus.env" >"$tmp_env"
+		$SUDO cat "$CONFIG_DIR/regulus.env" >"$tmp_env"
 	fi
 	[ "$builtin_agent" = default ] || set_env_value REGULUS_BUILTIN_AGENT "$builtin_agent"
 	[ "$self_update" != 1 ] || set_env_value REGULUS_UPDATES_APPLY true
+	[ "$write_db" = 0 ] || write_database_settings
 	$SUDO install -m 0640 "$tmp_env" "$CONFIG_DIR/regulus.env"
 	rm -f "$tmp_env" "$tmp_env.new"
+}
+
+# write_database_settings stores the PostgreSQL choice in $tmp_env. The
+# password is quoted and goes into this file only, never into config.yaml.
+write_database_settings() {
+	quiet_trace
+	set_env_value REGULUS_DATABASE_TYPE postgres
+	[ -z "$db_host" ] || set_env_value REGULUS_DATABASE_HOST "$db_host"
+	[ -z "$db_port" ] || set_env_value REGULUS_DATABASE_PORT "$db_port"
+	[ -z "$db_name" ] || set_env_value REGULUS_DATABASE_NAME "$db_name"
+	[ -z "$db_user" ] || set_env_value REGULUS_DATABASE_USER "$db_user"
+	[ -z "$db_sslmode" ] || set_env_value REGULUS_DATABASE_SSLMODE "$db_sslmode"
+	[ -z "$db_sslrootcert" ] || set_env_value REGULUS_DATABASE_SSLROOTCERT "$db_sslrootcert"
+	if [ -n "$db_password" ]; then
+		set_env_value REGULUS_DATABASE_PASSWORD "$(quote_env_value "$db_password")"
+	fi
 }
 
 # enable_self_update starts watching for the update requests of the hub. The
@@ -420,6 +754,16 @@ main() {
 	hub=
 	token=
 	ca_fingerprint=
+	database=
+	db_host=
+	db_port=
+	db_name=
+	db_user=
+	db_sslmode=
+	db_sslrootcert=
+	db_password_file=
+	db_password=
+	db_keep=0
 	assume_yes=0
 	self_update=1
 	require_signature=${REGULUS_REQUIRE_SIGNATURE:-0}
@@ -459,6 +803,46 @@ main() {
 				;;
 			--beta) channel=beta ;;
 			--alpha) channel=alpha ;;
+			--database)
+				[ $# -ge 2 ] || die "--database needs a value"
+				database=$2
+				shift
+				;;
+			--db-host)
+				[ $# -ge 2 ] || die "--db-host needs a value"
+				db_host=$2
+				shift
+				;;
+			--db-port)
+				[ $# -ge 2 ] || die "--db-port needs a value"
+				db_port=$2
+				shift
+				;;
+			--db-name)
+				[ $# -ge 2 ] || die "--db-name needs a value"
+				db_name=$2
+				shift
+				;;
+			--db-user)
+				[ $# -ge 2 ] || die "--db-user needs a value"
+				db_user=$2
+				shift
+				;;
+			--db-sslmode)
+				[ $# -ge 2 ] || die "--db-sslmode needs a value"
+				db_sslmode=$2
+				shift
+				;;
+			--db-sslrootcert)
+				[ $# -ge 2 ] || die "--db-sslrootcert needs a value"
+				db_sslrootcert=$2
+				shift
+				;;
+			--database-password-file)
+				[ $# -ge 2 ] || die "--database-password-file needs a value"
+				db_password_file=$2
+				shift
+				;;
 			--builtin-agent) builtin_agent=true ;;
 			--no-builtin-agent) builtin_agent=false ;;
 			--no-self-update) self_update=0 ;;
@@ -486,6 +870,8 @@ main() {
 		*) die "invalid --channel $channel: use stable, beta or alpha" ;;
 	esac
 
+	check_database_args
+
 	case "$role" in
 		hub)
 			[ -z "$hub$token$ca_fingerprint" ] || die "--hub, --token and --ca-fingerprint are for --role agent"
@@ -506,6 +892,10 @@ main() {
 		SUDO=sudo
 	fi
 
+	if [ "$role" = hub ]; then
+		prepare_database
+	fi
+
 	if [ -z "$version" ]; then
 		version=$(latest_version)
 	fi
@@ -524,6 +914,7 @@ main() {
 
 	if [ "$role" = hub ]; then
 		ask_builtin_agent
+		precheck_database
 		write_settings
 	fi
 	set_role
@@ -541,6 +932,7 @@ main() {
 		report_agent
 	else
 		enable_self_update
+		check_database_installed
 		report
 	fi
 }

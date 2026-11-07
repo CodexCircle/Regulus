@@ -24,6 +24,27 @@ if [ "$role" = agent ]; then
 	install -d -o regulus -g regulus -m 0750 /var/lib/regulus-agent
 fi
 
+# With PostgreSQL, say now whether the database can be used. The installer
+# (install.sh) checks it before it installs anything, but the package can also
+# be installed by apt alone. This never fails the package: a broken
+# configuration state is worse than a hub that waits. The service starts below
+# and, while the database does not answer, the hub exits after a minute and
+# systemd starts it again (Restart=on-failure), until the settings are fixed.
+# The password is read by regulus itself from the environment file; it is never
+# printed.
+if [ "$role" != agent ] && [ -r "$env_file" ] && grep -q '^REGULUS_DATABASE_TYPE=.*postgres' "$env_file"; then
+	if out=$(/usr/bin/regulus db check 2>&1); then
+		echo "Regulus: the PostgreSQL database answers."
+	else
+		{
+			echo "Regulus: the PostgreSQL database cannot be used yet:"
+			echo "$out"
+			echo "Fix the settings in $env_file (or the database), check with: sudo regulus db check"
+			echo "then: sudo systemctl restart regulus"
+		} >&2
+	fi
+fi
+
 fresh=false
 case "$1" in
 	configure)

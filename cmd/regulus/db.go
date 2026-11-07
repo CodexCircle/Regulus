@@ -136,7 +136,12 @@ func readEnvFile(path string) map[string]string {
 			continue
 		}
 		v = strings.TrimSpace(v)
-		if len(v) >= 2 && (v[0] == '"' && v[len(v)-1] == '"' || v[0] == '\'' && v[len(v)-1] == '\'') {
+		switch {
+		case len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"':
+			// The installer writes the password this way: backslash and
+			// double quote escaped, as systemd reads them.
+			v = strings.NewReplacer(`\\`, `\`, `\"`, `"`).Replace(v[1 : len(v)-1])
+		case len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'':
 			v = v[1 : len(v)-1]
 		}
 		out[strings.TrimSpace(k)] = v
