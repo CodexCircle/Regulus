@@ -1,8 +1,8 @@
 # Database
 
-The hub keeps its accounts, sessions, layouts, enrolled agents and update state in one database. Two backends exist: **SQLite**, the default, which needs nothing, and **PostgreSQL**, which you prepare and point the hub at. Choosing between them in the installer is #123; moving existing data from one to the other is #124 (not implemented). Until those ship, set PostgreSQL by hand as described here.
+The hub keeps its accounts, sessions, layouts, enrolled agents and update state in one database. Two backends exist: **SQLite**, the default, which needs nothing, and **PostgreSQL**, which you prepare and point the hub at. The administrator chooses between them in the installer ([Installation](installation.md#choosing-the-database), #123); moving existing data from one to the other is #124 (not implemented). The settings below can also be set by hand.
 
-Both backends run the same code: the tests of the storage, auth, fleet, hub, update and command packages run on SQLite and on PostgreSQL in CI. What has **not** been checked yet is a PostgreSQL install on a real VM (#81).
+Both backends run the same code: the tests of the storage, auth, fleet, hub, update and command packages run on SQLite and on PostgreSQL in CI. What has **not** been checked yet is a PostgreSQL install through the installer on a real VM (#81; the checklist there needs a PostgreSQL item).
 
 ## Settings
 

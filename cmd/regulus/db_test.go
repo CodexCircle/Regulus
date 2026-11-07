@@ -92,11 +92,11 @@ func TestDBCheckReadsThePasswordFromTheEnvFile(t *testing.T) {
 
 func TestReadEnvFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "e.env")
-	if err := os.WriteFile(path, []byte("# c\n\nA=1\nB = \"two words\"\nC='x'\nbad line\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("# c\n\nA=1\nB = \"two words\"\nC='x'\nD=\"p\\\"a\\\\ss $word#1\"\nbad line\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got := readEnvFile(path)
-	if got["A"] != "1" || got["B"] != "two words" || got["C"] != "x" || len(got) != 3 {
+	if got["A"] != "1" || got["B"] != "two words" || got["C"] != "x" || got["D"] != `p"a\ss $word#1` || len(got) != 4 {
 		t.Errorf("got %v", got)
 	}
 	if len(readEnvFile(filepath.Join(t.TempDir(), "missing"))) != 0 {

@@ -95,6 +95,16 @@ Done in #122. Choices, so they are not rediscovered:
 - **Check command:** `regulus db check` (name confirmed here), see [Database](database.md).
 - **CI:** a PostgreSQL service job runs the whole suite with `REGULUS_TEST_DATABASE_URL`; each test gets its own schema (`storagetest`).
 
+## Installer: the database choice (#123)
+
+- **Scope.** The installer **connects to an existing PostgreSQL** that the administrator prepared (`docs/database.md` has the SQL). Installing PostgreSQL locally and creating the role and the database automatically is **not** done; it is a separate follow-up issue unless the maintainer wants it in now (asked in the pull request).
+- **Flags, not a URL.** A single set of options (`--database`, `--db-host/-port/-name/-user/-sslmode/-sslrootcert`) rather than one connection URL read from a file: each option is validated on its own with a specific error, and the values map one to one to the `REGULUS_DATABASE_*` settings. The password has no option: `--database-password-file`, `REGULUS_DATABASE_PASSWORD`, or a prompt without echo.
+- **Where the password lives.** Only `/etc/regulus/regulus.env` (written `0640`, then `root:regulus` by the package's post-install script), in double quotes with `\` and `"` escaped as systemd and `regulus db check` read them. Never `config.yaml`, which the hub refuses to read a password from anyway.
+- **The check runs before the install.** The issue asked for the check after the install; the installer does it *also* before, with the binary extracted from the verified `.deb` (`dpkg-deb -x`) and the settings passed in the environment of that one process, so a wrong password or a missing database stops the run while nothing has changed. The check after the install, with the installed binary, reports and fails the installer with instructions but does not roll back the package.
+- **Post-install script when the database is unreachable.** It prints the result of `regulus db check` and the way to fix it and **never fails the package**. The service is still enabled and started: the hub waits 60 s for the database, exits, and systemd restarts it every few seconds after that (`Restart=on-failure`), so it comes up by itself when the database does.
+- **Upgrades.** An installation is recognised by the installed package, the SQLite file or database settings in the environment file. Without `--database` its backend is kept and nothing is asked or written; naming the other backend stops with a pointer to #124 before anything is downloaded.
+- **Not verified:** the installer has not run on a real VM with PostgreSQL (#81), and not with `apt` upgrading an existing PostgreSQL install. The script is tested with stubs for `dpkg-deb` and the binary, and by hand against a PostgreSQL 16 with SCRAM authentication using the real binary (wrong password stops, right password writes the file; a password with quotes, a backslash and `$` round-trips).
+
 ## Open questions
 
 - Should the other privileged actions use a `sudoers.d` rule or a root helper like the updates? (#60)

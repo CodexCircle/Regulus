@@ -11,6 +11,26 @@ The same in one line is `curl -fsSL …/install.sh | sh`, with options after `sh
 
 The installer asks whether to include the **built-in agent** (so the hub's own server is managed like the others). To answer in advance, or in a script, add options after `sh install.sh` (or `sh -s --` in the one-line form): `--builtin-agent`, `--no-builtin-agent`, `--yes` (no questions), `--channel beta` or `--channel alpha` (latest release of that channel; also `--beta`, `--alpha`), `--version 0.2.0`, `--require-signature` (fail unless the signature can be verified with [cosign](https://docs.sigstore.dev/cosign/)). Without cosign the installer verifies the checksum only and says so. If you prefer not to pipe a script into a shell, download the `.deb` from the [releases](https://github.com/CodexCircle/Regulus/releases), verify it as shown under [Releases](releases.md) and run `sudo apt install ./regulus_*.deb`.
 
+## Choosing the database
+
+The database is chosen **once, at install time**. SQLite is the default and needs nothing. PostgreSQL is a server **you prepare first**; the installer connects to it and does not install PostgreSQL or create the role and the database (see [Database](database.md) for the three SQL statements and the `pg_hba.conf` and firewall notes). Installing and preparing PostgreSQL locally is a possible follow-up, not part of the installer today.
+
+- On a terminal, without `--database`, the installer asks `SQLite or PostgreSQL?`, and for PostgreSQL the host, port, database, user, TLS mode and the password (typed without echo).
+- With `--yes`, or without a terminal (the one-line `curl ... | sh` form), the answer is **SQLite**; nothing new is asked, so existing commands keep working.
+- Non-interactively: `--database postgres --db-host HOST` (the rest defaults to port `5432`, database `regulus`, user `regulus`, `--db-sslmode prefer`; also `--db-port`, `--db-name`, `--db-user`, `--db-sslmode`, `--db-sslrootcert FILE`) and the password from a file or the environment:
+
+```sh
+sh install.sh --yes --database postgres --db-host db.example --db-sslmode verify-full \
+  --db-sslrootcert /etc/ssl/db-ca.pem --database-password-file /root/regulus-db-password
+# or: REGULUS_DATABASE_PASSWORD=... sh install.sh --yes --database postgres --db-host db.example
+```
+
+**The password is never an option**: an option would show in the process list and in the shell history, and this script is usually piped. It is read from the first line of `--database-password-file`, from `REGULUS_DATABASE_PASSWORD`, or typed without echo, and it is written only to `/etc/regulus/regulus.env` (`0640`, `root:regulus`) — never to `config.yaml`, to a log or to the screen; `set -x` is turned off while it is handled.
+
+**The connection is checked before anything is installed.** The installer takes the new binary out of the verified package and runs `regulus db check` with your settings. A wrong password, an unreachable host, a missing database, a missing privilege or a PostgreSQL older than 14 stops the installer with the cause, before any file of the system or `/etc/regulus` was changed. After the install the same check runs again with the installed binary and the saved settings. If the package is installed by `apt` alone, its post-install step prints the result of the check but never fails the package.
+
+**Running the installer again, or upgrading the package, keeps the database.** Without `--database` the choice that is there stays and nothing is asked. `--database` naming the *other* backend stops with an explanation and touches nothing: moving data between SQLite and PostgreSQL is a separate feature (#124). On an existing PostgreSQL installation you may pass `--db-*` options or a new password file to change the connection (for example after rotating the password); only what you give changes.
+
 What the package sets up:
 
 | Path | Purpose |
@@ -19,7 +39,7 @@ What the package sets up:
 | `/usr/lib/systemd/system/regulus.service` | the service, enabled and started at install |
 | `/etc/regulus/config.yaml` | configuration (kept on upgrade) |
 | `/usr/lib/systemd/system/regulus-agent.service` | the agent service, used only on servers installed with `--role agent` |
-| `/etc/regulus/regulus.env` | settings chosen by the installer, such as `REGULUS_BUILTIN_AGENT`; they override `config.yaml` |
+| `/etc/regulus/regulus.env` | settings chosen by the installer, such as `REGULUS_BUILTIN_AGENT` and, with PostgreSQL, `REGULUS_DATABASE_*` including the password (`0640`, `root:regulus`); they override `config.yaml` |
 | `/etc/regulus/agent.yaml`, `/etc/regulus/role` | agent role only: the hub address, and a marker that keeps the package from starting a hub |
 | `/var/lib/regulus` | the database; kept when the package is removed or purged |
 | `/var/lib/regulus-agent` | agent role only: the agent's key and certificates; kept on removal |
