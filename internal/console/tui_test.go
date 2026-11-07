@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -272,9 +273,8 @@ func TestEditingWithEscapeChangesNothing(t *testing.T) {
 func TestTabCyclesThroughChoices(t *testing.T) {
 	path := copyConfig(t)
 	m := newModel(t, path, true, 100, 30)
-	// log.level is the sixth setting.
 	keys := []tea.KeyMsg{rune1('2')}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < slices.Index(config.Keys(), "log.level"); i++ {
 		keys = append(keys, key(tea.KeyDown))
 	}
 	m = sendKey(t, m, append(keys, key(tea.KeyEnter), key(tea.KeyTab))...)
@@ -417,7 +417,7 @@ func TestEnvironmentOverrideIsFlagged(t *testing.T) {
 		return ""
 	}
 	m := New(Options{System: sys, ConfigFile: "testdata/config.yaml", Unicode: true})
-	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 	m = settle(t, next.(Model), next.(Model).collect())
 	m = sendKey(t, m, rune1('2'))
 	view := m.View()

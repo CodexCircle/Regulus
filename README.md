@@ -38,7 +38,7 @@ The words used here (hub, agent, built-in agent, role, channel…) are defined i
 | Dashboard | [React](https://react.dev/) with TypeScript and Vite, embedded in the binary |
 | Communication | gRPC with Protobuf as the contract, mTLS between agent and hub |
 | Plugins | Separate processes talking gRPC with the host, plus JavaScript modules for dashboard widgets |
-| Data | SQLite today; PostgreSQL is planned (#122, #123, #124) |
+| Data | SQLite (default, nothing to set up) or PostgreSQL, chosen by configuration ([Database](docs/database.md)); the installer choice (#123) and moving data between them (#124) are not done yet |
 
 ## Supported platforms
 

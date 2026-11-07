@@ -6,6 +6,7 @@ Requirements: Go 1.26+, Node.js 22+.
 make build            # builds the dashboard, then bin/regulus
 ./bin/regulus hub     # serves the dashboard on :8080
 make test             # go vet, go test -race, dashboard typecheck and tests
+make test-postgres    # the database tests on PostgreSQL too (needs REGULUS_TEST_DATABASE_URL, see the Makefile)
 make lint             # golangci-lint and ESLint
 make smoke            # start bin/regulus and check it end to end (after make build)
 scripts/test-install.sh   # tests of the install script (also part of make test)

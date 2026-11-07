@@ -63,7 +63,11 @@ type Snapshot struct {
 	CAFingerprint string `json:"ca_fingerprint,omitempty"`
 	DataDir       string `json:"data_dir"`
 	DatabaseSize  int64  `json:"database_bytes"`
-	BuiltinAgent  bool   `json:"builtin_agent"`
+	// Database names the backend (never with a password) and DatabaseProblem
+	// is what the running hub reports when it cannot reach PostgreSQL.
+	Database        string `json:"database"`
+	DatabaseProblem string `json:"database_problem,omitempty"`
+	BuiltinAgent    bool   `json:"builtin_agent"`
 	// LogLevel and Format are shown in the header of the logs.
 	LogLevel string `json:"log_level"`
 
@@ -163,6 +167,7 @@ func Collect(ctx context.Context, sys System, configFile, version string) Snapsh
 	snap.Port = portOf(cfg.Listen)
 	snap.AgentListen = cfg.AgentListen
 	snap.DataDir = cfg.DataDir
+	snap.Database = cfg.Storage().Describe()
 	snap.BuiltinAgent = cfg.BuiltinAgent
 	snap.LogLevel = cfg.Log.Level
 	snap.URL = dashboardURL(cfg.Listen)
@@ -190,6 +195,7 @@ func Collect(ctx context.Context, sys System, configFile, version string) Snapsh
 			snap.AgentListen = live.AgentAddr
 		}
 		snap.CAFingerprint = live.CAFingerprint
+		snap.DatabaseProblem = live.DatabaseProblem
 	}
 	snap.Health = healthChecks(snap, cfg, fetchErr)
 	return snap
@@ -235,9 +241,19 @@ func healthChecks(snap Snapshot, cfg config.Config, fetchErr error) []Check {
 		add("Data directory", OK, snap.DataDir+" is writable")
 	}
 
-	if _, err := os.Stat(filepath.Join(snap.DataDir, storage.FileName)); err == nil {
+	switch {
+	case cfg.Storage().IsPostgres():
+		switch {
+		case snap.DatabaseProblem != "":
+			add("Database", Fail, snap.Database+": "+snap.DatabaseProblem)
+		case snap.Running:
+			add("Database", OK, snap.Database+" answers")
+		default:
+			add("Database", Info, snap.Database+" (checked while the hub runs; `regulus db check` tries it now)")
+		}
+	case fileExists(filepath.Join(snap.DataDir, storage.FileName)):
 		add("Database", OK, fmt.Sprintf("%s, %s", storage.FileName, FormatBytes(snap.DatabaseSize)))
-	} else {
+	default:
 		add("Database", Info, "none yet")
 	}
 	return checks
@@ -340,4 +356,9 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm %ds", m, s)
 	}
 	return fmt.Sprintf("%ds", s)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

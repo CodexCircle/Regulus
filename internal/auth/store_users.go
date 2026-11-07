@@ -5,8 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
+
+	"github.com/CodexCircle/Regulus/internal/storage"
 )
 
 // removesAnAdmin is true, in a statement about one row of users, when that
@@ -37,18 +38,15 @@ func (s store) listUsers(ctx context.Context) ([]User, error) {
 }
 
 func (s store) createUser(ctx context.Context, username, hash string, role Role, now time.Time) (User, error) {
-	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)`,
-		username, hash, string(role), now.UTC().Format(timeLayout))
+	var id int64
+	err := s.db.QueryRowContext(ctx,
+		`INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?) RETURNING id`,
+		username, hash, string(role), now.UTC().Format(timeLayout)).Scan(&id)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if storage.IsUniqueViolation(err) {
 			return User{}, ErrUserExists
 		}
 		return User{}, fmt.Errorf("create user: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return User{}, err
 	}
 	return User{ID: id, Username: username, Role: role, CreatedAt: now.UTC()}, nil
 }

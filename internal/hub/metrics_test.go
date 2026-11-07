@@ -187,6 +187,7 @@ func TestBuiltinAgentMetricsAreServed(t *testing.T) {
 func TestConfiguredMetricsIntervalReachesAgents(t *testing.T) {
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
+	useTestDatabase(t, &cfg)
 	cfg.MetricsInterval = 7 * time.Second
 	h, err := New(context.Background(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), fstest.MapFS{})
 	if err != nil {

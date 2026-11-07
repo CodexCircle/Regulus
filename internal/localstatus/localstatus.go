@@ -37,6 +37,10 @@ type Status struct {
 	// empty once the admin exists.
 	SetupToken string  `json:"setup_token,omitempty"`
 	Agents     []Agent `json:"agents"`
+	// Database names the backend (never with a password); DatabaseProblem is
+	// empty while the database answers.
+	Database        string `json:"database,omitempty"`
+	DatabaseProblem string `json:"database_problem,omitempty"`
 }
 
 // Agent is a connected agent.

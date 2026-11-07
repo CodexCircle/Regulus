@@ -12,6 +12,7 @@ import (
 
 	"github.com/CodexCircle/Regulus/internal/auth"
 	"github.com/CodexCircle/Regulus/internal/storage"
+	"github.com/CodexCircle/Regulus/internal/storage/storagetest"
 )
 
 func noEnv(string) string { return "" }
@@ -21,10 +22,7 @@ func hubWithAdmin(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	ctx := context.Background()
-	db, err := storage.Open(ctx, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := storagetest.Open(t, dir)
 	s, err := auth.New(ctx, db, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +39,7 @@ func hubWithAdmin(t *testing.T) string {
 func TestResetAdminPrintsALinkThatWorks(t *testing.T) {
 	dir := hubWithAdmin(t)
 	var out, errOut bytes.Buffer
-	if code := resetAdmin([]string{"--data-dir", dir, "--listen", "0.0.0.0:9000"}, noEnv, &out, &errOut); code != 0 {
+	if code := resetAdmin([]string{"--data-dir", dir, "--listen", "0.0.0.0:9000"}, storagetest.Getenv(t, dir), &out, &errOut); code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
 	}
 	link := strings.TrimSpace(out.String())
@@ -52,10 +50,7 @@ func TestResetAdminPrintsALinkThatWorks(t *testing.T) {
 
 	// The token in the link is accepted by the hub's service.
 	ctx := context.Background()
-	db, err := storage.Open(ctx, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := storagetest.Open(t, dir)
 	defer func() { _ = db.Close() }()
 	s, err := auth.New(ctx, db, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
@@ -67,6 +62,9 @@ func TestResetAdminPrintsALinkThatWorks(t *testing.T) {
 }
 
 func TestResetAdminRefusesToInventADatabase(t *testing.T) {
+	if storagetest.Postgres() {
+		t.Skip("about the SQLite file; PostgreSQL is covered by the checks in storage")
+	}
 	dir := t.TempDir()
 	var out, errOut bytes.Buffer
 	if code := resetAdmin([]string{"--data-dir", dir}, noEnv, &out, &errOut); code == 0 {
@@ -83,7 +81,7 @@ func TestResetAdminRefusesToInventADatabase(t *testing.T) {
 func TestResetAdminRejectsAWrongAccount(t *testing.T) {
 	dir := hubWithAdmin(t)
 	var out, errOut bytes.Buffer
-	if code := resetAdmin([]string{"--data-dir", dir, "--user", "ghost"}, noEnv, &out, &errOut); code == 0 {
+	if code := resetAdmin([]string{"--data-dir", dir, "--user", "ghost"}, storagetest.Getenv(t, dir), &out, &errOut); code == 0 {
 		t.Fatal("an unknown account must fail")
 	}
 	if out.Len() != 0 || !strings.Contains(errOut.String(), "not an admin account") {

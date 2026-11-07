@@ -635,6 +635,9 @@ func (m Model) statusBody() []string {
 		data += mutedStyle.Render("  (" + T.Database + " " + FormatBytes(s.DatabaseSize) + ")")
 	}
 	out = append(out, kv(T.DataDir, data))
+	if strings.HasPrefix(s.Database, "PostgreSQL") {
+		out = append(out, kv(T.Database, s.Database))
+	}
 	out = append(out, kv(T.ConfigFile, orDash(s.ConfigFile, T.None)))
 	if s.Problem != "" {
 		out = append(out, kv("Problem", badStyle.Render(s.Problem)))
@@ -669,10 +672,10 @@ func (m Model) statusBody() []string {
 func (m Model) settingsBody(w int) []string {
 	entries := m.snap.Settings
 	hdr := T.SettingHeader
-	out := []string{" " + mutedStyle.Render(fmt.Sprintf("  %-18s %-26s %s", hdr[0], hdr[1], hdr[2]))}
+	out := []string{" " + mutedStyle.Render(fmt.Sprintf("  %-22s %-26s %s", hdr[0], hdr[1], hdr[2]))}
 	for i, e := range entries {
 		marker := "  "
-		line := fmt.Sprintf("%-18s %-26s %s", e.Key, ansi.Truncate(displayValue(e.Value), 26, "…"), e.Origin)
+		line := fmt.Sprintf("%-22s %-26s %s", e.Key, ansi.Truncate(displayValue(e.Value), 26, "…"), e.Origin)
 		if i == m.sel {
 			marker = m.sym("▸ ", "> ")
 			line = selectStyle.Render(line)

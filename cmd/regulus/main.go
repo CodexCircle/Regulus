@@ -40,6 +40,8 @@ func main() {
 		os.Exit(runConfig(os.Args[2:]))
 	case "hub":
 		os.Exit(runHub(os.Args[2:]))
+	case "db":
+		os.Exit(runDB(os.Args[2:]))
 	case "agent":
 		os.Exit(runAgent(os.Args[2:]))
 	case "update-apply":
@@ -66,6 +68,7 @@ Commands:
   status   print what the hub is doing; --json or --plain for scripts
   config   list, get and set the hub's settings (list|get|set|path)
   hub      run the hub (serves the dashboard); see 'regulus hub -h' for flags
+  db       check the database settings (db check)
   hub reset-admin
            regain access when the admin cannot log in; see 'regulus hub reset-admin -h'
   agent    run a remote agent that connects to a hub; see 'regulus agent -h'

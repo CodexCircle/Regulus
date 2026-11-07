@@ -73,6 +73,7 @@ func newUpdateHub(t *testing.T, version string, src update.Source, mutate ...fun
 	t.Helper()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
+	useTestDatabase(t, &cfg)
 	cfg.BuiltinAgent = false
 	for _, m := range mutate {
 		m(&cfg)
@@ -244,6 +245,7 @@ func TestHubRefusesAReleaseWithoutAValidSignature(t *testing.T) {
 	rs := newReleaseServer(t, "0.2.0")
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
+	useTestDatabase(t, &cfg)
 	cfg.BuiltinAgent = false
 	h, err := New(t.Context(), cfg, quiet(), fstest.MapFS{}, WithVersion("0.1.0"), WithUpdateSource(rs.Source))
 	if err != nil {

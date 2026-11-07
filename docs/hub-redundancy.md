@@ -76,7 +76,7 @@ sequenceDiagram
 
 Maintainer decisions (#103): everything the hub needs to act as the hub is replicated; Regulus-internal secrets and tokens are generated again for the redundant hub and tested periodically (copied only if regeneration is impossible); externally issued tokens are copied; **containers are replicated as definitions, never as data**.
 
-Open in #106: the inventory table (copied, regenerated, never copied), RPO and RTO, downtime of a planned switch, behaviour when the two hubs run different release series, encryption, verification of lag and consistency, initial sync and resync, resource limits. The choice between mechanisms depends on the database in use; **today only SQLite is implemented** (PostgreSQL is planned: #122 to #124).
+Open in #106: the inventory table (copied, regenerated, never copied), RPO and RTO, downtime of a planned switch, behaviour when the two hubs run different release series, encryption, verification of lag and consistency, initial sync and resync, resource limits. The choice between mechanisms depends on the database in use; **SQLite is the default and PostgreSQL can be selected by configuration** (#122); moving data between them is #124, not done. Replication has been checked on neither.
 
 | Item | Copied / regenerated / never copied | Source |
 |---|---|---|

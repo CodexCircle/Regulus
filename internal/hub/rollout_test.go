@@ -32,6 +32,7 @@ func startRolloutHub(t *testing.T, mutate ...func(*config.Config)) (*Hub, releas
 	cfg.BuiltinAgent = false
 	cfg.AgentListen = "127.0.0.1:0"
 	cfg.DataDir = t.TempDir()
+	useTestDatabase(t, &cfg)
 	for _, m := range mutate {
 		m(&cfg)
 	}

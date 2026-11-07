@@ -24,6 +24,11 @@ func (h *Hub) localStatus(addr string) localstatus.Status {
 		BuiltinAgent:  h.cfg.BuiltinAgent,
 		SetupToken:    h.auth.SetupToken(),
 		Agents:        []localstatus.Agent{},
+		Database:      h.cfg.Storage().Describe(),
+	}
+	if h.cfg.Storage().IsPostgres() {
+		h.checkDatabase(context.Background())
+		st.DatabaseProblem = h.dbState.get()
 	}
 	now := time.Now()
 	for _, a := range h.Agents() {

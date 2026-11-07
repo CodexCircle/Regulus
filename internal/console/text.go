@@ -68,6 +68,9 @@ func writeStatusText(w io.Writer, snap Snapshot, now time.Time) error {
 		data += " (" + T.Database + " " + FormatBytes(snap.DatabaseSize) + ")"
 	}
 	row(T.DataDir, data)
+	if strings.HasPrefix(snap.Database, "PostgreSQL") {
+		row(T.Database, snap.Database)
+	}
 	row(T.ConfigFile, orDash(snap.ConfigFile, T.None))
 	if snap.Problem != "" {
 		row("Problem", snap.Problem)

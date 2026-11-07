@@ -45,7 +45,9 @@ type Hub struct {
 	cfg config.Config
 	log *slog.Logger
 	db  *sql.DB
-	ui  fs.FS
+
+	dbState dbHealth
+	ui      fs.FS
 
 	version   string
 	startedAt time.Time
@@ -94,11 +96,11 @@ func WithAgentIntervals(heartbeat, metrics time.Duration) Option {
 // New opens the database (applying migrations) and returns a Hub that serves
 // the dashboard from ui. Call Close when done.
 func New(ctx context.Context, cfg config.Config, log *slog.Logger, ui fs.FS, opts ...Option) (*Hub, error) {
-	db, err := storage.Open(ctx, cfg.DataDir)
+	db, err := storage.Open(ctx, cfg.Storage())
 	if err != nil {
 		return nil, fmt.Errorf("storage: %w", err)
 	}
-	log.Info("database ready", "dir", cfg.DataDir)
+	log.Info("database ready", "backend", cfg.Storage().Describe())
 
 	secret, err := auth.LoadOrCreateSecret(cfg.DataDir)
 	if err != nil {
@@ -245,6 +247,7 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 	}
 
 	defer h.serveLocal(ln.Addr().String())()
+	h.watchDatabase(ctx)
 
 	h.rollout.mu.Lock()
 	h.rollout.base = ctx

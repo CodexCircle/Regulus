@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CodexCircle/Regulus/internal/storage"
+	"github.com/CodexCircle/Regulus/internal/storage/storagetest"
 )
 
 type fakeSource struct {
@@ -70,10 +70,7 @@ type rig struct {
 // server that offers `offered`.
 func newRig(t *testing.T, current, offered string, mutate ...func(*Options)) *rig {
 	t.Helper()
-	db, err := storage.Open(t.Context(), t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := storagetest.Open(t, t.TempDir())
 	t.Cleanup(func() { _ = db.Close() })
 
 	r := &rig{src: &fakeSource{}, audit: &fakeAudit{}}

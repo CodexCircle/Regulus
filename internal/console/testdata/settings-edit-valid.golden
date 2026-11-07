@@ -2,29 +2,29 @@ Regulus v0.3.0  Hub ● running
 
  1 Status   2 Settings   3 Logs   4 Health   5 Actions
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-   Setting            Value                      Source
- ▸ listen             :8080                      file
-   agent_listen       (empty)                    default
-   data_dir           testdata/no-such-dir       file
-   builtin_agent      true                       file
-   metrics_interval   10s                        file
-   log.level          info                       file
-   log.format         text                       file
-   updates.check      true                       default
-   updates.apply      false                      default
-   console.tui        true                       default
+   Setting                Value                      Source
+ ▸ listen                 :8080                      file
+   agent_listen           (empty)                    default
+   data_dir               testdata/no-such-dir       file
+   database.type          sqlite                     default
+   database.host          (empty)                    default
+   database.port          5432                       default
+   database.name          regulus                    default
+   database.user          regulus                    default
+   database.password      (empty)                    default
+   database.sslmode       prefer                     default
+   database.sslrootcert   (empty)                    default
+   database.schema        (empty)                    default
+   builtin_agent          true                       file
+   metrics_interval       10s                        file
+   log.level              info                       file
+   log.format             text                       file
+   updates.check          true                       default
+   updates.apply          false                      default
+   console.tui            true                       default
 
  listen  default: :8080
  Address of the dashboard and API: host:port, or only the port (8080)
- The hub reads it at start: restart it to apply.
-
- Editing listen
- > 9090
- ✓ will be saved as :9090
-
-
-
-
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 enter save  esc cancel  tab next choice

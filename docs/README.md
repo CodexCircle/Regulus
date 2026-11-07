@@ -6,6 +6,7 @@ Find what you need by what you want to do. For what Regulus is, see the [README]
 |---|---|
 | install Regulus on a server | [Installation](installation.md) |
 | configure the hub | [Configuration](configuration.md) |
+| choose and prepare the database (SQLite or PostgreSQL) | [Database](database.md) |
 | use the console or the command line | [Console and command line](console-and-cli.md) |
 | manage users, roles and two-factor authentication, or recover lost credentials | [Authentication](authentication.md) |
 | add other servers (remote agents) | [Remote agents](remote-agents.md), and **Servers → Add a server** in the dashboard |

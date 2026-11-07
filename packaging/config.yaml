@@ -15,6 +15,21 @@ listen: ":8080"
 # Where the hub keeps its database. Created by the service unit.
 data_dir: /var/lib/regulus
 
+# Where the hub keeps its data. The default is a SQLite file in data_dir and
+# needs nothing. To use a PostgreSQL server you prepared (the installer asks;
+# see docs/installation.md), set the connection here. The PASSWORD IS NOT SET
+# HERE: put REGULUS_DATABASE_PASSWORD=... in /etc/regulus/regulus.env (mode
+# 0640, root:regulus). The hub refuses a password in this file.
+# database:
+#   type: postgres  # sqlite (default) or postgres
+#   host: db.example
+#   port: 5432
+#   name: regulus
+#   user: regulus
+#   sslmode: prefer  # disable, allow, prefer, require, verify-ca, verify-full
+#   sslrootcert: ""  # CA file, for verify-ca and verify-full
+#   schema: ""       # empty means public
+
 # Run an agent inside the hub, so this server is managed like the others.
 builtin_agent: true
 

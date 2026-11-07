@@ -136,7 +136,15 @@ Agents do not use any of this: they authenticate with client certificates (secti
 
 ## 5. Data
 
-**Which databases.** Only **SQLite** is implemented: `modernc.org/sqlite`, a pure-Go driver, in `internal/storage` (`storage.go`; `go.mod` has no other driver). The README used to say "PostgreSQL optional"; that was not true. The maintainer decided that PostgreSQL will be supported, chosen in the installer (#122, #123), with moving data between the two from the WebUI and the TUI later (#124). **Until #122 ships, PostgreSQL is planned, not available.**
+**Which databases.** **SQLite** (default; `modernc.org/sqlite`, pure Go) and **PostgreSQL** (`pgx`, pure Go, so the binary stays static), selected by `database.type` (#122). `internal/storage` is the one place that knows the dialect: it opens the right backend, wraps the PostgreSQL connection so the `?` placeholders used by every query become `$1, $2, ...` (`storage.Rebind`), keeps one migration directory per backend, and exposes `Check` (used by `regulus db check`) and `IsUniqueViolation`. The other packages receive a `*sql.DB` and do not care. The installer choice is #123 and moving data between backends is #124 (not done). Details, settings and prerequisites: [Database](database.md).
+
+```mermaid
+flowchart LR
+    Hub[hub, auth, fleet, update] -->|"*sql.DB, ? placeholders"| S[internal/storage]
+    S -->|"database.type sqlite"| L[("regulus.db")]
+    S -->|"database.type postgres, Rebind"| P[("PostgreSQL")]
+    K["secret.key and pki in data_dir"] -.stays on the hub's disk.- Hub
+```
 
 **Migrations.** `internal/storage/migrations/0001` to `0009`, embedded in the binary, applied in order at startup and recorded:
 
@@ -273,7 +281,7 @@ There is no TLS on the dashboard port; put a reverse proxy in front outside a tr
 - **Plugins**: designed only (`docs/plugins.md`; #19 to #23). No plugin runs.
 - **Containers** and workload management: not started (#113).
 - **Hub redundancy, promotion and failover**: designed in the issues of epic #103, not implemented. In particular **the hub address list and the term (epoch) concept do not exist anywhere in the code** (checked with `grep` on 2026-10-29), so nothing on this page about connections to "the hub" assumes more than one.
-- **PostgreSQL**: planned (#122 to #124).
+- **Moving data between SQLite and PostgreSQL** (#124) and the **installer choice** of the database (#123); PostgreSQL itself works through configuration (#122) but has not been installed on a real VM yet (#81).
 - **Agent certificate renewal**: not implemented (see section 3).
 - **Server inventory** (#62) and **AI Support** (#63): designs only.
 
@@ -288,7 +296,7 @@ For a reading map of the biggest files, see [code-map.md](code-map.md).
 | `internal/console` | interactive console (Bubble Tea) and the plain-text/JSON status and settings output |
 | `internal/localstatus` | the Unix socket where a running hub reports to local tools |
 | `internal/logging` | structured logging |
-| `internal/storage` | SQLite database and migrations |
+| `internal/storage` | SQLite and PostgreSQL backends, migrations, `Check`; `storagetest` opens a test database on either |
 | `internal/auth` | local accounts, roles, sessions, two-factor, reset, and the HTTP login endpoints |
 | `internal/pki` | the hub's certificate authority, agent keys, fingerprint pinning |
 | `internal/fleet` | enrollment tokens, the registry of remote agents, revocation |
