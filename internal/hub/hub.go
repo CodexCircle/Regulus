@@ -233,7 +233,13 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 	go func() { _ = grpcSrv.Serve(h.transport.Listener()) }()
 	defer grpcSrv.Stop() // agent streams are long-lived, so a graceful stop would wait forever
 
+	// A context cancelled while the hub is still starting (slower with
+	// PostgreSQL, where startup queries take a network round trip) is a
+	// request to stop, not a failure.
 	if err := h.startAgentListener(ctx); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
 		return err
 	}
 	defer h.stopAgentListener()
@@ -241,6 +247,9 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 	if h.cfg.BuiltinAgent {
 		stopAgent, err := h.startBuiltinAgent(ctx)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			return err
 		}
 		defer stopAgent()
