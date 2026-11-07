@@ -13,17 +13,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CodexCircle/Regulus/internal/storage"
+	"github.com/CodexCircle/Regulus/internal/storage/storagetest"
 )
 
 const goodPassword = "correct horse battery"
 
 func newService(t *testing.T) *Service {
 	t.Helper()
-	db, err := storage.Open(context.Background(), t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := storagetest.Open(t, t.TempDir())
 	t.Cleanup(func() { _ = db.Close() })
 	s, err := New(context.Background(), db, slog.New(slog.NewTextHandler(io.Discard, nil)), WithSecret(testSecret))
 	if err != nil {
@@ -110,10 +107,7 @@ func TestSetupCreatesTheFirstAdminOnlyOnce(t *testing.T) {
 func TestSetupSurvivesRestartOnlyWhileNoUserExists(t *testing.T) {
 	dir := t.TempDir()
 	open := func() *Service {
-		db, err := storage.Open(context.Background(), dir)
-		if err != nil {
-			t.Fatal(err)
-		}
+		db := storagetest.Open(t, dir)
 		t.Cleanup(func() { _ = db.Close() })
 		s, err := New(context.Background(), db, slog.New(slog.NewTextHandler(io.Discard, nil)))
 		if err != nil {

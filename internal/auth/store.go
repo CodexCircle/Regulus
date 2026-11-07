@@ -61,19 +61,17 @@ func (s store) countUsers(ctx context.Context) (int, error) {
 // createFirstAdmin inserts the admin only if there is no user yet, in a single
 // statement, so two concurrent setups cannot both succeed.
 func (s store) createFirstAdmin(ctx context.Context, username, hash string, now time.Time) (User, error) {
-	res, err := s.db.ExecContext(ctx,
+	var id int64
+	err := s.db.QueryRowContext(ctx,
 		`INSERT INTO users (username, password_hash, role, created_at)
-		 SELECT ?, ?, 'admin', ? WHERE NOT EXISTS (SELECT 1 FROM users)`,
-		username, hash, now.UTC().Format(timeLayout))
-	if err != nil {
-		return User{}, fmt.Errorf("create admin: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
+		 SELECT CAST(? AS TEXT), CAST(? AS TEXT), 'admin', CAST(? AS TEXT) WHERE NOT EXISTS (SELECT 1 FROM users)
+		 RETURNING id`,
+		username, hash, now.UTC().Format(timeLayout)).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrSetupDone
 	}
-	id, err := res.LastInsertId()
 	if err != nil {
-		return User{}, err
+		return User{}, fmt.Errorf("create admin: %w", err)
 	}
 	return User{ID: id, Username: username, Role: RoleAdmin, CreatedAt: now.UTC()}, nil
 }

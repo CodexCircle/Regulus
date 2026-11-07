@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/CodexCircle/Regulus/internal/storage"
 )
 
 // Config is the complete hub configuration.
@@ -33,9 +35,45 @@ type Config struct {
 	BuiltinAgent bool `yaml:"builtin_agent"`
 	// MetricsInterval is how often agents report their metrics to the hub.
 	MetricsInterval time.Duration `yaml:"metrics_interval"`
+	Database        Database      `yaml:"database"`
 	Log             Log           `yaml:"log"`
 	Console         Console       `yaml:"console"`
 	Updates         Updates       `yaml:"updates"`
+}
+
+// Database says where the hub keeps its data: a SQLite file in data_dir (the
+// default) or a PostgreSQL server the administrator prepared. The password is
+// not part of the YAML file on purpose: it is read only from the environment
+// (REGULUS_DATABASE_PASSWORD, in /etc/regulus/regulus.env, readable by root and
+// the regulus group only), so `regulus config`, the console, the dashboard and
+// the configuration file never hold it.
+type Database struct {
+	// Type is sqlite or postgres.
+	Type string `yaml:"type"`
+	// Host, Port, Name and User say how to reach PostgreSQL.
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
+	Name string `yaml:"name"`
+	User string `yaml:"user"`
+	// SSLMode is the libpq sslmode: disable, allow, prefer, require, verify-ca
+	// or verify-full.
+	SSLMode string `yaml:"sslmode"`
+	// SSLRootCert is the path of the CA certificate that signed the server's.
+	SSLRootCert string `yaml:"sslrootcert"`
+	// Schema is the PostgreSQL schema that holds the tables; empty is public.
+	Schema string `yaml:"schema"`
+	// Password comes from the environment only.
+	Password string `yaml:"-"`
+}
+
+// Storage returns the settings in the form the storage package opens.
+func (c Config) Storage() storage.Config {
+	return storage.Config{
+		Type: c.Database.Type, DataDir: c.DataDir,
+		Host: c.Database.Host, Port: c.Database.Port, Name: c.Database.Name, User: c.Database.User,
+		Password: c.Database.Password, SSLMode: c.Database.SSLMode, SSLRootCert: c.Database.SSLRootCert,
+		Schema: c.Database.Schema,
+	}
 }
 
 // Updates configures how the hub looks for new releases. What happens when one
@@ -76,6 +114,7 @@ func Default() Config {
 		DataDir:         "data",
 		BuiltinAgent:    true,
 		MetricsInterval: 10 * time.Second,
+		Database:        Database{Type: storage.TypeSQLite, Port: 5432, Name: "regulus", User: "regulus", SSLMode: "prefer"},
 		Log:             Log{Level: "info", Format: "text"},
 		Console:         Console{TUI: true},
 		Updates:         Updates{Check: true},
@@ -92,6 +131,9 @@ func (c Config) Validate() error {
 	}
 	if c.MetricsInterval < MinMetricsInterval {
 		return fmt.Errorf("metrics_interval %v is too short (minimum %v)", c.MetricsInterval, MinMetricsInterval)
+	}
+	if err := c.Storage().Validate(); err != nil {
+		return err
 	}
 	switch c.Log.Level {
 	case "debug", "info", "warn", "error":
@@ -177,6 +219,21 @@ func LoadWith(name string, args []string, getenv func(string) string, output io.
 		}
 		cfg.Updates.Apply = b
 	}
+	setIfNotEmpty(&cfg.Database.Type, strings.ToLower(getenv("REGULUS_DATABASE_TYPE")))
+	setIfNotEmpty(&cfg.Database.Host, getenv("REGULUS_DATABASE_HOST"))
+	if v := getenv("REGULUS_DATABASE_PORT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid configuration: REGULUS_DATABASE_PORT %q is not a number", v)
+		}
+		cfg.Database.Port = n
+	}
+	setIfNotEmpty(&cfg.Database.Name, getenv("REGULUS_DATABASE_NAME"))
+	setIfNotEmpty(&cfg.Database.User, getenv("REGULUS_DATABASE_USER"))
+	setIfNotEmpty(&cfg.Database.SSLMode, strings.ToLower(getenv("REGULUS_DATABASE_SSLMODE")))
+	setIfNotEmpty(&cfg.Database.SSLRootCert, getenv("REGULUS_DATABASE_SSLROOTCERT"))
+	setIfNotEmpty(&cfg.Database.Schema, getenv("REGULUS_DATABASE_SCHEMA"))
+	cfg.Database.Password = getenv("REGULUS_DATABASE_PASSWORD")
 	setIfNotEmpty(&cfg.Log.Level, getenv("REGULUS_LOG_LEVEL"))
 	setIfNotEmpty(&cfg.Log.Format, getenv("REGULUS_LOG_FORMAT"))
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,8 +75,8 @@ func TestEveryKeyHasAGetterAndANormalizer(t *testing.T) {
 			t.Errorf("%s has no getter", s.Key)
 			continue
 		}
-		if s.Key == "agent_listen" {
-			continue // empty by default
+		if s.Key == "agent_listen" || s.Secret {
+			continue // empty by default; a secret is never set through Normalize
 		}
 		if got, err := Normalize(s.Key, v); err != nil || got != v {
 			t.Errorf("the default of %s (%q) does not survive Normalize: %q, %v", s.Key, v, got, err)
@@ -119,7 +120,7 @@ func TestSetFileKeepsCommentsAndOtherLines(t *testing.T) {
 	}
 	for _, e := range entries {
 		wantOrigin := OriginFile
-		if e.Key == "agent_listen" || e.Key == "console.tui" {
+		if e.Key == "agent_listen" || e.Key == "console.tui" || strings.HasPrefix(e.Key, "database.") {
 			wantOrigin = OriginDefault
 		}
 		if e.Origin != wantOrigin {
@@ -234,5 +235,94 @@ func TestFindFile(t *testing.T) {
 	}
 	if got := FindFile("", func(string) string { return "/y.yaml" }); got != "/y.yaml" {
 		t.Errorf("env = %q", got)
+	}
+}
+
+func TestDatabasePasswordIsNeverShownOrStored(t *testing.T) {
+	const secret = "s3cret-pw"
+	env := map[string]string{"REGULUS_DATABASE_PASSWORD": secret, "REGULUS_DATABASE_TYPE": "postgres", "REGULUS_DATABASE_HOST": "db.example"}
+	getenv := func(k string) string { return env[k] }
+
+	cfg, entries, err := Resolve("", getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Database.Password != secret || cfg.Database.Host != "db.example" {
+		t.Fatalf("environment not read: %+v", cfg.Database)
+	}
+	found := false
+	for _, e := range entries {
+		if strings.Contains(e.Value, secret) {
+			t.Errorf("%s shows the password: %q", e.Key, e.Value)
+		}
+		if e.Key == "database.password" {
+			found = true
+			if e.Value != Masked || e.Origin != OriginEnv || !e.Secret {
+				t.Errorf("database.password entry = %+v", e)
+			}
+		}
+	}
+	if !found {
+		t.Error("database.password is not in the list")
+	}
+	if v, _ := cfg.Get("database.password"); v != Masked {
+		t.Errorf("Get = %q", v)
+	}
+	if v, _ := Default().Get("database.password"); v != "" {
+		t.Errorf("an unset password shows %q", v)
+	}
+
+	// Nothing writes it to the file, and the file cannot hold it.
+	path := copyPackaged(t)
+	if _, err := SetFile(path, "database.password", secret); err == nil || strings.Contains(err.Error(), secret) {
+		t.Errorf("SetFile accepted the password or echoed it: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("database:\n  password: x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load([]string{"--config", path}, noEnv, io.Discard); err == nil {
+		t.Error("a password in the YAML file was accepted")
+	}
+	// The storage description used in logs has no password either.
+	if d := cfg.Storage().Describe(); strings.Contains(d, secret) {
+		t.Errorf("Describe = %q", d)
+	}
+}
+
+func TestDatabaseSettings(t *testing.T) {
+	path := copyPackaged(t)
+	// The file is checked as a whole after each edit, so the type comes last.
+	for _, kv := range [][2]string{
+		{"database.host", "db.example"}, {"database.port", "5433"},
+		{"database.name", "hub"}, {"database.user", "hubuser"}, {"database.sslmode", "verify-full"},
+		{"database.sslrootcert", "/etc/ssl/ca.pem"}, {"database.schema", "regulus"}, {"database.type", "postgres"},
+	} {
+		if _, err := SetFile(path, kv[0], kv[1]); err != nil {
+			t.Fatalf("%s: %v", kv[0], err)
+		}
+	}
+	cfg, _, err := Resolve(path, noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Database{Type: "postgres", Host: "db.example", Port: 5433, Name: "hub", User: "hubuser", SSLMode: "verify-full", SSLRootCert: "/etc/ssl/ca.pem", Schema: "regulus"}
+	if cfg.Database != want {
+		t.Errorf("database = %+v, want %+v", cfg.Database, want)
+	}
+
+	for _, tc := range []struct{ key, in string }{
+		{"database.type", "mysql"}, {"database.port", "0"}, {"database.port", "x"},
+		{"database.sslmode", "maybe"}, {"database.schema", "1bad"}, {"database.name", ""},
+	} {
+		if _, err := Normalize(tc.key, tc.in); err == nil {
+			t.Errorf("Normalize(%s, %q) accepted", tc.key, tc.in)
+		}
+	}
+
+	// PostgreSQL without a host is refused at load time.
+	c := Default()
+	c.Database.Type = "postgres"
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "database.host") {
+		t.Errorf("Validate = %v", err)
 	}
 }

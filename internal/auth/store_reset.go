@@ -15,7 +15,9 @@ func (s store) putReset(ctx context.Context, userID int64, tokenHash string, now
 		return err
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO password_resets (token_hash, user_id, created_at, expires_at, created_by) VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO password_resets (token_hash, user_id, created_at, expires_at, created_by) VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT (user_id) DO UPDATE SET token_hash = excluded.token_hash, created_at = excluded.created_at,
+		   expires_at = excluded.expires_at, created_by = excluded.created_by`,
 		tokenHash, userID, at, expires.UTC().Format(timeLayout), by)
 	return err
 }

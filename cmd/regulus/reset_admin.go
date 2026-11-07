@@ -80,11 +80,19 @@ Flags:
 func recoverAdmin(ctx context.Context, cfg config.Config, user string) (auth.Recovery, string, error) {
 	// Do not create an empty database where there is none: that would be a
 	// wrong data directory, not a recovery.
-	dbFile := filepath.Join(cfg.DataDir, storage.FileName)
-	if _, err := os.Stat(dbFile); err != nil {
+	sc := cfg.Storage()
+	if sc.IsPostgres() {
+		rep, err := storage.Check(ctx, sc)
+		if err != nil {
+			return auth.Recovery{}, "", err
+		}
+		if rep.Schema == 0 {
+			return auth.Recovery{}, "", fmt.Errorf("no hub data in %s: check the database settings", rep.Where)
+		}
+	} else if dbFile := filepath.Join(cfg.DataDir, storage.FileName); !fileExists(dbFile) {
 		return auth.Recovery{}, "", fmt.Errorf("no hub database at %s: check --data-dir (or data_dir in the configuration)", dbFile)
 	}
-	db, err := storage.Open(ctx, cfg.DataDir)
+	db, err := storage.Open(ctx, sc)
 	if err != nil {
 		return auth.Recovery{}, "", err
 	}
@@ -111,4 +119,9 @@ func dashboardURL(listen string) string {
 		host = "localhost"
 	}
 	return "http://" + net.JoinHostPort(host, port)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

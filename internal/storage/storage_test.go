@@ -11,7 +11,7 @@ import (
 
 func TestOpenCreatesAndMigrates(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested", "data")
-	db, err := Open(context.Background(), dir)
+	db, err := OpenSQLite(context.Background(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestOpenIsIdempotentAndKeepsData(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
 
-	db, err := Open(ctx, dir)
+	db, err := OpenSQLite(ctx, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestOpenIsIdempotentAndKeepsData(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db, err = Open(ctx, dir)
+	db, err = OpenSQLite(ctx, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ type loaded struct{ count int }
 
 func mustLoad(t *testing.T) loaded {
 	t.Helper()
-	list, err := loadMigrations(migrationFiles)
+	list, err := loadMigrations(migrationFiles, dialects[TypeSQLite].dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func mustLoad(t *testing.T) loaded {
 func TestRefusesNewerDatabase(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
-	db, err := Open(ctx, dir)
+	db, err := OpenSQLite(ctx, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestRefusesNewerDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := Open(ctx, dir); err == nil || !strings.Contains(err.Error(), "newer version") {
+	if _, err := OpenSQLite(ctx, dir); err == nil || !strings.Contains(err.Error(), "newer version") {
 		t.Fatalf("error = %v, want a 'newer version' error", err)
 	}
 }
@@ -96,7 +96,7 @@ func TestApplyOrderAndRollback(t *testing.T) {
 	db := memoryDB(t)
 	ctx := context.Background()
 
-	err := apply(ctx, db, []migration{
+	err := apply(ctx, db, dialects[TypeSQLite], []migration{
 		{version: 1, name: "a", sql: `CREATE TABLE a (x INTEGER)`},
 		{version: 2, name: "broken", sql: `CREATE TABLE b (x INTEGER); THIS IS NOT SQL`},
 		{version: 3, name: "c", sql: `CREATE TABLE c (x INTEGER)`},
@@ -122,7 +122,7 @@ func TestLoadMigrationsValidatesNames(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			fsys := fstest.MapFS{file: {Data: []byte("SELECT 1")}}
-			if _, err := loadMigrations(fsys); err == nil {
+			if _, err := loadMigrations(fsys, "migrations"); err == nil {
 				t.Fatal("expected an error")
 			}
 		})
@@ -133,7 +133,7 @@ func TestLoadMigrationsValidatesNames(t *testing.T) {
 			"migrations/0001_a.sql": {Data: []byte("SELECT 1")},
 			"migrations/0001_b.sql": {Data: []byte("SELECT 1")},
 		}
-		if _, err := loadMigrations(fsys); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		if _, err := loadMigrations(fsys, "migrations"); err == nil || !strings.Contains(err.Error(), "duplicate") {
 			t.Fatalf("error = %v, want a duplicate error", err)
 		}
 	})
@@ -168,7 +168,7 @@ func TestRoleMigrationKeepsEverythingThatRefersToUsers(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	db.SetMaxOpenConns(1)
 
-	list, err := loadMigrations(migrationFiles)
+	list, err := loadMigrations(migrationFiles, dialects[TypeSQLite].dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestRoleMigrationKeepsEverythingThatRefersToUsers(t *testing.T) {
 	if len(before) != 8 || len(all) < 9 {
 		t.Fatalf("migrations: %d before the role migration, %d in all", len(before), len(all))
 	}
-	if err := apply(ctx, db, before); err != nil {
+	if err := apply(ctx, db, dialects[TypeSQLite], before); err != nil {
 		t.Fatal(err)
 	}
 	for _, q := range []string{
@@ -197,7 +197,7 @@ func TestRoleMigrationKeepsEverythingThatRefersToUsers(t *testing.T) {
 		}
 	}
 
-	if err := apply(ctx, db, all); err != nil {
+	if err := apply(ctx, db, dialects[TypeSQLite], all); err != nil {
 		t.Fatal(err)
 	}
 

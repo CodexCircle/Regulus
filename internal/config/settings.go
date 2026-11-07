@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/CodexCircle/Regulus/internal/storage"
 )
 
 // DefaultFile is where the package installs the hub configuration. The hub
@@ -32,6 +34,9 @@ type Setting struct {
 	Choices []string
 	// Restart is true when the hub reads the setting only at start.
 	Restart bool
+	// Secret is true for a value that must never be shown or written to the
+	// configuration file; it comes from the environment only.
+	Secret bool
 	// quote is true for values that are written as YAML strings.
 	quote bool
 }
@@ -42,6 +47,15 @@ func Settings() []Setting {
 		{Key: "listen", Env: "REGULUS_LISTEN", Description: "Address of the dashboard and API: host:port, or only the port (8080)", Restart: true, quote: true},
 		{Key: "agent_listen", Env: "REGULUS_AGENT_LISTEN", Description: "Address where remote agents connect (gRPC over TLS); empty keeps remote agents off", Restart: true, quote: true},
 		{Key: "data_dir", Env: "REGULUS_DATA_DIR", Description: "Directory where the hub keeps its database and keys", Restart: true, quote: true},
+		{Key: "database.type", Env: "REGULUS_DATABASE_TYPE", Description: "Where the hub keeps its data: sqlite (a file in data_dir, nothing to set up) or postgres (a server you prepared)", Choices: []string{"sqlite", "postgres"}, Restart: true},
+		{Key: "database.host", Env: "REGULUS_DATABASE_HOST", Description: "PostgreSQL host name or address (database.type postgres)", Restart: true, quote: true},
+		{Key: "database.port", Env: "REGULUS_DATABASE_PORT", Description: "PostgreSQL port", Restart: true},
+		{Key: "database.name", Env: "REGULUS_DATABASE_NAME", Description: "PostgreSQL database name", Restart: true, quote: true},
+		{Key: "database.user", Env: "REGULUS_DATABASE_USER", Description: "PostgreSQL user", Restart: true, quote: true},
+		{Key: "database.password", Env: "REGULUS_DATABASE_PASSWORD", Description: "PostgreSQL password; read only from the environment (/etc/regulus/regulus.env), never shown or written to the configuration file", Restart: true, Secret: true},
+		{Key: "database.sslmode", Env: "REGULUS_DATABASE_SSLMODE", Description: "TLS to PostgreSQL", Choices: []string{"disable", "allow", "prefer", "require", "verify-ca", "verify-full"}, Restart: true},
+		{Key: "database.sslrootcert", Env: "REGULUS_DATABASE_SSLROOTCERT", Description: "File with the CA certificate that signed the PostgreSQL server certificate (for verify-ca and verify-full)", Restart: true, quote: true},
+		{Key: "database.schema", Env: "REGULUS_DATABASE_SCHEMA", Description: "PostgreSQL schema that holds the tables; empty means public", Restart: true, quote: true},
 		{Key: "builtin_agent", Env: "REGULUS_BUILTIN_AGENT", Description: "Run an agent inside the hub so its own server is managed too", Choices: []string{"true", "false"}, Restart: true},
 		{Key: "metrics_interval", Env: "REGULUS_METRICS_INTERVAL", Description: "How often agents report metrics, such as 10s (at least 1s)", Restart: true},
 		{Key: "log.level", Env: "REGULUS_LOG_LEVEL", Description: "How much the hub logs", Choices: []string{"debug", "info", "warn", "error"}, Restart: true},
@@ -80,6 +94,28 @@ func (c Config) Get(key string) (string, bool) {
 		return c.AgentListen, true
 	case "data_dir":
 		return c.DataDir, true
+	case "database.type":
+		return c.Database.Type, true
+	case "database.host":
+		return c.Database.Host, true
+	case "database.port":
+		return strconv.Itoa(c.Database.Port), true
+	case "database.name":
+		return c.Database.Name, true
+	case "database.user":
+		return c.Database.User, true
+	case "database.password":
+		// Only whether it is set, never the value.
+		if c.Database.Password != "" {
+			return Masked, true
+		}
+		return "", true
+	case "database.sslmode":
+		return c.Database.SSLMode, true
+	case "database.sslrootcert":
+		return c.Database.SSLRootCert, true
+	case "database.schema":
+		return c.Database.Schema, true
 	case "builtin_agent":
 		return strconv.FormatBool(c.BuiltinAgent), true
 	case "metrics_interval":
@@ -119,6 +155,30 @@ func Normalize(key, raw string) (string, error) {
 			return "", errors.New("data_dir must not be empty")
 		}
 		return v, nil
+	case "database.type":
+		return oneOf(v, "sqlite", "postgres")
+	case "database.sslmode":
+		return oneOf(v, "disable", "allow", "prefer", "require", "verify-ca", "verify-full")
+	case "database.host", "database.sslrootcert":
+		return v, nil
+	case "database.name", "database.user":
+		if v == "" {
+			return "", errors.New("must not be empty")
+		}
+		return v, nil
+	case "database.port":
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 65535 {
+			return "", errors.New("the port must be a number from 1 to 65535")
+		}
+		return strconv.Itoa(n), nil
+	case "database.schema":
+		if !storage.ValidSchema(v) {
+			return "", errors.New("use letters, digits and underscore, not starting with a digit")
+		}
+		return v, nil
+	case "database.password":
+		return "", errors.New("the password is never stored in the configuration file: put REGULUS_DATABASE_PASSWORD=... in /etc/regulus/regulus.env (mode 0640, root:regulus) and restart the service")
 	case "builtin_agent", "console.tui", "updates.check", "updates.apply":
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -173,6 +233,9 @@ func normalizeAddress(v string) (string, error) {
 	}
 	return net.JoinHostPort(host, port), nil
 }
+
+// Masked is shown instead of a secret value that is set.
+const Masked = "********"
 
 // Origins of a value.
 const (

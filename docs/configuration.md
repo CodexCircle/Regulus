@@ -16,4 +16,4 @@ The hub reads, in increasing priority: defaults, a YAML file (`--config` or `REG
 
 With `builtin_agent` enabled (the default) the hub runs an agent for its own server, which connects through the same contract as any other agent (agent id `local`).
 
-The hub stores its data in a SQLite database (`regulus.db`) inside `data_dir` and applies schema migrations automatically at startup.
+The hub stores its data in a SQLite database (`regulus.db`) inside `data_dir`, or in a PostgreSQL database when `database.type` is `postgres`, and applies schema migrations automatically at startup. The `database.*` settings (host, port, name, user, `sslmode`, `sslrootcert`, `schema`, and the password, which comes **only** from `REGULUS_DATABASE_PASSWORD` in `/etc/regulus/regulus.env`) are described in [Database](database.md); `regulus db check` tests them.

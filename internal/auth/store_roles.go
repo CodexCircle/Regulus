@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/CodexCircle/Regulus/internal/storage"
 )
 
 // roleRow is a custom role as stored.
@@ -94,7 +96,7 @@ func (s store) createRole(ctx context.Context, r roleRow, now time.Time) error {
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO roles (name, description, created_at) VALUES (?, ?, ?)`,
 		string(r.name), r.description, now.UTC().Format(timeLayout)); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if storage.IsUniqueViolation(err) {
 			return ErrRoleExists
 		}
 		return err
@@ -128,7 +130,7 @@ func (s store) updateRole(ctx context.Context, old Role, next roleRow) error {
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `UPDATE roles SET name = ?, description = ? WHERE name = ?`,
 		string(next.name), next.description, string(old)); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if storage.IsUniqueViolation(err) {
 			return ErrRoleExists
 		}
 		return err

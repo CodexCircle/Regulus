@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/CodexCircle/Regulus/internal/config"
+	"github.com/CodexCircle/Regulus/internal/storage/storagetest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -227,7 +229,7 @@ func TestConfigListGetSetPath(t *testing.T) {
 	}
 	code, out, _ = run("list", "--json")
 	var items []map[string]any
-	if code != 0 || json.Unmarshal([]byte(out), &items) != nil || len(items) != 10 || items[0]["key"] != "listen" || items[0]["source"] != "file" {
+	if code != 0 || json.Unmarshal([]byte(out), &items) != nil || len(items) != len(config.Keys()) || items[0]["key"] != "listen" || items[0]["source"] != "file" {
 		t.Errorf("list --json: %d\n%s", code, out)
 	}
 	code, out, _ = run("list", "--plain")
@@ -305,13 +307,18 @@ func TestOwnerOf(t *testing.T) {
 
 func TestResetAdminLinkFromTheConsole(t *testing.T) {
 	dir := hubWithAdmin(t)
-	f := newFixture(t, false, false, map[string]string{"REGULUS_DATA_DIR": dir})
+	env := storagetest.Env(t, dir)
+	env["REGULUS_DATA_DIR"] = dir
+	f := newFixture(t, false, false, env)
 	link, err := resetAdminLink(context.Background(), f.env, f.file)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(link, "http://localhost:8080/#/reset/") {
 		t.Errorf("link = %q", link)
+	}
+	if storagetest.Postgres() {
+		return
 	}
 	f = newFixture(t, false, false, map[string]string{"REGULUS_DATA_DIR": t.TempDir()})
 	if _, err := resetAdminLink(context.Background(), f.env, f.file); err == nil || !strings.Contains(err.Error(), "no hub database") {

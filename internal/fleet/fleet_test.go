@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/CodexCircle/Regulus/internal/pki"
-	"github.com/CodexCircle/Regulus/internal/storage"
+	"github.com/CodexCircle/Regulus/internal/storage/storagetest"
 )
 
 type audit struct {
@@ -33,10 +33,7 @@ func (a *audit) text() string {
 func newService(t *testing.T) (*Service, *audit) {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := storage.Open(context.Background(), dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := storagetest.Open(t, dir)
 	t.Cleanup(func() { _ = db.Close() })
 	ca, err := pki.LoadOrCreate(dir+"/pki", time.Now())
 	if err != nil {

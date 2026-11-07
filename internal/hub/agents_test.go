@@ -26,6 +26,7 @@ func startHub(t *testing.T) *Hub {
 
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
+	useTestDatabase(t, &cfg)
 	cfg.Updates.Check = false // tests never reach for the network
 	cfg.BuiltinAgent = false  // these tests drive the agent side by hand
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))

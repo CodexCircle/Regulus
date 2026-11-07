@@ -51,6 +51,7 @@ func TestHubServesAndShutsDown(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
+	useTestDatabase(t, &cfg)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	h, err := New(ctx, cfg, log, fstest.MapFS{})
@@ -98,6 +99,7 @@ func TestDashboardOnlyAnswersGet(t *testing.T) {
 func TestHubKeepsItsSecretOutsideTheDatabase(t *testing.T) {
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
+	useTestDatabase(t, &cfg)
 	h, err := New(context.Background(), cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), fstest.MapFS{})
 	if err != nil {
 		t.Fatal(err)
