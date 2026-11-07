@@ -36,7 +36,12 @@ func startRolloutHub(t *testing.T, mutate ...func(*config.Config)) (*Hub, releas
 		m(&cfg)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	h, err := New(ctx, cfg, quiet(), fstest.MapFS{}, WithVersion("9.9.9"), WithAgentIntervals(50*time.Millisecond, 50*time.Millisecond),
+	// The hub drops an agent that is silent for three heartbeat intervals. With
+	// a short interval a scheduling stall (a loaded CI runner, -race) of a few
+	// hundred milliseconds drops a healthy agent in the middle of a rollout,
+	// and the test sees "not connected" instead of the outcome it tests.
+	// Nothing here waits for a heartbeat, so a long interval costs no time.
+	h, err := New(ctx, cfg, quiet(), fstest.MapFS{}, WithVersion("9.9.9"), WithAgentIntervals(2*time.Second, 2*time.Second),
 		WithUpdateSource(rs.Source), WithUpdateVerifier(acceptAll{}))
 	if err != nil {
 		cancel()
