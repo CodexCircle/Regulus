@@ -19,6 +19,7 @@ The exceptions are explicit and each has its own design issue: a node that **acc
 | **Compute node** (standard node) | A server that runs workloads and is managed from the hub. | the active hub only | **implemented** as the agent (`regulus agent`; the hub's own server is the built-in agent). Workload management is [#113](https://github.com/CodexCircle/Regulus/issues/113). |
 | **Backup node** | A storage node that keeps the backups of the other nodes. Has a connection **to the hub only** and **cannot contact other nodes**. | the active hub only | proposed in [#166](https://github.com/CodexCircle/Regulus/issues/166). |
 | **Access gateway** | A node with a public address that lets the Regulus Access phone app reach the hub from outside the local network. Forwards the phone's connection to the active hub; **mTLS stays end to end between phone and hub**. May later also host a notification server and, separately designed, an authentication server. | the active hub (outbound); phones (inbound, the only inbound listener of the group) | proposed in [#161](https://github.com/CodexCircle/Regulus/issues/161) (epic [#152](https://github.com/CodexCircle/Regulus/issues/152)). |
+| **Development node** | A node for developer and AI tools (for example Claude Code). Reaches the hub only, **never other nodes**, and cannot use the hub's shared resources unless an administrator writes a specific **grant**, whose confirmation is deliberately slow (a mandatory wait, enforced by the hub). | the active hub only | proposed in [#168](https://github.com/CodexCircle/Regulus/issues/168). What can be enforced outside Regulus (the host's own network) is open there. |
 | **AI node** | A node that offers local AI (for example a server running Ollama) to other nodes. | the active hub, and possibly **directly** to the nodes that use it (see below) | idea only, not designed. |
 
 A node has **one** type (the role); capabilities are switched on one by one by an administrator on the hub. An access gateway is a normal enrolled node plus the gateway capability, so it is rebuilt from nothing by enrolling again.
@@ -62,6 +63,42 @@ None of this exists in the code. Related: guided installation ([#165](https://gi
 | `replica` | receives the replicated data of the hub | redundant hub |
 
 The set is not final; it is what the issues mention today.
+
+## Defaults per type (proposal)
+
+**One binary, one kind of machine.** Every node runs the same `regulus` binary, so in principle a node can be anything; a type is a **preset**: which capabilities are on and which permissions it has. Two lists are needed, one for *what a node does* (capabilities, [#169](https://github.com/CodexCircle/Regulus/issues/169)) and one for *what it may reach or use* (node permissions, [#170](https://github.com/CodexCircle/Regulus/issues/170); not the user permissions of `internal/auth`). Defaults can be overridden **per node**. Anything sensitive is **denied by default**. These tables are a starting point to argue about, not a decision.
+
+Capabilities on by default (✓ on, – off, `opt-in` = off until the administrator turns it on and the node agrees):
+
+| Capability | Compute | Backup | Access gateway | Development |
+|---|---|---|---|---|
+| `report` (system information, heartbeat, metrics) | ✓ | ✓ | ✓ | ✓ |
+| `self-update` | ✓ | ✓ | ✓ | ✓ |
+| `inventory` (read-only machine information, #62) | ✓ | ✓ | ✓ | ✓ |
+| `workloads` (#113) | ✓ | – | – | limited (open in #168) |
+| `privileged-actions` (#60) | ✓ | – | – | – |
+| `plugin-runtime` (#19) | ✓ | – | – | – |
+| `backup-storage` | – | ✓ | – | – |
+| `relay` | – | – | opt-in | – |
+| `notifications`, `authentication` | – | – | opt-in | – |
+
+Node permissions by default (all denied unless shown):
+
+| Permission | Compute | Backup | Access gateway | Development |
+|---|---|---|---|---|
+| `reach-hub` | ✓ | ✓ | ✓ | ✓ |
+| `reach-nodes` (direct links, #113; none exist today) | – | – | – | – (a grant, never a default) |
+| `shared-resources` (none exist yet) | – | – | – | – (a **delayed grant**) |
+| `egress-network` (what the node may reach outside) | unrestricted | hub only | hub, plus inbound | restricted (open in #168) |
+| `inbound-listener` | – | – | opt-in | – |
+| `receive-backups` | – | ✓ | – | – |
+| `privileged-actions` | ✓ | – | – | – |
+
+The hub and the redundant hub are *roles*, not presets of the agent (#104), so they are not in these tables.
+
+## Changing a type and migrating ([#171](https://github.com/CodexCircle/Regulus/issues/171))
+
+Turning a capability on or off moves no data. Some changes do need a **migration**, the backup node first: the general method is always "enroll a new node, give it the type, move the data and the assignments, switch over, retire the old one", with checks and a way back. Not designed yet.
 
 ## Direct links between nodes (later)
 
