@@ -142,7 +142,7 @@ function UserTable({ self, roles }: { self: string; roles: RoleInfo[] }) {
                 </td>
                 <td>{u.disabled ? t("users.status.disabled") : t("users.status.active")}</td>
                 <td>{u.two_factor ? t("users.twoFactor.on") : t("users.twoFactor.off")}</td>
-                <td>{formatAgo(u.created_at)}</td>
+                <td>{formatAgo(u.created_at, undefined, t)}</td>
                 <td className="row-actions">
                   <button
                     type="button"
@@ -350,7 +350,7 @@ function Audit() {
           <tbody>
             {entries.items.map((a) => (
               <tr key={a.id}>
-                <td>{formatAgo(a.at)}</td>
+                <td>{formatAgo(a.at, undefined, t)}</td>
                 <td>{a.actor || "–"}</td>
                 <td>{a.event.replace(/_/g, " ")}</td>
                 <td>{a.target || "–"}</td>
