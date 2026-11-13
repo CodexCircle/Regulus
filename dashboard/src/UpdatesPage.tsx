@@ -16,6 +16,7 @@ import {
   type UpdateStatus,
 } from "./api";
 import { formatAgo, formatBytes } from "./format";
+import { useT, type MessageKey } from "./i18n";
 import { useSession } from "./session";
 import { errorMessage } from "./useApiList";
 
@@ -26,6 +27,7 @@ const POLL_MS = 2000;
 // hub behaves. Installing is done by a root helper of the hub's server, which
 // checks the release again; the hub restarts in the middle of it.
 export function UpdatesPage() {
+  const t = useT();
   const session = useSession();
   const expired = session?.expired;
   const [status, setStatus] = useState<UpdateStatus | null>(null);
@@ -81,10 +83,10 @@ export function UpdatesPage() {
 
   return (
     <section aria-labelledby="updates-heading">
-      <h2 id="updates-heading">Updates</h2>
+      <h2 id="updates-heading">{t("updates.title")}</h2>
       {error && <p role="alert">{error}</p>}
       {status === null ? (
-        !error && <p role="status">Loading…</p>
+        !error && <p role="status">{t("updates.loading")}</p>
       ) : (
         <>
           <Version
@@ -121,43 +123,48 @@ function Version({
   onDownload: () => void;
   onApply: () => Promise<void>;
 }) {
+  const t = useT();
   const { latest, staged, last_apply: last } = status;
+  const channelName = (c: UpdateChannel) => t(`updates.channel.${c}`);
   const [confirming, setConfirming] = useState(false);
   const downloaded =
     staged !== null && latest !== null && staged.version === latest.version;
   return (
     <section className="panel" aria-labelledby="version-heading">
-      <h3 id="version-heading">Version</h3>
+      <h3 id="version-heading">{t("updates.version.title")}</h3>
       <p>
-        This hub runs <strong>{status.current_version || "unknown"}</strong> (
-        {status.platform}).
+        {t("updates.version.runs")}{" "}
+        <strong>{status.current_version || t("updates.unknown")}</strong>{" "}
+        {t("updates.version.platform", { platform: status.platform })}
       </p>
       {!status.release_build && (
-        <p className="muted">
-          This is a development build. It does not compare itself with releases,
-          so it is never offered an update.
-        </p>
+        <p className="muted">{t("updates.version.devBuild")}</p>
       )}
       {!status.checks_enabled && (
         <p role="status">
-          Update checks are turned off in the configuration (
-          <code>updates.check</code>), so the hub does not contact any server.
+          {t("updates.version.checksOffBefore")}
+          <code>updates.check</code>
+          {t("updates.version.checksOffAfter")}
         </p>
       )}
 
       {status.checks_enabled && (
         <>
           {status.update_available && latest ? (
-            <div role="status" aria-label="Update available">
+            <div role="status" aria-label={t("updates.version.availableLabel")}>
               <p>
-                <strong>Version {latest.version}</strong>
-                {latest.channel !== "stable" && ` (${latest.channel})`} is
-                available.
+                <strong>
+                  {t("updates.version.availableVersion", {
+                    version: latest.version,
+                  })}
+                </strong>
+                {latest.channel !== "stable" && ` (${latest.channel})`}{" "}
+                {t("updates.version.isAvailable")}
                 {latest.url.startsWith("https://") && (
                   <>
                     {" "}
                     <a href={latest.url} target="_blank" rel="noreferrer">
-                      Release page
+                      {t("updates.version.releasePage")}
                     </a>
                   </>
                 )}
@@ -168,8 +175,10 @@ function Version({
             status.release_build &&
             latest && (
               <p role="status">
-                Regulus is up to date: the newest {status.channel} release is{" "}
-                {latest.version}.
+                {t("updates.version.upToDate", {
+                  channel: channelName(status.channel),
+                  version: latest.version,
+                })}
               </p>
             )
           )}
@@ -178,73 +187,89 @@ function Version({
             status.checked_at &&
             !status.check_error && (
               <p role="status">
-                The release server lists no {status.channel} release.
+                {t("updates.version.noRelease", {
+                  channel: channelName(status.channel),
+                })}
               </p>
             )}
           <p className="muted">
             {status.checked_at
-              ? `Checked ${formatAgo(status.checked_at)}.`
-              : "Not checked yet."}
+              ? t("updates.version.checked", {
+                  ago: formatAgo(status.checked_at),
+                })
+              : t("updates.version.notChecked")}
           </p>
           {status.check_error && (
-            <p role="alert">The last check failed: {status.check_error}</p>
+            <p role="alert">
+              {t("updates.version.checkFailed", { error: status.check_error })}
+            </p>
           )}
         </>
       )}
 
       {staged && (
-        <div role="status" aria-label="Downloaded update">
+        <div role="status" aria-label={t("updates.staged.label")}>
           <p>
-            Version <strong>{staged.version}</strong> is downloaded (
-            {formatBytes(staged.size)}, {staged.archive}).{" "}
+            {t("updates.staged.version")} <strong>{staged.version}</strong>{" "}
+            {t("updates.staged.downloaded", {
+              size: formatBytes(staged.size),
+              archive: staged.archive,
+            })}{" "}
             {staged.verified === "signature"
-              ? "Its signature was checked: it was made by this project's release workflow for this version, and the file matches it."
-              : "Its SHA-256 matches the release's checksum list."}{" "}
-            It is <strong>not installed</strong>
+              ? t("updates.staged.signature")
+              : t("updates.staged.checksum")}{" "}
+            {t("updates.staged.itIs")}{" "}
+            <strong>{t("updates.staged.notInstalled")}</strong>
             {status.apply_enabled
-              ? "."
-              : ": this hub was not set up to install updates itself (updates.apply, and the regulus-update.path unit of the installer)."}
+              ? t("updates.staged.applyOn")
+              : t("updates.staged.applyOff")}
           </p>
           {staged.verified !== "signature" && (
-            <p className="muted">
-              The checksum list comes from the same place as the file, so it
-              catches a damaged download but does not prove who published it.
-            </p>
+            <p className="muted">{t("updates.staged.checksumNote")}</p>
           )}
         </div>
       )}
-      {status.downloading && <p role="status">Downloading…</p>}
+      {status.downloading && <p role="status">{t("updates.downloading")}</p>}
       {status.applying && (
         <p role="status">
-          Installing {staged?.version ?? "the update"}… The hub restarts in a
-          moment and this page may stop answering for a short while; it checks
-          again by itself. If the new version does not start properly, the
-          previous one is put back.
+          {t("updates.applying.head", {
+            what: staged?.version ?? t("updates.applying.theUpdate"),
+          })}{" "}
+          {t("updates.applying.rest")}
         </p>
       )}
       {status.apply_stalled && (
         <p role="alert">
-          Nothing has picked up the request for a few minutes. The unit that
-          installs updates is probably not running:{" "}
+          {t("updates.stalled")}{" "}
           <code>systemctl enable --now regulus-update.path</code>.
         </p>
       )}
       {last && !status.applying && last.outcome === "applied" && (
         <p role="status">
-          Updated to {last.version}
-          {last.from ? ` from ${last.from}` : ""} {formatAgo(last.at)}.
+          {last.from
+            ? t("updates.last.appliedFrom", {
+                version: last.version,
+                from: last.from,
+                ago: formatAgo(last.at),
+              })
+            : t("updates.last.applied", {
+                version: last.version,
+                ago: formatAgo(last.at),
+              })}
         </p>
       )}
       {last && !status.applying && last.outcome !== "applied" && (
         <p role="alert">
           {last.outcome === "rolled_back"
-            ? `Version ${last.version} did not start properly, so the previous version was put back.`
-            : `Version ${last.version} was not installed.`}
+            ? t("updates.last.rolledBack", { version: last.version })
+            : t("updates.last.notInstalled", { version: last.version })}
           {last.message ? ` ${last.message}` : ""}
         </p>
       )}
       {status.download_error && (
-        <p role="alert">The download failed: {status.download_error}</p>
+        <p role="alert">
+          {t("updates.downloadFailed", { error: status.download_error })}
+        </p>
       )}
 
       <p className="row-actions">
@@ -253,7 +278,9 @@ function Version({
           onClick={onCheck}
           disabled={busy || status.checking || !status.checks_enabled}
         >
-          {status.checking ? "Checking…" : "Check now"}
+          {status.checking
+            ? t("updates.action.checking")
+            : t("updates.action.checkNow")}
         </button>
         {status.update_available && latest && !downloaded && (
           <button
@@ -261,7 +288,7 @@ function Version({
             onClick={onDownload}
             disabled={busy || status.downloading}
           >
-            Download {latest.version}
+            {t("updates.action.download", { version: latest.version })}
           </button>
         )}
         {status.apply_available && staged && !confirming && (
@@ -270,17 +297,13 @@ function Version({
             onClick={() => setConfirming(true)}
             disabled={busy}
           >
-            Install {staged.version}
+            {t("updates.action.install", { version: staged.version })}
           </button>
         )}
       </p>
       {confirming && staged && status.apply_available && (
-        <div role="group" aria-label="Confirm installation">
-          <p>
-            The hub is checked and replaced by version {staged.version} and
-            restarts. Agents reconnect by themselves. If the new version does
-            not start, the previous one is put back.
-          </p>
+        <div role="group" aria-label={t("updates.confirm.label")}>
+          <p>{t("updates.confirm.text", { version: staged.version })}</p>
           <p className="row-actions">
             <button
               type="button"
@@ -290,10 +313,10 @@ function Version({
                 void onApply();
               }}
             >
-              Install now
+              {t("updates.action.installNow")}
             </button>
             <button type="button" onClick={() => setConfirming(false)}>
-              Cancel
+              {t("updates.action.cancel")}
             </button>
           </p>
         </div>
@@ -313,6 +336,7 @@ function Settings({
     window: { start: string; end: string },
   ) => Promise<void>;
 }) {
+  const t = useT();
   const [mode, setMode] = useState<UpdateMode>(status.mode);
   const [channel, setChannel] = useState<UpdateChannel>(status.channel);
   const [start, setStart] = useState(status.window_start || "03:00");
@@ -332,10 +356,10 @@ function Settings({
 
   return (
     <section className="panel" aria-labelledby="update-settings-heading">
-      <h3 id="update-settings-heading">Settings</h3>
+      <h3 id="update-settings-heading">{t("updates.settings.title")}</h3>
       <form onSubmit={submit}>
         <fieldset>
-          <legend>When a new version is out</legend>
+          <legend>{t("updates.settings.when")}</legend>
           <label className="choice">
             <input
               type="radio"
@@ -344,7 +368,7 @@ function Settings({
               checked={mode === "manual"}
               onChange={() => setMode("manual")}
             />
-            Only tell me
+            {t("updates.mode.manual")}
           </label>
           <label className="choice">
             <input
@@ -354,7 +378,7 @@ function Settings({
               checked={mode === "download"}
               onChange={() => setMode("download")}
             />
-            Download and check it, then wait for me
+            {t("updates.mode.download")}
           </label>
           <label className="choice">
             <input
@@ -365,18 +389,15 @@ function Settings({
               disabled={!status.apply_enabled}
               onChange={() => setMode("automatic")}
             />
-            Download it and install it by itself, inside a maintenance window
+            {t("updates.mode.automatic")}
           </label>
           {!status.apply_enabled && (
-            <p className="muted">
-              Installing is not set up on this hub (updates.apply and the
-              regulus-update.path unit, which the installer enables).
-            </p>
+            <p className="muted">{t("updates.settings.applyOff")}</p>
           )}
           {mode === "automatic" && (
             <p className="row-actions">
               <label>
-                Window starts
+                {t("updates.settings.windowStarts")}
                 <input
                   type="time"
                   value={start}
@@ -384,7 +405,7 @@ function Settings({
                 />
               </label>
               <label>
-                Window ends
+                {t("updates.settings.windowEnds")}
                 <input
                   type="time"
                   value={end}
@@ -394,46 +415,43 @@ function Settings({
             </p>
           )}
           {mode === "automatic" && (
-            <p className="muted">
-              Times are those of the hub's server. The hub restarts during the
-              update, and a version that had to be rolled back is not tried
-              again by itself.
-            </p>
+            <p className="muted">{t("updates.settings.windowNote")}</p>
           )}
         </fieldset>
         <label>
-          Channel
+          {t("updates.settings.channel")}
           <select
             value={channel}
             onChange={(e) => setChannel(e.target.value as UpdateChannel)}
           >
-            <option value="stable">Stable</option>
-            <option value="beta">Beta (releases and betas)</option>
-            <option value="alpha">
-              Alpha (every release, alphas included)
+            <option value="stable">
+              {t("updates.settings.channelStable")}
             </option>
+            <option value="beta">{t("updates.settings.channelBeta")}</option>
+            <option value="alpha">{t("updates.settings.channelAlpha")}</option>
           </select>
         </label>
         <button type="submit" disabled={!changed || !valid}>
-          Save
+          {t("updates.action.save")}
         </button>
       </form>
     </section>
   );
 }
 
-const AGENT_STATUS: Record<RolloutAgent["status"], string> = {
-  pending: "waiting",
-  offered: "fetching the update",
-  installing: "installing, waiting for it to come back",
-  updated: "updated",
-  failed: "failed",
-  skipped: "not tried",
+const AGENT_STATUS: Record<RolloutAgent["status"], MessageKey> = {
+  pending: "updates.agent.pending",
+  offered: "updates.agent.offered",
+  installing: "updates.agent.installing",
+  updated: "updates.agent.updated",
+  failed: "updates.agent.failed",
+  skipped: "updates.agent.skipped",
 };
 
 // Servers shows the managed servers that run an older version than the hub and
 // updates them to it, a few at a time, stopping at the first failure.
 function Servers() {
+  const t = useT();
   const session = useSession();
   const expired = session?.expired;
   const [rollout, setRollout] = useState<RolloutStatus | null>(null);
@@ -488,29 +506,30 @@ function Servers() {
   const finished = rollout.state !== "idle" && rollout.state !== "running";
   return (
     <section className="panel" aria-labelledby="servers-heading">
-      <h3 id="servers-heading">Servers</h3>
+      <h3 id="servers-heading">{t("updates.rollout.title")}</h3>
       {error && <p role="alert">{error}</p>}
       <p>
-        The servers this hub manages are updated to the version the hub runs (
-        <strong>{rollout.target || "unknown"}</strong>). They fetch it from the
-        hub, so they need no internet access, and a server whose new version
-        does not reconnect goes back to the previous one by itself.
+        {t("updates.rollout.intro")}
+        <strong>{rollout.target || t("updates.unknown")}</strong>
+        {t("updates.rollout.introAfter")}
       </p>
 
       {rollout.state === "running" && (
         <>
           <p role="status">
-            Updating the servers, {rollout.wave_size ?? 1} at a time. It stops
-            at the first failure.
+            {t("updates.rollout.running", { size: rollout.wave_size ?? 1 })}
           </p>
-          <AgentRows agents={rollout.agents} label="Update progress" />
+          <AgentRows
+            agents={rollout.agents}
+            label={t("updates.rollout.progress")}
+          />
           <p className="row-actions">
             <button
               type="button"
               onClick={() => void run(stopRollout)}
               disabled={busy}
             >
-              Stop
+              {t("updates.action.stop")}
             </button>
           </p>
         </>
@@ -520,26 +539,28 @@ function Servers() {
         <>
           {behind.length === 0 ? (
             <p role="status">
-              Every connected server runs {rollout.target}, or is not managed by
-              an agent that can be updated.
+              {t("updates.rollout.allCurrent", { target: rollout.target })}
             </p>
           ) : (
             <>
               <p role="status">
-                {behind.length}{" "}
-                {behind.length === 1 ? "server runs" : "servers run"} an older
-                version.
+                {behind.length === 1
+                  ? t("updates.rollout.behindOne")
+                  : t("updates.rollout.behindMany", { count: behind.length })}
               </p>
-              <ul aria-label="Servers behind">
+              <ul aria-label={t("updates.rollout.behindLabel")}>
                 {behind.map((a) => (
                   <li key={a.id}>
-                    {a.hostname || a.id} runs {a.from}
+                    {t("updates.rollout.runs", {
+                      name: a.hostname || a.id,
+                      version: a.from,
+                    })}
                   </li>
                 ))}
               </ul>
               <p className="row-actions">
                 <label>
-                  At a time
+                  {t("updates.rollout.atATime")}
                   <select
                     value={wave}
                     onChange={(e) => setWave(Number(e.target.value))}
@@ -547,7 +568,7 @@ function Servers() {
                     <option value={1}>1</option>
                     <option value={3}>3</option>
                     <option value={10}>10</option>
-                    <option value={100}>All</option>
+                    <option value={100}>{t("updates.rollout.all")}</option>
                   </select>
                 </label>
                 <button
@@ -555,11 +576,12 @@ function Servers() {
                   onClick={() => void run(() => startRollout(wave))}
                   disabled={busy}
                 >
-                  Update{" "}
                   {behind.length === 1
-                    ? "this server"
-                    : `${behind.length} servers`}{" "}
-                  to {rollout.target}
+                    ? t("updates.rollout.updateOne", { target: rollout.target })
+                    : t("updates.rollout.updateMany", {
+                        count: behind.length,
+                        target: rollout.target,
+                      })}
                 </button>
               </p>
             </>
@@ -567,18 +589,29 @@ function Servers() {
           {finished && rollout.agents.length > 0 && (
             <>
               <p className="muted">
-                Last update of the servers:{" "}
-                {rollout.state === "done"
-                  ? "done"
-                  : rollout.state === "stopped"
-                    ? "stopped"
-                    : "stopped by a failure"}
-                {rollout.finished_at
-                  ? `, ${formatAgo(rollout.finished_at)}`
-                  : ""}
-                .
+                {t(
+                  rollout.state === "done"
+                    ? rollout.finished_at
+                      ? "updates.rollout.lastDoneAgo"
+                      : "updates.rollout.lastDone"
+                    : rollout.state === "stopped"
+                      ? rollout.finished_at
+                        ? "updates.rollout.lastStoppedAgo"
+                        : "updates.rollout.lastStopped"
+                      : rollout.finished_at
+                        ? "updates.rollout.lastFailedAgo"
+                        : "updates.rollout.lastFailed",
+                  {
+                    ago: rollout.finished_at
+                      ? formatAgo(rollout.finished_at)
+                      : "",
+                  },
+                )}
               </p>
-              <AgentRows agents={rollout.agents} label="Last update" />
+              <AgentRows
+                agents={rollout.agents}
+                label={t("updates.rollout.lastLabel")}
+              />
             </>
           )}
         </>
@@ -594,12 +627,22 @@ function AgentRows({
   agents: RolloutAgent[];
   label: string;
 }) {
+  const t = useT();
   return (
     <ul aria-label={label}>
       {agents.map((a) => (
         <li key={a.id}>
-          {a.hostname || a.id} ({a.from}): {AGENT_STATUS[a.status]}
-          {a.message && a.status === "failed" ? ` — ${a.message}` : ""}
+          {t(
+            a.message && a.status === "failed"
+              ? "updates.agent.rowMessage"
+              : "updates.agent.row",
+            {
+              name: a.hostname || a.id,
+              from: a.from,
+              status: t(AGENT_STATUS[a.status]),
+              message: a.message ?? "",
+            },
+          )}
         </li>
       ))}
     </ul>
