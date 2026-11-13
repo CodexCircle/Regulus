@@ -127,6 +127,12 @@ Agreed in conversation on 2026-11-13, **proposed**, to be confirmed in the desig
 - **Re-run on an existing installation:** `--db-local` is ignored with a note; on a SQLite installation it is refused like `--database postgres` (#124).
 - **Tested** by `scripts/test-install.sh` with stubs for `apt`, the `postgres` user and `psql` (including that the password is on no command line), and by hand: the real functions against a throwaway PostgreSQL 16 cluster (role and database created and owned by the role, `citext` enabled, login over TCP with the generated password, a second run refused). **Not verified:** `apt-get install postgresql` on a real Ubuntu VM, PostgreSQL 14 from 22.04, a cluster that is stopped or on another port, and the whole installer end to end with a release (#81, #141).
 
+## GUI translations: dashboard mechanism (#125, proposal in progress)
+
+- **No library:** two typed catalogs (`dashboard/src/i18n/en.ts` is the source, `it.ts` is `Record<keyof en, string>`), so a missing Italian text is a compile error, plus a test for extra keys, empty texts and placeholder mismatches. Keys are stable dotted names, not the English text. No plural machinery (two keys where a count matters); dates and numbers through `Intl`.
+- **Language:** the saved choice (`localStorage`, `regulus.language`), else the browser's (`it*` is Italian), else English; a switch in the header; `<html lang>` follows. Components work without the provider (the detected language), which keeps small tests simple.
+- **Migration** is one pull request per page group; the first slice moved the header, the navigation and the database banner. The console gets an Italian table and a test in a later pull request. Still open: who reviews the Italian wording (a first draft was written by the assistant), and a per-user language setting stored on the hub.
+
 ## Open questions
 
 - Should the other privileged actions use a `sudoers.d` rule or a root helper like the updates? (#60)
