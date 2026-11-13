@@ -23,6 +23,20 @@ The exceptions are explicit and each has its own design issue: a node that **acc
 
 A node has **one** type (the role); capabilities are switched on one by one by an administrator on the hub. An access gateway is a normal enrolled node plus the gateway capability, so it is rebuilt from nothing by enrolling again.
 
+## Who decides a node's type (proposal of #160, my call, not agreed)
+
+Today the only "type" is the installer's `--role hub|agent`, written to `/etc/regulus/role` for the package scripts; the binary ignores it, and neither the `agents` table nor `Hello` carries a type ([architecture.md](architecture.md), section 1). Options considered:
+
+| Option | How | Verdict |
+|---|---|---|
+| **A. The hub assigns it** | Type and capabilities are stored in the hub's registry (a new column or table next to `agents`), set by an administrator, and sent to the node (in `Welcome`, or as a command). | **Proposed.** Same principle as the agent id, which comes from the certificate and never from what the agent says. Changing a type needs no new certificate, so it works with the N / N-1 rule and without certificate renewal (#128). |
+| B. In the certificate | A certificate extension names the type. | Rejected for now: changing a type would mean reissuing the certificate, and renewal does not exist yet (#128). |
+| C. The node declares it in `Hello` | The node says what it is. | Rejected: a compromised or misconfigured node could claim a capability. |
+
+**Two keys for exposure.** A capability that changes what a node exposes locally (the access gateway's inbound listener) needs **both**: the hub grants it **and** the node opts in locally (a setting, off by default, like `agent_listen`). A hub alone cannot make a server open a port.
+
+**Role and types.** The **role** stays the exclusive enum of #104 (`agent`, `hub`, `hub-redundant`, plus the transient `candidate`); a **node type** such as "backup node" or "access gateway" is a named **preset of capabilities on the role `agent`** (compute node = no extra capability; backup node = `backup-storage`; access gateway = `relay`, later `notifications`). The UI and docs say "type"; the code keeps role plus capability set, so a new type is a new preset, not a new code path. "A backup node cannot contact other nodes" needs no rule today, because nodes never contact each other (all traffic goes through the hub); the rule matters when direct links exist (below).
+
 ## Capabilities (proposed)
 
 | Capability | Meaning | Used by |
