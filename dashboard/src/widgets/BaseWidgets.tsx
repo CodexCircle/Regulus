@@ -1,4 +1,5 @@
 import { Chart } from "../Chart";
+import { useT } from "../i18n";
 import { formatBytes, formatDuration, formatPercent, formatRate } from "../format";
 import type { MetricsPoint } from "../api";
 import { AgentView, Waiting } from "./AgentView";
@@ -18,23 +19,24 @@ function Stat({ value, caption }: { value: string; caption?: string }) {
 
 // SystemWidget shows what the server is and its current load.
 export function SystemWidget(props: WidgetProps) {
+  const t = useT();
   return (
     <AgentView {...props}>
       {({ agent, stale, latest }) => {
         const rows: [string, string][] = [
-          ["Server", agent.hostname ? `${agent.hostname} (${agent.id})` : agent.id],
-          ["System", [agent.os_version ?? agent.os, agent.arch].filter(Boolean).join(" ") || "-"],
-          ["Kernel", agent.kernel || "-"],
-          ["CPUs", agent.cpu_count ? String(agent.cpu_count) : "-"],
-          ["Memory", agent.memory_total_bytes ? formatBytes(agent.memory_total_bytes) : "-"],
-          ["Status", stale ? "stale" : agent.status],
-          ["Agent version", agent.version || "-"],
+          [t("servers.fact.server"), agent.hostname ? `${agent.hostname} (${agent.id})` : agent.id],
+          [t("servers.fact.system"), [agent.os_version ?? agent.os, agent.arch].filter(Boolean).join(" ") || "-"],
+          [t("servers.fact.kernel"), agent.kernel || "-"],
+          [t("servers.fact.cpus"), agent.cpu_count ? String(agent.cpu_count) : "-"],
+          [t("servers.fact.memory"), agent.memory_total_bytes ? formatBytes(agent.memory_total_bytes) : "-"],
+          [t("servers.fact.status"), t(`servers.status.${stale ? "stale" : agent.status}`)],
+          [t("servers.fact.agentVersion"), agent.version || "-"],
         ];
         if (latest) {
-          rows.push(["Load average", [latest.load_1, latest.load_5, latest.load_15].map((l) => l.toFixed(2)).join(" · ")]);
-          rows.push(["Uptime", formatDuration(latest.uptime_seconds)]);
+          rows.push([t("servers.fact.loadAverage"), [latest.load_1, latest.load_5, latest.load_15].map((l) => l.toFixed(2)).join(" · ")]);
+          rows.push([t("servers.fact.uptime"), formatDuration(latest.uptime_seconds)]);
         } else if (agent.uptime_seconds !== null) {
-          rows.push(["Uptime", formatDuration(agent.uptime_seconds)]);
+          rows.push([t("servers.fact.uptime"), formatDuration(agent.uptime_seconds)]);
         }
         return (
           <dl className="facts">
@@ -53,6 +55,7 @@ export function SystemWidget(props: WidgetProps) {
 
 // CpuWidget shows CPU usage now and over the last minutes.
 export function CpuWidget(props: WidgetProps) {
+  const t = useT();
   return (
     <AgentView {...props}>
       {({ agent, points, latest }) =>
@@ -62,12 +65,17 @@ export function CpuWidget(props: WidgetProps) {
           <>
             <Stat
               value={formatPercent(latest.cpu_percent)}
-              caption={`load ${latest.load_1.toFixed(2)} · ${latest.load_5.toFixed(2)} · ${latest.load_15.toFixed(2)}${agent.cpu_count ? ` on ${agent.cpu_count} cores` : ""}`}
+              caption={t(agent.cpu_count ? "servers.widget.cpuLoadCores" : "servers.widget.cpuLoad", {
+                one: latest.load_1.toFixed(2),
+                five: latest.load_5.toFixed(2),
+                fifteen: latest.load_15.toFixed(2),
+                count: agent.cpu_count ?? 0,
+              })}
             />
             <Chart
-              title="CPU usage over the last minutes"
+              title={t("servers.widget.cpuChart")}
               times={times(points)}
-              series={[{ label: "CPU", values: points.map((p) => p.cpu_percent) }]}
+              series={[{ label: t("servers.widget.cpuSeries"), values: points.map((p) => p.cpu_percent) }]}
               max={100}
               formatValue={(v) => `${v}%`}
             />
@@ -80,6 +88,7 @@ export function CpuWidget(props: WidgetProps) {
 
 // MemoryWidget shows memory in use now and over the last minutes, and swap.
 export function MemoryWidget(props: WidgetProps) {
+  const t = useT();
   return (
     <AgentView {...props}>
       {({ points, latest }) =>
@@ -89,16 +98,17 @@ export function MemoryWidget(props: WidgetProps) {
           <>
             <Stat
               value={formatPercent(percent(latest.memory_used_bytes, latest.memory_total_bytes))}
-              caption={`${formatBytes(latest.memory_used_bytes)} of ${formatBytes(latest.memory_total_bytes)} used${
-                latest.swap_total_bytes > 0
-                  ? ` · swap ${formatBytes(latest.swap_used_bytes)} of ${formatBytes(latest.swap_total_bytes)}`
-                  : ""
-              }`}
+              caption={t(latest.swap_total_bytes > 0 ? "servers.widget.memoryUsedSwap" : "servers.widget.memoryUsed", {
+                used: formatBytes(latest.memory_used_bytes),
+                total: formatBytes(latest.memory_total_bytes),
+                swapUsed: formatBytes(latest.swap_used_bytes),
+                swapTotal: formatBytes(latest.swap_total_bytes),
+              })}
             />
             <Chart
-              title="Memory use over the last minutes"
+              title={t("servers.widget.memoryChart")}
               times={times(points)}
-              series={[{ label: "Memory", values: points.map((p) => percent(p.memory_used_bytes, p.memory_total_bytes)) }]}
+              series={[{ label: t("servers.fact.memory"), values: points.map((p) => percent(p.memory_used_bytes, p.memory_total_bytes)) }]}
               max={100}
               formatValue={(v) => `${v}%`}
             />
@@ -111,11 +121,12 @@ export function MemoryWidget(props: WidgetProps) {
 
 // DiskWidget shows how full each disk is.
 export function DiskWidget(props: WidgetProps) {
+  const t = useT();
   return (
     <AgentView {...props}>
       {({ latest }) => {
         if (!latest) return <Waiting />;
-        if (latest.disks.length === 0) return <p>No disks reported.</p>;
+        if (latest.disks.length === 0) return <p>{t("servers.widget.noDisks")}</p>;
         return (
           <ul className="disks">
             {[...latest.disks]
@@ -127,13 +138,13 @@ export function DiskWidget(props: WidgetProps) {
                     <div className="disk-head">
                       <strong>{d.mount_point}</strong>
                       <span>
-                        {formatBytes(d.used_bytes)} of {formatBytes(d.total_bytes)} ({formatPercent(used)})
+                        {t("servers.widget.diskUsage", { used: formatBytes(d.used_bytes), total: formatBytes(d.total_bytes), percent: formatPercent(used) })}
                       </span>
                     </div>
                     <div
                       className={`meter${used >= 90 ? " full" : ""}`}
                       role="meter"
-                      aria-label={`${d.mount_point} used`}
+                      aria-label={t("servers.widget.diskMeter", { mount: d.mount_point })}
                       aria-valuemin={0}
                       aria-valuemax={100}
                       aria-valuenow={Math.round(used)}
@@ -156,6 +167,7 @@ const total = (rates: (number | null)[]) =>
 
 // NetworkWidget shows the traffic of all interfaces, now and over time.
 export function NetworkWidget(props: WidgetProps) {
+  const t = useT();
   return (
     <AgentView {...props}>
       {({ points, latest }) => {
@@ -169,11 +181,11 @@ export function NetworkWidget(props: WidgetProps) {
               caption={`↑ ${formatRate(up.at(-1) ?? 0)}`}
             />
             <Chart
-              title="Network traffic over the last minutes"
+              title={t("servers.widget.networkChart")}
               times={times(points)}
               series={[
-                { label: "Received", values: down },
-                { label: "Sent", values: up },
+                { label: t("servers.widget.received"), values: down },
+                { label: t("servers.widget.sent"), values: up },
               ]}
               minTop={1024}
               formatValue={formatRate}
@@ -182,9 +194,9 @@ export function NetworkWidget(props: WidgetProps) {
               <table>
                 <thead>
                   <tr>
-                    <th>Interface</th>
-                    <th>Received</th>
-                    <th>Sent</th>
+                    <th>{t("servers.widget.interface")}</th>
+                    <th>{t("servers.widget.received")}</th>
+                    <th>{t("servers.widget.sent")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -207,6 +219,7 @@ export function NetworkWidget(props: WidgetProps) {
 
 // UptimeWidget shows how long the server has been running.
 export function UptimeWidget(props: WidgetProps) {
+  const t = useT();
   return (
     <AgentView {...props}>
       {({ agent, latest }) => {
@@ -216,7 +229,7 @@ export function UptimeWidget(props: WidgetProps) {
         return (
           <Stat
             value={formatDuration(seconds)}
-            caption={since === null ? undefined : `since ${new Date(since).toLocaleString()}`}
+            caption={since === null ? undefined : t("servers.widget.since", { date: new Date(since).toLocaleString() })}
           />
         );
       }}

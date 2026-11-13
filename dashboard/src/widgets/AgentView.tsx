@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { formatAgo } from "../format";
+import { useT } from "../i18n";
 import { lastSeen } from "../live";
 import { useLiveAgent, type LiveAgent } from "../LiveProvider";
 import type { WidgetProps } from "./registry";
@@ -13,16 +14,17 @@ interface Props extends WidgetProps {
 // agents, a stale agent and a lost connection, and draws the widget itself
 // only when there is an agent to show.
 export function AgentView({ config, setConfig, children }: Props) {
+  const t = useT();
   const view = useLiveAgent(config.agentId);
-  if (view.status === "loading") return <p>Loading…</p>;
-  if (view.status === "empty") return <p>No agents connected.</p>;
+  if (view.status === "loading") return <p>{t("servers.loading")}</p>;
+  if (view.status === "empty") return <p>{t("servers.list.noneConnected")}</p>;
 
   const { agents, agent, stale, connection } = view;
   return (
     <div className="agent-view">
       {agents.length > 1 && !config.fixed && (
         <select
-          aria-label="Server"
+          aria-label={t("servers.fact.server")}
           value={agent.id}
           onChange={(e) => setConfig({ ...config, agentId: e.target.value })}
         >
@@ -35,12 +37,12 @@ export function AgentView({ config, setConfig, children }: Props) {
       )}
       {stale && (
         <p role="status" className="note warn">
-          No news from this server since {formatAgo(new Date(lastSeen(agent)).toISOString())}.
+          {t("servers.widget.staleNote", { ago: formatAgo(new Date(lastSeen(agent)).toISOString()) })}
         </p>
       )}
       {connection === "offline" && (
         <p role="status" className="note warn">
-          Connection to the hub lost, reconnecting…
+          {t("servers.widget.connectionLost")}
         </p>
       )}
       {children(view)}
@@ -50,5 +52,6 @@ export function AgentView({ config, setConfig, children }: Props) {
 
 // Waiting is shown by widgets that need a metrics report when none arrived yet.
 export function Waiting() {
-  return <p>Waiting for the first report…</p>;
+  const t = useT();
+  return <p>{t("servers.widget.waiting")}</p>;
 }

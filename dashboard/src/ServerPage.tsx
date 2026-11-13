@@ -4,7 +4,9 @@ import { ApiError, can, fetchAgent, renameAgent, revokeAgent, type Agent } from 
 import { serverIdFromHash } from "./route";
 import { useSession } from "./session";
 import { errorMessage } from "./useApiList";
+import { useT } from "./i18n";
 import { registry } from "./widgets";
+import { widgetTitle } from "./widgets/registry";
 
 // The widgets of the page of a server, in order.
 const WIDGETS = ["system", "cpu", "memory", "network", "disk"];
@@ -15,6 +17,7 @@ type State = { kind: "loading" } | { kind: "missing" } | { kind: "error"; messag
 
 // ServerPage shows one server: its state and the widgets bound to it.
 export function ServerPage({ id = serverIdFromHash(window.location.hash) }: { id?: string }) {
+  const t = useT();
   const session = useSession();
   const expired = session?.expired;
   const [state, setState] = useState<State>({ kind: "loading" });
@@ -44,14 +47,14 @@ export function ServerPage({ id = serverIdFromHash(window.location.hash) }: { id
   return (
     <section aria-labelledby="server-heading">
       <p>
-        <a href="#/servers">← All servers</a>
+        <a href="#/servers">{t("servers.server.back")}</a>
       </p>
-      {state.kind === "loading" && <p>Loading…</p>}
-      {state.kind === "error" && <p role="alert">Could not load the server: {state.message}</p>}
+      {state.kind === "loading" && <p>{t("servers.loading")}</p>}
+      {state.kind === "error" && <p role="alert">{t("servers.server.loadError", { message: state.message })}</p>}
       {state.kind === "missing" && (
         <>
-          <h2 id="server-heading">Server not found</h2>
-          <p>There is no server with this id.</p>
+          <h2 id="server-heading">{t("servers.server.notFound")}</h2>
+          <p>{t("servers.server.notFoundBody")}</p>
         </>
       )}
       {state.kind === "ready" && <Details agent={state.agent} canManage={can(session?.user, "servers.manage")} onChanged={reload} />}
@@ -60,35 +63,36 @@ export function ServerPage({ id = serverIdFromHash(window.location.hash) }: { id
 }
 
 function Details({ agent, canManage, onChanged }: { agent: Agent; canManage: boolean; onChanged: () => void }) {
+  const t = useT();
   const online = agent.status === "connected" || agent.status === "stale";
   return (
     <>
       <h2 id="server-heading">
-        {displayName(agent)} <span className={`status ${agent.status}`}>{statusLabel(agent)}</span>
+        {displayName(agent)} <span className={`status ${agent.status}`}>{statusLabel(agent, t)}</span>
       </h2>
       <dl className="facts server-facts">
         <div>
-          <dt>Id</dt>
+          <dt>{t("servers.fact.id")}</dt>
           <dd>{agent.id}</dd>
         </div>
         <div>
-          <dt>Host</dt>
+          <dt>{t("servers.fact.host")}</dt>
           <dd>{agent.hostname || "-"}</dd>
         </div>
         <div>
-          <dt>System</dt>
+          <dt>{t("servers.fact.system")}</dt>
           <dd>{[agent.os_version ?? agent.os, agent.arch].filter(Boolean).join(" ") || "-"}</dd>
         </div>
         <div>
-          <dt>Agent version</dt>
+          <dt>{t("servers.fact.agentVersion")}</dt>
           <dd>
             {agent.version || "-"}
-            {versionNote(agent) && <span className="muted"> ({versionNote(agent)})</span>}
+            {versionNote(agent, t) && <span className="muted"> ({versionNote(agent, t)})</span>}
           </dd>
         </div>
         <div>
-          <dt>Last contact</dt>
-          <dd>{lastContact(agent)}</dd>
+          <dt>{t("servers.fact.lastContact")}</dt>
+          <dd>{lastContact(agent, t)}</dd>
         </div>
       </dl>
       {canManage && agent.id !== "local" && <Manage agent={agent} onChanged={onChanged} />}
@@ -99,9 +103,9 @@ function Details({ agent, canManage, onChanged }: { agent: Agent; canManage: boo
             if (!def) return null;
             const Widget = def.component;
             return (
-              <section key={w} className="widget" aria-label={def.title}>
+              <section key={w} className="widget" aria-label={widgetTitle(def, t)}>
                 <header>
-                  <h3 className="widget-title">{def.title}</h3>
+                  <h3 className="widget-title">{widgetTitle(def, t)}</h3>
                 </header>
                 <div className="widget-body">
                   <Widget instanceId={`server-${w}`} config={{ agentId: agent.id, fixed: true }} setConfig={() => undefined} />
@@ -113,10 +117,10 @@ function Details({ agent, canManage, onChanged }: { agent: Agent; canManage: boo
       ) : (
         <p role="status" className="note warn">
           {agent.status === "revoked"
-            ? "This server was revoked and cannot connect any more. To use it again, remove its agent data directory and add it with a new token."
+            ? t("servers.server.revokedNote")
             : agent.status === "incompatible"
-              ? `The hub refuses this server's agent: ${agent.incompatible_reason ?? "its version does not work with this hub"}. The agent keeps trying and connects once it is updated.`
-              : "This server is offline. Its metrics appear here again when its agent reconnects."}
+              ? t("servers.server.incompatibleNote", { reason: agent.incompatible_reason ?? t("servers.server.incompatibleFallback") })
+              : t("servers.server.offlineNote")}
         </p>
       )}
     </>
@@ -124,6 +128,7 @@ function Details({ agent, canManage, onChanged }: { agent: Agent; canManage: boo
 }
 
 function Manage({ agent, onChanged }: { agent: Agent; onChanged: () => void }) {
+  const t = useT();
   const [name, setName] = useState(agent.name ?? "");
   const [error, setError] = useState("");
 
@@ -146,10 +151,10 @@ function Manage({ agent, onChanged }: { agent: Agent; onChanged: () => void }) {
         }}
       >
         <label>
-          Name
+          {t("servers.server.nameLabel")}
           <input value={name} onChange={(e) => setName(e.target.value)} maxLength={64} placeholder={agent.hostname || agent.id} />
         </label>
-        <button type="submit">Rename</button>
+        <button type="submit">{t("servers.server.rename")}</button>
       </form>
       {error && <p role="alert">{error}</p>}
       {agent.status !== "revoked" && (
@@ -157,12 +162,12 @@ function Manage({ agent, onChanged }: { agent: Agent; onChanged: () => void }) {
           <button
             type="button"
             onClick={() => {
-              if (window.confirm(`Revoke ${displayName(agent)}? It will be disconnected and can never connect again.`)) {
+              if (window.confirm(t("servers.server.revokeConfirm", { name: displayName(agent) }))) {
                 void run(() => revokeAgent(agent.id));
               }
             }}
           >
-            Revoke this server
+            {t("servers.server.revoke")}
           </button>
         </p>
       )}

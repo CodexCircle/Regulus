@@ -1,6 +1,16 @@
 import { AgentsWidget } from "./AgentsWidget";
 import { CpuWidget, DiskWidget, MemoryWidget, NetworkWidget, SystemWidget, UptimeWidget } from "./BaseWidgets";
-import { WidgetRegistry } from "./registry";
+import { en } from "../i18n/en";
+import { WidgetRegistry, type WidgetDefinition } from "./registry";
+
+// texts gives a built-in widget its English title and description and the
+// catalog keys the dashboard translates them with.
+const texts = (name: "system" | "cpu" | "memory" | "network" | "disk" | "uptime" | "agents"): Pick<WidgetDefinition, "title" | "description" | "titleKey" | "descriptionKey"> => ({
+  title: en[`servers.widget.${name}.title`],
+  description: en[`servers.widget.${name}.description`],
+  titleKey: `servers.widget.${name}.title`,
+  descriptionKey: `servers.widget.${name}.description`,
+});
 
 export { WidgetRegistry, type WidgetDefinition, type WidgetProps } from "./registry";
 
@@ -12,8 +22,7 @@ export const registerWidget = registry.register.bind(registry);
 
 registerWidget({
   id: "system",
-  title: "System",
-  description: "What the server is: host, system, kernel, memory, load and uptime.",
+  ...texts("system"),
   defaultSize: { w: 4, h: 6 },
   minSize: { w: 3, h: 3 },
   inDefaultLayout: true,
@@ -22,8 +31,7 @@ registerWidget({
 
 registerWidget({
   id: "cpu",
-  title: "CPU",
-  description: "CPU usage now and over the last minutes, with the load average.",
+  ...texts("cpu"),
   defaultSize: { w: 4, h: 6 },
   minSize: { w: 3, h: 3 },
   inDefaultLayout: true,
@@ -32,8 +40,7 @@ registerWidget({
 
 registerWidget({
   id: "memory",
-  title: "Memory",
-  description: "Memory in use now and over the last minutes, and swap.",
+  ...texts("memory"),
   defaultSize: { w: 4, h: 6 },
   minSize: { w: 3, h: 3 },
   inDefaultLayout: true,
@@ -42,8 +49,7 @@ registerWidget({
 
 registerWidget({
   id: "network",
-  title: "Network",
-  description: "Received and sent traffic, in total and per interface.",
+  ...texts("network"),
   defaultSize: { w: 6, h: 6 },
   minSize: { w: 3, h: 3 },
   inDefaultLayout: true,
@@ -52,8 +58,7 @@ registerWidget({
 
 registerWidget({
   id: "disk",
-  title: "Disk usage",
-  description: "How full each disk is.",
+  ...texts("disk"),
   defaultSize: { w: 6, h: 6 },
   minSize: { w: 3, h: 2 },
   inDefaultLayout: true,
@@ -62,8 +67,7 @@ registerWidget({
 
 registerWidget({
   id: "uptime",
-  title: "Uptime",
-  description: "How long the server has been running.",
+  ...texts("uptime"),
   defaultSize: { w: 3, h: 2 },
   minSize: { w: 2, h: 2 },
   component: UptimeWidget,
@@ -71,8 +75,7 @@ registerWidget({
 
 registerWidget({
   id: "agents",
-  title: "Servers",
-  description: "Connected servers with their status, last heartbeat and uptime.",
+  ...texts("agents"),
   defaultSize: { w: 12, h: 4 },
   minSize: { w: 4, h: 3 },
   inDefaultLayout: true,
