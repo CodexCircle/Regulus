@@ -194,26 +194,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) operationDone(msg opMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.err != nil && msg.kind == "agents":
-		m.say("Could not turn on remote agents: "+msg.err.Error()+". Open the console with sudo, or set agent_listen by hand.", true)
+		m.say(fmt.Sprintf(T.MsgAgentsFailed, msg.err.Error()), true)
 	case msg.kind == "agents-saved":
 		m.needsRestart = true
-		m.say("Saved agent_listen = "+remoteAgentsListen+". "+T.RestartHint, false)
+		m.say(fmt.Sprintf(T.MsgAgentsSaved, remoteAgentsListen)+" "+T.RestartHint, false)
 		return m, m.collect()
 	case msg.kind == "agents":
 		m.needsRestart = false
-		m.say("Remote agents are on, port 8443. Open it in the firewall towards the servers you manage.", false)
+		m.say(T.MsgAgentsOn, false)
 		return m, m.collect()
 	case msg.err != nil && msg.kind == "restart":
-		m.say("Could not restart: "+msg.err.Error()+". Run: sudo systemctl restart "+ServiceUnit, true)
+		m.say(fmt.Sprintf(T.MsgRestartFailed, msg.err.Error(), ServiceUnit), true)
 	case msg.err != nil:
-		m.say("Could not make the link: "+msg.err.Error(), true)
+		m.say(fmt.Sprintf(T.MsgLinkFailed, msg.err.Error()), true)
 	case msg.kind == "restart":
 		m.needsRestart = false
-		m.say("The service was restarted.", false)
+		m.say(T.MsgRestarted, false)
 		return m, m.collect()
 	default:
 		m.resetLink = msg.link
-		m.say("Open the link below to choose a new password. It works once.", false)
+		m.say(T.MsgLinkReady, false)
 	}
 	return m, nil
 }
@@ -334,10 +334,10 @@ func (m Model) answer(k string) (tea.Model, tea.Cmd) {
 	switch what {
 	case "restart":
 		if hooks.Restart == nil {
-			m.say("Restarting is not available here. Run: sudo systemctl restart "+ServiceUnit, true)
+			m.say(fmt.Sprintf(T.MsgRestartUnavailable, ServiceUnit), true)
 			return m, nil
 		}
-		m.say("Restarting…", false)
+		m.say(T.MsgRestarting, false)
 		return m, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -345,7 +345,7 @@ func (m Model) answer(k string) (tea.Model, tea.Cmd) {
 		}
 	case "agents":
 		file := m.snap.ConfigFile
-		m.say("Turning on remote agents…", false)
+		m.say(T.MsgTurningOn, false)
 		return m, func() tea.Msg {
 			if _, err := config.SetFile(file, "agent_listen", remoteAgentsListen); err != nil {
 				return opMsg{kind: "agents", err: err}
@@ -361,7 +361,7 @@ func (m Model) answer(k string) (tea.Model, tea.Cmd) {
 			return opMsg{kind: "agents"}
 		}
 	case "reset":
-		m.say("Making the link…", false)
+		m.say(T.MsgMakingLink, false)
 		return m, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -428,7 +428,7 @@ func (m Model) edit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.editing = false
 		m.input.Blur()
-		text := fmt.Sprintf("Saved %s = %s.", e.Key, displayValue(value))
+		text := fmt.Sprintf(T.MsgSaved, e.Key, displayValue(value))
 		if e.Restart && value != e.Value {
 			m.needsRestart = true
 			text += " " + T.RestartHint
@@ -647,7 +647,7 @@ func (m Model) statusBody() []string {
 		out = append(out, "", " "+headStyle.Render(T.SetupTitle), " "+T.SetupText, "   "+selectStyle.Render(s.SetupToken))
 	}
 	if m.resetLink != "" {
-		out = append(out, "", " "+headStyle.Render("Password reset link"), "   "+selectStyle.Render(m.resetLink))
+		out = append(out, "", " "+headStyle.Render(T.ResetLinkTitle), "   "+selectStyle.Render(m.resetLink))
 	}
 
 	out = append(out, "", " "+headStyle.Render(fmt.Sprintf("%s (%d)", T.Agents, len(s.Agents))))

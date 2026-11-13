@@ -163,6 +163,7 @@ func runStatus(args []string) int { return consoleCommand(args, hostEnv(), false
 // consoleCommand shows the console when it should open and the status as text
 // otherwise. interactive is false for `status`, which never opens the screen.
 func consoleCommand(args []string, e env, interactive bool) int {
+	console.UseLocale(e.getenv)
 	name, usage := "status", "Usage: regulus status [--json|--plain] [--config FILE]\n\nPrints what the hub is doing. Exit status 0 when the hub is running, 3 when it is not."
 	if interactive {
 		name, usage = "console", "Usage: regulus [console] [--no-tui] [--json|--plain] [--config FILE]\n\nOpens the interactive console to check and change the hub. It prints the status\nas text instead when it is not run in a terminal, or when --no-tui,\nREGULUS_NO_TUI=1 or console.tui: false in the configuration says so."
@@ -336,6 +337,7 @@ hub reads it at start, so restart the service after 'set' (sudo systemctl
 restart regulus). The settings are: `
 
 func configCommand(args []string, e env) int {
+	console.UseLocale(e.getenv)
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		_, _ = fmt.Fprintln(e.stderr, configUsage+strings.Join(config.Keys(), ", ")+".")
 		if len(args) == 0 {

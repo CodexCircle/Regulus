@@ -131,6 +131,7 @@ Agreed in conversation on 2026-11-13, **proposed**, to be confirmed in the desig
 
 - **No library:** two typed catalogs (`dashboard/src/i18n/en.ts` is the source, `it.ts` is `Record<keyof en, string>`), so a missing Italian text is a compile error, plus a test for extra keys, empty texts and placeholder mismatches. Keys are stable dotted names, not the English text. No plural machinery (two keys where a count matters); dates and numbers through `Intl`.
 - **Language:** the saved choice (`localStorage`, `regulus.language`), else the browser's (`it*` is Italian), else English; a switch in the header; `<html lang>` follows. Components work without the provider (the detected language), which keeps small tests simple.
+- **Console:** one `strs` table per language in `internal/console/strings.go`, chosen once at start by `UseLocale` from the first set of `LC_ALL`, `LC_MESSAGES` and `LANG` (C-library order); machine formats (`--plain`, `--json`) are never translated. Texts shown after an action became table fields (templates with `%s`). Left in the code: health-check names and details and a few literals (#191).
 - **Migration** is one pull request per page group; the first slice moved the header, the navigation and the database banner. The console gets an Italian table and a test in a later pull request. Still open: who reviews the Italian wording (a first draft was written by the assistant), and a per-user language setting stored on the hub.
 
 ## Open questions
