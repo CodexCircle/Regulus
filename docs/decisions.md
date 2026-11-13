@@ -105,6 +105,18 @@ Done in #122. Choices, so they are not rediscovered:
 - **Upgrades.** An installation is recognised by the installed package, the SQLite file or database settings in the environment file. Without `--database` its backend is kept and nothing is asked or written; naming the other backend stops with a pointer to #124 before anything is downloaded.
 - **Not verified:** the installer has not run on a real VM with PostgreSQL (#81), and not with `apt` upgrading an existing PostgreSQL install. The script is tested with stubs for `dpkg-deb` and the binary, and by hand against a PostgreSQL 16 with SCRAM authentication using the real binary (wrong password stops, right password writes the file; a password with quotes, a backslash and `$` round-trips).
 
+## Regulus Access: direction (not final; epic #152)
+
+Agreed in conversation on 2026-11-13, **proposed**, to be confirmed in the design issues of #152. Nothing is implemented. Recorded here so the reasoning is not lost:
+
+- **The phone connects to the hub, not to the nodes.** It is always the client, so mobile networks and NAT do not matter, and no node opens a new port. Identity is a device certificate from the group's CA with the key in the Android Keystore; mTLS over TLS 1.3 already encrypts, so no extra encryption layer. mTLS does not depend on the phone's address.
+- **Rejected for the first version:** a public Access listener on every node (multiplies the attack surface), and a mandatory overlay network (Tailscale, WireGuard): not needed for security. The overlay stays an optional way not to expose anything.
+- **Away from home: the access gateway** (#161), a public node that forwards the phone's connection to the active hub. mTLS stays end to end phone to hub; the gateway holds no secrets. It follows a failover to the redundant hub. Its extra capabilities: notifications (second step) and authentication for other programs (later, **separate design**, because it would make a public machine hold keys).
+- **At home: the local address first** (#162), as an ordered address list with the CA fingerprint checked on every path; no discovery in the first version.
+- **Node types** are one role plus capabilities, and every node keeps the same connection to the hub inside; see [node-types.md](node-types.md) (#160). Direct node-to-node links are left for later and, when they exist, are authorised by the hub.
+- **Passkeys (#50)** stay for the web login; Access uses the device key.
+- **Free-tier cloud servers:** a plugin to measure use and optionally keep a server active (#163) is only built after the provider's current terms are read.
+
 ## Open questions
 
 - Should the other privileged actions use a `sudoers.d` rule or a root helper like the updates? (#60)
