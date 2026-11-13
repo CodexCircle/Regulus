@@ -21,6 +21,7 @@ import {
 } from "./api";
 import { formatAgo } from "./format";
 import { RolesPanel } from "./RolesPanel";
+import { useT } from "./i18n";
 import { useSession } from "./session";
 import { errorMessage, useApiList } from "./useApiList";
 
@@ -28,6 +29,7 @@ import { errorMessage, useApiList } from "./useApiList";
 // shows to those who hold its permission (users.manage, roles.manage,
 // audit.read).
 export function UsersPage() {
+  const t = useT();
   const session = useSession();
   const user = session?.user;
   const manageUsers = can(user, "users.manage");
@@ -36,14 +38,14 @@ export function UsersPage() {
   if (!user || !(manageUsers || manageRoles || readAudit)) {
     return (
       <section aria-labelledby="users-heading">
-        <h2 id="users-heading">Users</h2>
-        <p role="alert">You are not allowed to manage users.</p>
+        <h2 id="users-heading">{t("users.title")}</h2>
+        <p role="alert">{t("users.notAllowed")}</p>
       </section>
     );
   }
   return (
     <section aria-labelledby="users-heading">
-      <h2 id="users-heading">Users</h2>
+      <h2 id="users-heading">{t("users.title")}</h2>
       {(manageUsers || manageRoles) && <Accounts self={user.username} manageUsers={manageUsers} manageRoles={manageRoles} />}
       {manageUsers && <Security />}
       {readAudit && <Audit />}
@@ -54,13 +56,14 @@ export function UsersPage() {
 // Accounts loads the roles once for the account table, the new account form
 // and the roles panel.
 function Accounts({ self, manageUsers, manageRoles }: { self: string; manageUsers: boolean; manageRoles: boolean }) {
+  const t = useT();
   // The list state holds one item: the roles with the permission catalogue.
   const load = useCallback(async (signal: AbortSignal) => [await fetchRoles(signal)], []);
   const [loaded, reload] = useApiList<RoleList>(load);
   const list = loaded.kind === "ready" ? loaded.items[0] : undefined;
   return (
     <>
-      {loaded.kind === "error" && <p role="alert">Could not load the roles: {loaded.message}</p>}
+      {loaded.kind === "error" && <p role="alert">{t("users.rolesLoadFailed", { message: loaded.message })}</p>}
       {manageUsers && <UserTable self={self} roles={list?.roles ?? []} />}
       {manageRoles && list && <RolesPanel roles={list.roles} permissions={list.permissions} onChanged={reload} />}
     </>
@@ -84,6 +87,7 @@ function RoleOptions({ roles, current }: { roles: RoleInfo[]; current?: Role }) 
 }
 
 function UserTable({ self, roles }: { self: string; roles: RoleInfo[] }) {
+  const t = useT();
   const load = useCallback((signal: AbortSignal) => fetchUsers(signal), []);
   const [users, reload] = useApiList<User>(load);
   const [error, setError] = useState("");
@@ -102,20 +106,20 @@ function UserTable({ self, roles }: { self: string; roles: RoleInfo[] }) {
 
   return (
     <>
-      {users.kind === "loading" && <p>Loading…</p>}
-      {users.kind === "error" && <p role="alert">Could not load users: {users.message}</p>}
+      {users.kind === "loading" && <p>{t("users.loading")}</p>}
+      {users.kind === "error" && <p role="alert">{t("users.loadFailed", { message: users.message })}</p>}
       {error && <p role="alert">{error}</p>}
       {users.kind === "ready" && (
         <table>
           <thead>
             <tr>
-              <th>User</th>
-              <th>Role</th>
-              <th>Status</th>
-              <th>Two-factor</th>
-              <th>Created</th>
+              <th>{t("users.col.user")}</th>
+              <th>{t("users.col.role")}</th>
+              <th>{t("users.col.status")}</th>
+              <th>{t("users.col.twoFactor")}</th>
+              <th>{t("users.col.created")}</th>
               <th>
-                <span className="visually-hidden">Actions</span>
+                <span className="visually-hidden">{t("users.col.actions")}</span>
               </th>
             </tr>
           </thead>
@@ -124,11 +128,11 @@ function UserTable({ self, roles }: { self: string; roles: RoleInfo[] }) {
               <tr key={u.username}>
                 <td>
                   {u.username}
-                  {u.username === self && " (you)"}
+                  {u.username === self && t("users.you")}
                 </td>
                 <td>
                   <select
-                    aria-label={`Role of ${u.username}`}
+                    aria-label={t("users.roleOf", { name: u.username })}
                     value={u.role}
                     disabled={u.username === self}
                     onChange={(e) => void run(() => updateUser(u.username, { role: e.target.value as Role }))}
@@ -136,8 +140,8 @@ function UserTable({ self, roles }: { self: string; roles: RoleInfo[] }) {
                     <RoleOptions roles={roles} current={u.role} />
                   </select>
                 </td>
-                <td>{u.disabled ? "disabled" : "active"}</td>
-                <td>{u.two_factor ? "on" : "off"}</td>
+                <td>{u.disabled ? t("users.status.disabled") : t("users.status.active")}</td>
+                <td>{u.two_factor ? t("users.twoFactor.on") : t("users.twoFactor.off")}</td>
                 <td>{formatAgo(u.created_at)}</td>
                 <td className="row-actions">
                   <button
@@ -145,41 +149,41 @@ function UserTable({ self, roles }: { self: string; roles: RoleInfo[] }) {
                     disabled={u.username === self}
                     onClick={() => void run(() => updateUser(u.username, { disabled: !u.disabled }))}
                   >
-                    {u.disabled ? "Enable" : "Disable"} {u.username}
+                    {u.disabled ? t("users.enable", { name: u.username }) : t("users.disable", { name: u.username })}
                   </button>
                   <button
                     type="button"
                     disabled={u.username === self || u.disabled}
                     onClick={() => {
-                      if (window.confirm(`Make a password reset link for ${u.username}? It signs ${u.username} out everywhere.`)) {
+                      if (window.confirm(t("users.confirmResetPassword", { name: u.username }))) {
                         void run(async () => setReset(await createReset(u.username)));
                       }
                     }}
                   >
-                    Reset password of {u.username}
+                    {t("users.resetPassword", { name: u.username })}
                   </button>
                   {u.two_factor && u.username !== self && (
                     <button
                       type="button"
                       onClick={() => {
-                        if (window.confirm(`Remove the two-factor authentication of ${u.username}? ${u.username} is signed out everywhere and can sign in with the password alone.`)) {
+                        if (window.confirm(t("users.confirmResetTwoFactor", { name: u.username }))) {
                           void run(() => resetUserTwoFactor(u.username));
                         }
                       }}
                     >
-                      Reset two-factor of {u.username}
+                      {t("users.resetTwoFactor", { name: u.username })}
                     </button>
                   )}
                   <button
                     type="button"
                     disabled={u.username === self}
                     onClick={() => {
-                      if (window.confirm(`Delete the account ${u.username}? This cannot be undone.`)) {
+                      if (window.confirm(t("users.confirmDelete", { name: u.username }))) {
                         void run(() => deleteUser(u.username));
                       }
                     }}
                   >
-                    Delete {u.username}
+                    {t("users.delete", { name: u.username })}
                   </button>
                 </td>
               </tr>
@@ -196,6 +200,7 @@ function UserTable({ self, roles }: { self: string; roles: RoleInfo[] }) {
 // ResetLink shows the link of a password reset once, for the admin to hand to
 // the user.
 function ResetLink({ reset, onClose }: { reset: PasswordReset; onClose: () => void }) {
+  const t = useT();
   const link = `${window.location.origin}${window.location.pathname}#/reset/${reset.token}`;
   const [copied, setCopied] = useState(false);
   const copy = () => {
@@ -205,19 +210,16 @@ function ResetLink({ reset, onClose }: { reset: PasswordReset; onClose: () => vo
     );
   };
   return (
-    <div className="panel" role="status" aria-label={`Reset link for ${reset.username}`}>
-      <h3>Reset link for {reset.username}</h3>
-      <p>
-        Give this link to {reset.username}. It works once and expires at {new Date(reset.expires_at).toLocaleString()}. It is not shown
-        again, and you never see the new password.
-      </p>
-      <input readOnly value={link} aria-label="Reset link" onFocus={(e) => e.target.select()} />
+    <div className="panel" role="status" aria-label={t("users.resetLink.label", { name: reset.username })}>
+      <h3>{t("users.resetLink.label", { name: reset.username })}</h3>
+      <p>{t("users.resetLink.text", { name: reset.username, expires: new Date(reset.expires_at).toLocaleString() })}</p>
+      <input readOnly value={link} aria-label={t("users.resetLink.input")} onFocus={(e) => e.target.select()} />
       <p className="row-actions">
         <button type="button" onClick={copy}>
-          {copied ? "Copied" : "Copy link"}
+          {copied ? t("users.resetLink.copied") : t("users.resetLink.copy")}
         </button>
         <button type="button" onClick={onClose}>
-          Done
+          {t("users.resetLink.done")}
         </button>
       </p>
     </div>
@@ -226,6 +228,7 @@ function ResetLink({ reset, onClose }: { reset: PasswordReset; onClose: () => vo
 
 // Security is where admins choose who must use two-factor authentication.
 function Security() {
+  const t = useT();
   const [settings, setSettings] = useState<SecuritySettings | null>(null);
   const [error, setError] = useState("");
 
@@ -248,28 +251,29 @@ function Security() {
 
   return (
     <section aria-labelledby="security-heading" className="panel">
-      <h3 id="security-heading">Security</h3>
+      <h3 id="security-heading">{t("users.security.title")}</h3>
       {error && <p role="alert">{error}</p>}
       {settings && (
         <label>
-          Who must use two-factor authentication
+          {t("users.security.who")}
           <select
             value={settings.two_factor_policy}
             disabled={!settings.two_factor_available}
             onChange={(e) => void change(e.target.value as TwoFactorPolicy)}
           >
-            <option value="off">nobody (optional for everyone)</option>
-            <option value="admins">administrators</option>
-            <option value="all">everyone</option>
+            <option value="off">{t("users.security.nobody")}</option>
+            <option value="admins">{t("users.security.admins")}</option>
+            <option value="all">{t("users.security.all")}</option>
           </select>
         </label>
       )}
-      <p className="hint">Users it applies to set it up the next time they use Regulus, before anything else.</p>
+      <p className="hint">{t("users.security.hint")}</p>
     </section>
   );
 }
 
 function NewUserForm({ roles, onCreated }: { roles: RoleInfo[]; onCreated: () => void }) {
+  const t = useT();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("viewer");
@@ -295,51 +299,52 @@ function NewUserForm({ roles, onCreated }: { roles: RoleInfo[]; onCreated: () =>
 
   return (
     <form className="panel" onSubmit={(e) => void submit(e)}>
-      <h3>Add a user</h3>
+      <h3>{t("users.add.title")}</h3>
       <label>
-        Username
+        {t("users.add.username")}
         <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" required />
       </label>
       <label>
-        Password
+        {t("users.add.password")}
         <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={10} required />
       </label>
       <label>
-        Role
+        {t("users.add.role")}
         <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
           <RoleOptions roles={roles} current="viewer" />
         </select>
       </label>
       {error && <p role="alert">{error}</p>}
       <button type="submit" disabled={busy}>
-        Add user
+        {t("users.add.submit")}
       </button>
     </form>
   );
 }
 
 function Audit() {
+  const t = useT();
   const load = useCallback((signal: AbortSignal) => fetchAudit(100, signal), []);
   const [entries, reload] = useApiList(load);
   return (
     <section aria-labelledby="audit-heading" className="panel">
-      <h3 id="audit-heading">Recent activity</h3>
+      <h3 id="audit-heading">{t("users.audit.title")}</h3>
       <button type="button" onClick={reload}>
-        Refresh
+        {t("users.audit.refresh")}
       </button>
-      {entries.kind === "loading" && <p>Loading…</p>}
-      {entries.kind === "error" && <p role="alert">Could not load the activity: {entries.message}</p>}
-      {entries.kind === "ready" && entries.items.length === 0 && <p>Nothing yet.</p>}
+      {entries.kind === "loading" && <p>{t("users.loading")}</p>}
+      {entries.kind === "error" && <p role="alert">{t("users.audit.loadFailed", { message: entries.message })}</p>}
+      {entries.kind === "ready" && entries.items.length === 0 && <p>{t("users.audit.empty")}</p>}
       {entries.kind === "ready" && entries.items.length > 0 && (
         <table>
           <thead>
             <tr>
-              <th>When</th>
-              <th>Who</th>
-              <th>Event</th>
-              <th>Target</th>
-              <th>From</th>
-              <th>Detail</th>
+              <th>{t("users.audit.when")}</th>
+              <th>{t("users.audit.who")}</th>
+              <th>{t("users.audit.event")}</th>
+              <th>{t("users.audit.target")}</th>
+              <th>{t("users.audit.from")}</th>
+              <th>{t("users.audit.detail")}</th>
             </tr>
           </thead>
           <tbody>

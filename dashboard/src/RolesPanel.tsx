@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { createRole, deleteRole, updateRole, type PermissionInfo, type RoleInfo } from "./api";
+import { useT } from "./i18n";
 import { errorMessage } from "./useApiList";
 
 interface Props {
@@ -12,11 +13,12 @@ interface Props {
 // and delete their own. The built-in ones are fixed; the hub refuses anything
 // that would give someone more than the person asking holds.
 export function RolesPanel({ roles, permissions, onChanged }: Props) {
+  const t = useT();
   const [editing, setEditing] = useState<RoleInfo | "new" | null>(null);
   const [error, setError] = useState("");
 
   const remove = async (role: RoleInfo) => {
-    if (!window.confirm(`Delete the role ${role.name}?`)) return;
+    if (!window.confirm(t("users.roles.confirmDelete", { name: role.name }))) return;
     setError("");
     try {
       await deleteRole(role.name);
@@ -28,16 +30,16 @@ export function RolesPanel({ roles, permissions, onChanged }: Props) {
 
   return (
     <section aria-labelledby="roles-heading" className="panel">
-      <h3 id="roles-heading">Roles</h3>
+      <h3 id="roles-heading">{t("users.roles.title")}</h3>
       {error && <p role="alert">{error}</p>}
       <table>
         <thead>
           <tr>
-            <th>Role</th>
-            <th>Can</th>
-            <th>Users</th>
+            <th>{t("users.roles.colRole")}</th>
+            <th>{t("users.roles.colCan")}</th>
+            <th>{t("users.roles.colUsers")}</th>
             <th>
-              <span className="visually-hidden">Actions</span>
+              <span className="visually-hidden">{t("users.roles.colActions")}</span>
             </th>
           </tr>
         </thead>
@@ -46,19 +48,19 @@ export function RolesPanel({ roles, permissions, onChanged }: Props) {
             <tr key={r.name}>
               <td>
                 {r.name}
-                {r.builtin && " (built in)"}
+                {r.builtin && t("users.roles.builtIn")}
                 {r.description && <div className="hint">{r.description}</div>}
               </td>
-              <td>{r.permissions.join(", ") || "nothing"}</td>
+              <td>{r.permissions.join(", ") || t("users.roles.nothing")}</td>
               <td>{r.users}</td>
               <td className="row-actions">
                 {!r.builtin && (
                   <>
                     <button type="button" onClick={() => setEditing(r)}>
-                      Edit {r.name}
+                      {t("users.roles.edit", { name: r.name })}
                     </button>
                     <button type="button" onClick={() => void remove(r)}>
-                      Delete role {r.name}
+                      {t("users.roles.delete", { name: r.name })}
                     </button>
                   </>
                 )}
@@ -69,7 +71,7 @@ export function RolesPanel({ roles, permissions, onChanged }: Props) {
       </table>
       {editing === null ? (
         <button type="button" onClick={() => setEditing("new")}>
-          Add a role
+          {t("users.roles.add")}
         </button>
       ) : (
         <RoleForm
@@ -98,6 +100,7 @@ function RoleForm({
   onDone: () => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const [name, setName] = useState(role?.name ?? "");
   const [description, setDescription] = useState(role?.description ?? "");
   const [granted, setGranted] = useState<Set<string>>(new Set(role?.permissions));
@@ -131,18 +134,18 @@ function RoleForm({
   };
 
   return (
-    <form className="panel" onSubmit={(e) => void submit(e)} aria-label={role ? `Edit the role ${role.name}` : "Add a role"}>
-      <h4>{role ? `Edit ${role.name}` : "Add a role"}</h4>
+    <form className="panel" onSubmit={(e) => void submit(e)} aria-label={role ? t("users.roles.formLabel", { name: role.name }) : t("users.roles.add")}>
+      <h4>{role ? t("users.roles.formTitle", { name: role.name }) : t("users.roles.add")}</h4>
       <label>
-        Role name
+        {t("users.roles.name")}
         <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required />
       </label>
       <label>
-        Description
+        {t("users.roles.description")}
         <input value={description} onChange={(e) => setDescription(e.target.value)} autoComplete="off" />
       </label>
       <fieldset>
-        <legend>Permissions</legend>
+        <legend>{t("users.roles.permissions")}</legend>
         {permissions.map((p) => (
           <label key={p.id} className="check">
             <input type="checkbox" checked={granted.has(p.id)} onChange={() => toggle(p.id)} />
@@ -155,10 +158,10 @@ function RoleForm({
       {error && <p role="alert">{error}</p>}
       <p className="row-actions">
         <button type="submit" disabled={busy}>
-          Save role
+          {t("users.roles.save")}
         </button>
         <button type="button" onClick={onCancel}>
-          Cancel
+          {t("users.roles.cancel")}
         </button>
       </p>
     </form>
