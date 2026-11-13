@@ -1,5 +1,7 @@
 package console
 
+import "strings"
+
 // Every word the console shows that is not data lives here, so that a
 // translation replaces one value and touches no other file.
 type strs struct {
@@ -44,6 +46,14 @@ type strs struct {
 	NewAgentTitle, NewAgentText          string
 	NewAgentAddress, NewAgentFingerprint string
 	NewAgentToken                        string
+
+	// Messages shown after an action. Most are fmt templates: the verbs are
+	// documented where they are used (internal/console/tui.go).
+	MsgAgentsFailed, MsgAgentsSaved, MsgAgentsOn string
+	MsgRestartFailed, MsgRestartUnavailable      string
+	MsgRestarting, MsgRestarted                  string
+	MsgLinkFailed, MsgLinkReady, MsgMakingLink   string
+	MsgTurningOn, MsgSaved, ResetLinkTitle       string
 }
 
 var en = strs{
@@ -115,7 +125,38 @@ var en = strs{
 	NewAgentAddress:     "Hub address",
 	NewAgentFingerprint: "CA fingerprint",
 	NewAgentToken:       "Token: make it in the dashboard, Servers → Add a server (it shows the whole command).",
+
+	MsgAgentsFailed:       "Could not turn on remote agents: %s. Open the console with sudo, or set agent_listen by hand.",
+	MsgAgentsSaved:        "Saved agent_listen = %s.",
+	MsgAgentsOn:           "Remote agents are on, port 8443. Open it in the firewall towards the servers you manage.",
+	MsgRestartFailed:      "Could not restart: %s. Run: sudo systemctl restart %s",
+	MsgRestartUnavailable: "Restarting is not available here. Run: sudo systemctl restart %s",
+	MsgRestarting:         "Restarting…",
+	MsgRestarted:          "The service was restarted.",
+	MsgLinkFailed:         "Could not make the link: %s",
+	MsgLinkReady:          "Open the link below to choose a new password. It works once.",
+	MsgMakingLink:         "Making the link…",
+	MsgTurningOn:          "Turning on remote agents…",
+	MsgSaved:              "Saved %s = %s.",
+	ResetLinkTitle:        "Password reset link",
 }
 
-// T is the language in use.
+// T is the language in use. It is English until UseLocale picks another.
 var T = en
+
+// UseLocale picks the console language from the environment, the way the C
+// library does: the first of LC_ALL, LC_MESSAGES and LANG that is set decides,
+// and a value that starts with "it" (it_IT.UTF-8, it) is Italian. Anything
+// else, and no value, is English. It sets the package-wide T, so call it once
+// at start (or again in tests: it always resets).
+func UseLocale(getenv func(string) string) {
+	T = en
+	for _, k := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
+		if v := strings.ToLower(strings.TrimSpace(getenv(k))); v != "" {
+			if v == "it" || strings.HasPrefix(v, "it_") || strings.HasPrefix(v, "it.") || strings.HasPrefix(v, "it@") {
+				T = it
+			}
+			return
+		}
+	}
+}
