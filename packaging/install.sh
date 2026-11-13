@@ -53,6 +53,15 @@ Usage: install.sh [options]
   --db-port PORT         PostgreSQL: port (default 5432)
   --db-name NAME         PostgreSQL: database name (default regulus)
   --db-user USER         PostgreSQL: user (default regulus)
+  --db-local             hub role: install the distribution's PostgreSQL here if it is not
+                         there, create the role and the database with a generated password
+                         (written only to /etc/regulus/regulus.env) and enable citext, then
+                         check it like any PostgreSQL. Implies --database postgres. It uses
+                         127.0.0.1 and leaves the other databases of the server alone, and
+                         refuses when the role or the database already exists
+  --db-reuse             with --db-local: the role and the database already exist, use them
+                         (give the password with --database-password-file or
+                         REGULUS_DATABASE_PASSWORD; it is not generated or changed)
   --db-sslmode MODE      PostgreSQL: disable, allow, prefer (default), require,
                          verify-ca or verify-full
   --db-sslrootcert FILE  PostgreSQL: CA file, for verify-ca and verify-full
@@ -74,7 +83,8 @@ anything and has no database.
 
 With --database postgres the installer connects to a PostgreSQL that already
 exists; it does not install PostgreSQL or create the role and the database.
-It checks the connection (regulus db check) before it installs anything.
+With --db-local it installs PostgreSQL here and creates them. Either way it
+checks the connection (regulus db check) before it installs Regulus.
 EOF
 }
 
@@ -430,8 +440,19 @@ valid_db_path() {
 check_database_args() {
 	db_options=$db_host$db_port$db_name$db_user$db_sslmode$db_sslrootcert$db_password_file
 	if [ "$role" = agent ]; then
-		[ -z "$database$db_options" ] || die "--database and the --db-* options are for the hub role: the agent has no database"
+		[ -z "$database$db_options" ] && [ "$db_local" = 0 ] && [ "$db_reuse" = 0 ] || die "--database, --db-local and the --db-* options are for the hub role: the agent has no database"
 		return 0
+	fi
+	if [ "$db_local" = 1 ]; then
+		[ -n "$database" ] || database=postgres
+		[ "$database" = postgres ] || die "--db-local is for --database postgres"
+		[ -z "$db_host" ] || die "--db-local uses PostgreSQL on this server (127.0.0.1): do not give --db-host; to use another server, leave out --db-local"
+		[ -z "$db_sslrootcert" ] || die "--db-local connects to this server: --db-sslrootcert is for a remote PostgreSQL"
+		if [ "$db_reuse" != 1 ] && [ -n "$db_password_file" ]; then
+			die "--db-local generates the password: --database-password-file is only used with --db-reuse"
+		fi
+	else
+		[ "$db_reuse" = 0 ] || die "--db-reuse is for --db-local"
 	fi
 	case "$database" in
 		"" | sqlite | postgres) ;;
@@ -492,6 +513,7 @@ existing_backend() {
 # ask_database asks which database to use, and the PostgreSQL connection data
 # that was not given as options, when the user can be asked.
 ask_database() {
+	[ "$db_local" != 1 ] || return 0
 	if [ -z "$database" ]; then
 		can_ask || return 0
 		printf 'Database: SQLite (default, nothing to set up) or PostgreSQL that you already prepared? [S/p] ' >/dev/tty
@@ -574,6 +596,18 @@ prepare_database() {
 	fi
 	[ "$database" = postgres ] || return 0
 
+	# --db-local on a server that already has an installation is a re-run: the
+	# installation keeps the database it has; nothing is created again.
+	db_local_new=0
+	if [ "$db_local" = 1 ]; then
+		if [ "$existing" = none ]; then
+			db_local_new=1
+			db_host=127.0.0.1
+		else
+			say "This server already has a Regulus installation with PostgreSQL: --db-local is ignored, and the database it uses is kept."
+		fi
+	fi
+
 	if [ "$db_keep" != 1 ]; then
 		# Defaults only for a new installation. Changing an existing one
 		# touches only what was given.
@@ -594,6 +628,10 @@ prepare_database() {
 				[ -n "$db_sslrootcert" ] || warn "$db_sslmode without --db-sslrootcert uses the system's CA list"
 				;;
 		esac
+	fi
+	# A password that is generated is not asked for.
+	if [ "$db_local_new" = 1 ] && [ "$db_reuse" != 1 ]; then
+		return 0
 	fi
 	load_database_password
 }
@@ -627,9 +665,109 @@ precheck_database() {
 			"$bin" db check --env-file /dev/null 2>&1
 	); then
 		printf '%s\n' "$out" >&2
+		if [ "$db_local_new" = 1 ]; then
+			die "PostgreSQL and the database were set up and the settings saved in $CONFIG_DIR/regulus.env, but Regulus is not installed yet. Fix the cause above (see docs/database.md), then run the installer again: it keeps these settings and does not create anything twice"
+		fi
 		die "the database cannot be used with these settings, so nothing was installed or changed. Fix the cause above (see docs/database.md for what to prepare) and run the installer again"
 	fi
 	say "$out"
+}
+
+# The small wrappers below are what --db-local does to the system; the tests
+# replace them.
+
+# as_postgres runs a command as the PostgreSQL system user.
+as_postgres() {
+	if [ "$(id -u)" -eq 0 ]; then
+		if have runuser; then
+			runuser -u postgres -- "$@"
+		else
+			su -s /bin/sh postgres -c "$(printf '%s ' "$@")"
+		fi
+	else
+		sudo -u postgres "$@"
+	fi
+}
+
+# pg_sql [DATABASE] runs the SQL on its standard input as the postgres user,
+# over the local socket. SQL goes through the standard input so a password is
+# never in a process list.
+pg_sql() {
+	as_postgres psql -X -q -t -A -v ON_ERROR_STOP=1 -p "$db_port" -d "${1:-postgres}"
+}
+
+# pg_install installs the distribution's PostgreSQL.
+pg_install() {
+	$SUDO env DEBIAN_FRONTEND=noninteractive apt-get update -qq || return 1
+	$SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql
+}
+
+# pg_ready succeeds when PostgreSQL answers on $db_port.
+pg_ready() {
+	have pg_isready && pg_isready -q -p "$db_port"
+}
+
+# pg_start asks systemd to start PostgreSQL.
+pg_start() {
+	$SUDO systemctl start postgresql
+}
+
+# pg_wait_ready waits up to 30 seconds for PostgreSQL, starting it once.
+pg_wait_ready() {
+	i=0
+	started=0
+	while [ "$i" -lt 30 ]; do
+		pg_ready && return 0
+		if [ "$started" = 0 ]; then
+			started=1
+			pg_start >/dev/null 2>&1 || true
+		fi
+		i=$((i + 1))
+		sleep 1
+	done
+	return 1
+}
+
+# generate_db_password prints 32 random letters and digits: nothing in it needs
+# quoting in SQL or in the environment file.
+generate_db_password() {
+	quiet_trace
+	LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32
+}
+
+# setup_local_database is --db-local: it installs PostgreSQL if it is missing
+# and creates the role and the database for Regulus with a generated password
+# (kept in $db_password, written later to the environment file only). It
+# creates only these, so other databases of the server are not touched, and it
+# refuses when they already exist unless --db-reuse was given.
+setup_local_database() {
+	quiet_trace
+	say "Setting up PostgreSQL on this server..."
+	if ! have psql || ! have pg_isready; then
+		say "Installing PostgreSQL from the distribution..."
+		pg_install || die "PostgreSQL could not be installed with apt. Nothing else was changed"
+	fi
+	pg_wait_ready || die "PostgreSQL does not answer on port $db_port. Check it with: systemctl status postgresql (nothing of Regulus was installed)"
+
+	role_found=$(printf "SELECT 1 FROM pg_roles WHERE rolname = '%s';\n" "$db_user" | pg_sql) || die "could not ask PostgreSQL about the role $db_user (is it running on port $db_port, and does the postgres user have access over the local socket?)"
+	db_found=$(printf "SELECT 1 FROM pg_database WHERE datname = '%s';\n" "$db_name" | pg_sql) || die "could not ask PostgreSQL about the database $db_name"
+
+	if [ "$db_reuse" = 1 ]; then
+		[ -n "$role_found" ] || die "--db-reuse: the PostgreSQL role $db_user does not exist"
+		[ -n "$db_found" ] || die "--db-reuse: the database $db_name does not exist"
+		say "Using the existing role $db_user and database $db_name."
+	else
+		[ -z "$role_found" ] || die "the PostgreSQL role $db_user already exists, and this installer does not change an existing role. Choose another with --db-user, or use --db-reuse with its password. Nothing was changed"
+		[ -z "$db_found" ] || die "the PostgreSQL database $db_name already exists, and this installer does not change an existing database. Choose another with --db-name, or use --db-reuse. Nothing was changed"
+		db_password=$(generate_db_password)
+		[ "${#db_password}" -eq 32 ] || die "could not generate a password (is /dev/urandom readable?)"
+		{
+			printf "CREATE ROLE \"%s\" LOGIN PASSWORD '%s';\n" "$db_user" "$db_password"
+			printf 'CREATE DATABASE "%s" OWNER "%s";\n' "$db_name" "$db_user"
+		} | pg_sql || die "could not create the role and the database"
+		say "Created the role $db_user and the database $db_name."
+	fi
+	printf 'CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;\n' | pg_sql "$db_name" || die "could not enable the citext extension in $db_name"
 }
 
 # check_database_installed runs the check again with the installed binary and
@@ -764,6 +902,9 @@ main() {
 	db_password_file=
 	db_password=
 	db_keep=0
+	db_local=0
+	db_reuse=0
+	db_local_new=0
 	assume_yes=0
 	self_update=1
 	require_signature=${REGULUS_REQUIRE_SIGNATURE:-0}
@@ -843,6 +984,8 @@ main() {
 				db_password_file=$2
 				shift
 				;;
+			--db-local) db_local=1 ;;
+			--db-reuse) db_reuse=1 ;;
 			--builtin-agent) builtin_agent=true ;;
 			--no-builtin-agent) builtin_agent=false ;;
 			--no-self-update) self_update=0 ;;
@@ -914,8 +1057,16 @@ main() {
 
 	if [ "$role" = hub ]; then
 		ask_builtin_agent
-		precheck_database
-		write_settings
+		if [ "$db_local_new" = 1 ]; then
+			# The password was just generated and exists nowhere else: keep it
+			# before anything can fail, so a second run finds it.
+			setup_local_database
+			write_settings
+			precheck_database
+		else
+			precheck_database
+			write_settings
+		fi
 	fi
 	set_role
 

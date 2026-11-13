@@ -27,6 +27,9 @@ db_sslrootcert=
 db_password_file=
 db_password=
 db_keep=0
+db_local=0
+db_reuse=0
+db_local_new=0
 db_options=
 existing=none
 role=hub
@@ -291,7 +294,7 @@ CONFIG_DIR=$tmp/db-etc
 DATA_DIR=$tmp/db-var
 mkdir -p "$CONFIG_DIR" "$DATA_DIR"
 reset_db() {
-	database= db_host= db_port= db_name= db_user= db_sslmode= db_sslrootcert= db_password_file= db_password= db_keep=0 db_options= existing=none
+	database= db_host= db_port= db_name= db_user= db_sslmode= db_sslrootcert= db_password_file= db_password= db_keep=0 db_local=0 db_reuse=0 db_local_new=0 db_options= existing=none
 }
 reset_db
 assume_yes=1
@@ -438,7 +441,7 @@ DATA_DIR=$tmp/leak-var
 dpkg() { return 1; }
 mkdir -p "\$CONFIG_DIR" "\$DATA_DIR"
 assume_yes=1 role=hub
-database=postgres db_host=db.example db_port= db_name= db_user= db_sslmode= db_sslrootcert= db_password= db_keep=0
+database=postgres db_host=db.example db_port= db_name= db_user= db_sslmode= db_sslrootcert= db_password= db_keep=0 db_local=0 db_reuse=0 db_local_new=0
 db_password_file=$tmp/pw db_options=x builtin_agent=default self_update=0
 work=$work file=$file version=$version
 prepare_database
@@ -502,6 +505,177 @@ check_not "a bad port is refused" run_script --database postgres --db-host db.ex
 check_not "a bad TLS mode is refused" run_script --database postgres --db-host db.example --db-sslmode sometimes
 check_not "a password file that does not exist is refused" run_script --database postgres --db-host db.example --database-password-file "$tmp/none"
 check_not "the password is not an option" run_script --database postgres --db-host db.example --db-password hunter2
+
+# ---------------------------------------------------------------- --db-local
+
+# local_args ROLE DATABASE HOST PASSWORD_FILE LOCAL REUSE SSLROOTCERT
+local_args() {
+	role=$1 database=$2 db_host=$3 db_password_file=$4 db_local=$5 db_reuse=$6 db_sslrootcert=$7 db_port= db_sslmode= db_name= db_user=
+	( check_database_args )
+}
+check "--db-local alone is fine" local_args hub "" "" "" 1 0 ""
+check "--db-local with --database postgres is fine" local_args hub postgres "" "" 1 0 ""
+check "--db-local --db-reuse with a password file is fine" local_args hub "" "" "$tmp/pw" 1 1 ""
+check_not "--db-local with sqlite is refused" local_args hub sqlite "" "" 1 0 ""
+check_not "--db-local with a host is refused" local_args hub "" db.example "" 1 0 ""
+check_not "--db-local with a CA file is refused" local_args hub "" "" "" 1 0 /etc/ssl/ca.pem
+check_not "--db-local generates the password, so a password file is refused" local_args hub "" "" "$tmp/pw" 1 0 ""
+check_not "--db-reuse without --db-local is refused" local_args hub postgres db.example "" 0 1 ""
+check_not "the agent role takes --db-local" local_args agent "" "" "" 1 0 ""
+db_local=0 db_reuse=0 db_password_file= db_sslrootcert= db_host= database=
+
+# a generated password
+p1=$(generate_db_password)
+p2=$(generate_db_password)
+equal "a generated password has 32 characters" "${#p1}" 32
+case "$p1" in
+	*[!A-Za-z0-9]*) fail "a generated password has only letters and digits ($p1)" ;;
+	*) pass "a generated password has only letters and digits" ;;
+esac
+if [ "$p1" != "$p2" ]; then pass "two generated passwords differ"; else fail "two generated passwords differ"; fi
+
+# setup_local_database with the system replaced by stubs. pg_sql reads the SQL
+# from its standard input, as the real one does, and answers the two questions
+# about the role and the database from FAKE_ROLE and FAKE_DB.
+pg_log=$tmp/pg-args
+pg_sql_log=$tmp/pg-sql
+pg_calls=$tmp/pg-calls
+reset_pg() { : >"$pg_log"; : >"$pg_sql_log"; : >"$pg_calls"; }
+# shellcheck disable=SC2329 # the stubs replace the real functions
+pg_sql() {
+	printf '%s\n' "$*" >>"$pg_log"
+	sql=$(cat)
+	case "$sql" in
+		*"FROM pg_roles"*) printf '%s\n' "${FAKE_ROLE:-}" ;;
+		*"FROM pg_database"*) printf '%s\n' "${FAKE_DB:-}" ;;
+		*)
+			printf '%s\n' "$sql" >>"$pg_sql_log"
+			return "${FAKE_SQL_RC:-0}"
+			;;
+	esac
+}
+# shellcheck disable=SC2329
+pg_install() { echo install >>"$pg_calls"; return "${FAKE_INSTALL_RC:-0}"; }
+# shellcheck disable=SC2329
+pg_wait_ready() { return "${FAKE_READY_RC:-0}"; }
+db_user=regulus db_name=regulus db_port=5432
+
+run_local() { ( setup_local_database; printf '%s' "$db_password" >"$tmp/generated" ) >"$tmp/local-out" 2>&1; }
+
+reset_pg
+rm -f "$tmp/generated"
+db_reuse=0 db_password=
+FAKE_ROLE= FAKE_DB= run_local
+equal "a new role and database are created" "$?" 0
+generated=$(cat "$tmp/generated")
+equal "the password was generated" "${#generated}" 32
+case "$(cat "$pg_sql_log")" in
+	*'CREATE ROLE "regulus" LOGIN PASSWORD'*'CREATE DATABASE "regulus" OWNER "regulus"'*) pass "the role and the database are created and owned by the role" ;;
+	*) fail "the role and the database are created and owned by the role ($(cat "$pg_sql_log"))" ;;
+esac
+case "$(cat "$pg_sql_log")" in
+	*"$generated"*) pass "the password reaches PostgreSQL on standard input" ;;
+	*) fail "the password reaches PostgreSQL on standard input" ;;
+esac
+case "$(cat "$pg_sql_log")" in
+	*"CREATE EXTENSION IF NOT EXISTS citext"*) pass "citext is enabled" ;;
+	*) fail "citext is enabled" ;;
+esac
+if grep -qF "$generated" "$pg_log" "$tmp/local-out"; then
+	fail "the password is in no command argument and not printed"
+else
+	pass "the password is in no command argument and not printed"
+fi
+# pg_sql takes the database as its argument; the questions about the role and
+# the database use the default one, the extension must name the new database.
+if grep -qx regulus "$pg_log"; then pass "the extension is created in the new database, not elsewhere"; else fail "the extension is created in the new database, not elsewhere"; fi
+equal "PostgreSQL was already there, nothing was installed" "$(cat "$pg_calls")" ""
+
+# an existing role or database is refused, and nothing is created
+reset_pg
+db_password=
+FAKE_ROLE=1 FAKE_DB= run_local
+equal "an existing role stops it" "$?" 1
+case "$(cat "$tmp/local-out")" in
+	*"role regulus already exists"*"Nothing was changed"*) pass "an existing role is explained" ;;
+	*) fail "an existing role is explained ($(cat "$tmp/local-out"))" ;;
+esac
+equal "an existing role: nothing was created" "$(cat "$pg_sql_log")" ""
+reset_pg
+FAKE_ROLE= FAKE_DB=1 run_local
+equal "an existing database stops it" "$?" 1
+equal "an existing database: nothing was created" "$(cat "$pg_sql_log")" ""
+
+# --db-reuse uses what exists and keeps the password it was given
+reset_pg
+db_reuse=1 db_password=given-password
+FAKE_ROLE=1 FAKE_DB=1 run_local
+equal "--db-reuse accepts an existing role and database" "$?" 0
+equal "--db-reuse keeps the given password" "$(cat "$tmp/generated")" given-password
+case "$(cat "$pg_sql_log")" in
+	*"CREATE ROLE"* | *"CREATE DATABASE"*) fail "--db-reuse creates nothing" ;;
+	*) pass "--db-reuse creates nothing" ;;
+esac
+case "$(cat "$pg_sql_log")" in
+	*"CREATE EXTENSION IF NOT EXISTS citext"*) pass "--db-reuse still makes sure citext is there" ;;
+	*) fail "--db-reuse still makes sure citext is there" ;;
+esac
+FAKE_ROLE= FAKE_DB=1 run_local
+equal "--db-reuse needs the role to exist" "$?" 1
+FAKE_ROLE=1 FAKE_DB= run_local
+equal "--db-reuse needs the database to exist" "$?" 1
+db_reuse=0 db_password=
+
+# PostgreSQL is installed only when it is missing, and a failure is reported
+reset_pg
+(
+	# shellcheck disable=SC2329
+	have() { return 1; }
+	FAKE_ROLE= FAKE_DB= run_local
+)
+equal "a missing PostgreSQL is installed" "$(cat "$pg_calls")" install
+reset_pg
+(
+	# shellcheck disable=SC2329
+	have() { return 1; }
+	FAKE_INSTALL_RC=1 FAKE_ROLE= FAKE_DB= run_local
+	exit $?
+)
+equal "a failed apt install stops it before anything is created" "$?:$(cat "$pg_sql_log")" "1:"
+reset_pg
+FAKE_READY_RC=1 run_local
+equal "a PostgreSQL that does not answer stops it" "$?" 1
+reset_pg
+FAKE_SQL_RC=1 FAKE_ROLE= FAKE_DB= run_local
+equal "a failed creation stops it" "$?" 1
+
+# prepare_database with --db-local: a new installation, and a re-run
+reset_db
+database=postgres db_local=1
+prepare_database >/dev/null 2>&1
+equal "--db-local on a new server creates the database" "$db_local_new" 1
+equal "--db-local uses this server" "$db_host" 127.0.0.1
+equal "--db-local needs no password from the user" "$db_password" ""
+existing_backend() { printf '%s\n' "${FAKE_EXISTING:-none}"; }
+reset_db
+database=postgres db_local=1
+FAKE_EXISTING=postgres prepare_database >/dev/null 2>&1
+equal "a re-run on a PostgreSQL installation creates nothing" "$db_local_new" 0
+equal "a re-run on a PostgreSQL installation keeps the settings" "$db_keep" 1
+reset_db
+database=postgres db_local=1
+(FAKE_EXISTING=sqlite prepare_database) >/dev/null 2>&1
+equal "--db-local on a SQLite installation is refused" "$?" 1
+reset_db
+
+# on the command line
+check_not "--db-local with sqlite is refused" run_script --db-local --database sqlite
+check_not "--db-local with a host is refused" run_script --db-local --db-host db.example
+check_not "--db-reuse alone is refused" run_script --db-reuse
+check_not "the agent role takes no --db-local" run_script --role agent --hub hub.example --token abc --ca-fingerprint "$fp" --db-local
+help_lists() { run_script --help | grep -q -- "$1"; }
+check "the help lists --db-local" help_lists --db-local
+check "the help lists --db-reuse" help_lists --db-reuse
 
 if [ "$failures" -ne 0 ]; then
 	printf '%d test(s) failed\n' "$failures"

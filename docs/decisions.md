@@ -98,7 +98,7 @@ Done in #122. Choices, so they are not rediscovered:
 
 ## Installer: the database choice (#123)
 
-- **Scope.** The installer **connects to an existing PostgreSQL** that the administrator prepared (`docs/database.md` has the SQL). Installing PostgreSQL locally and creating the role and the database automatically is **not** done; it is a separate follow-up issue unless the maintainer wants it in now (asked in the pull request).
+- **Scope.** By default the installer **connects to an existing PostgreSQL** that the administrator prepared (`docs/database.md` has the SQL). Installing it locally is the opt-in `--db-local` (#139, below).
 - **Flags, not a URL.** A single set of options (`--database`, `--db-host/-port/-name/-user/-sslmode/-sslrootcert`) rather than one connection URL read from a file: each option is validated on its own with a specific error, and the values map one to one to the `REGULUS_DATABASE_*` settings. The password has no option: `--database-password-file`, `REGULUS_DATABASE_PASSWORD`, or a prompt without echo.
 - **Where the password lives.** Only `/etc/regulus/regulus.env` (written `0640`, then `root:regulus` by the package's post-install script), in double quotes with `\` and `"` escaped as systemd and `regulus db check` read them. Never `config.yaml`, which the hub refuses to read a password from anyway.
 - **The check runs before the install.** The issue asked for the check after the install; the installer does it *also* before, with the binary extracted from the verified `.deb` (`dpkg-deb -x`) and the settings passed in the environment of that one process, so a wrong password or a missing database stops the run while nothing has changed. The check after the install, with the installed binary, reports and fails the installer with instructions but does not roll back the package.
@@ -117,6 +117,15 @@ Agreed in conversation on 2026-11-13, **proposed**, to be confirmed in the desig
 - **Node types** are one role plus capabilities, and every node keeps the same connection to the hub inside; see [node-types.md](node-types.md) (#160). Direct node-to-node links are left for later and, when they exist, are authorised by the hub.
 - **Passkeys (#50)** stay for the web login; Access uses the device key.
 - **Free-tier cloud servers:** a plugin to measure use and optionally keep a server active (#163) is only built after the provider's current terms are read.
+
+## Installer: a local PostgreSQL (#139)
+
+- **Opt-in, `--db-local`** (implies `--database postgres`), plus **`--db-reuse`** for an existing role and database. The default stays "connect to what you prepared".
+- **Creates only its own role and database** over the local socket as the `postgres` system user, on `127.0.0.1`; it never alters an existing role or database. It **refuses** when either exists, because it could not know their password and must not reset it; `--db-reuse` is the explicit "I know, use them" and then needs the password given, never generated.
+- **The password** is 32 letters and digits from `/dev/urandom` (nothing to quote in SQL or in the environment file), sent to `psql` on **standard input**, never an argument, never printed, stored only in `/etc/regulus/regulus.env`.
+- **Order, so a second run works.** After the verified download the installer creates the role and database, then **writes the settings**, then runs the check with the binary from the package. If the check fails the password is already saved, and a re-run finds `REGULUS_DATABASE_TYPE` in the environment file and keeps it (nothing is created twice) instead of finding a role it has no password for. A failure leaves PostgreSQL, the role and the database in place; the message says so.
+- **Re-run on an existing installation:** `--db-local` is ignored with a note; on a SQLite installation it is refused like `--database postgres` (#124).
+- **Tested** by `scripts/test-install.sh` with stubs for `apt`, the `postgres` user and `psql` (including that the password is on no command line), and by hand: the real functions against a throwaway PostgreSQL 16 cluster (role and database created and owned by the role, `citext` enabled, login over TCP with the generated password, a second run refused). **Not verified:** `apt-get install postgresql` on a real Ubuntu VM, PostgreSQL 14 from 22.04, a cluster that is stopped or on another port, and the whole installer end to end with a release (#81, #141).
 
 ## Open questions
 
