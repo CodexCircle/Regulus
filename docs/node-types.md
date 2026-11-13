@@ -17,7 +17,7 @@ The exceptions are explicit and each has its own design issue: a node that **acc
 | **Hub** (active hub) | Orchestrates the group: dashboard, API, database, CA, updates. Exactly one active per term. | every node (they connect to it) | **implemented** (`regulus hub`) |
 | **Redundant hub** (informally "secondary hub"; further ones "tertiary"…) | Passive hub holding a copy of what the hub needs; takes over when the active hub is unreachable, or when forced. A **pure-hub** attribute means it hosts no workloads. | the active hub (replication); after failover, every node | designed in the issues of #103, **not implemented**. More than one redundant hub, with priority, is parked in [#113](https://github.com/CodexCircle/Regulus/issues/113). |
 | **Compute node** (standard node) | A server that runs workloads and is managed from the hub. | the active hub only | **implemented** as the agent (`regulus agent`; the hub's own server is the built-in agent). Workload management is [#113](https://github.com/CodexCircle/Regulus/issues/113). |
-| **Backup node** | A storage node that keeps the backups of the other nodes. Has a connection **to the hub only** and **cannot contact other nodes**. | the active hub only | proposed; no issue yet (this page records the idea). |
+| **Backup node** | A storage node that keeps the backups of the other nodes. Has a connection **to the hub only** and **cannot contact other nodes**. | the active hub only | proposed in [#166](https://github.com/CodexCircle/Regulus/issues/166). |
 | **Access gateway** | A node with a public address that lets the Regulus Access phone app reach the hub from outside the local network. Forwards the phone's connection to the active hub; **mTLS stays end to end between phone and hub**. May later also host a notification server and, separately designed, an authentication server. | the active hub (outbound); phones (inbound, the only inbound listener of the group) | proposed in [#161](https://github.com/CodexCircle/Regulus/issues/161) (epic [#152](https://github.com/CodexCircle/Regulus/issues/152)). |
 | **AI node** | A node that offers local AI (for example a server running Ollama) to other nodes. | the active hub, and possibly **directly** to the nodes that use it (see below) | idea only, not designed. |
 
@@ -36,6 +36,20 @@ Today the only "type" is the installer's `--role hub|agent`, written to `/etc/re
 **Two keys for exposure.** A capability that changes what a node exposes locally (the access gateway's inbound listener) needs **both**: the hub grants it **and** the node opts in locally (a setting, off by default, like `agent_listen`). A hub alone cannot make a server open a port.
 
 **Role and types.** The **role** stays the exclusive enum of #104 (`agent`, `hub`, `hub-redundant`, plus the transient `candidate`); a **node type** such as "backup node" or "access gateway" is a named **preset of capabilities on the role `agent`** (compute node = no extra capability; backup node = `backup-storage`; access gateway = `relay`, later `notifications`). The UI and docs say "type"; the code keeps role plus capability set, so a new type is a new preset, not a new code path. "A backup node cannot contact other nodes" needs no rule today, because nodes never contact each other (all traffic goes through the hub); the rule matters when direct links exist (below).
+
+## Changing a type later, and the command line (proposal, [#164](https://github.com/CodexCircle/Regulus/issues/164))
+
+The intended flow: install the hub, enroll **only standard agents**, then decide from the dashboard that one becomes the redundant hub, another a backup node, another an access gateway, and undo it later. The **command line always stays** a way to do the same: advanced installs and scripts use it, and the dashboard and the CLI are two front ends to one operation.
+
+It follows the two-key rule above, so what the dashboard can do depends on the node having agreed:
+
+| Change | Node side (second key) | Weight |
+|---|---|---|
+| Backup node | reports free space and a storage directory; no new exposure | light |
+| Access gateway | an **allowed-capabilities list on the node**, empty by default, set at install (`--allow gateway`) or later on the node; the hub never changes it. Opening a firewall is outside Regulus. | medium |
+| Redundant hub | the promotion flow of [#105](https://github.com/CodexCircle/Regulus/issues/105): the one-time token on the node, or its "accept promotion autonomously" setting (off by default) | heavy: the whole epic #103 |
+
+None of this exists in the code. Related: guided installation ([#165](https://github.com/CodexCircle/Regulus/issues/165): from the hub, "add a node of this type" gives the exact steps and checks each one) and a possible future **configurator**, a static web page where one describes a home lab or a company and gets the node list and the steps ([#167](https://github.com/CodexCircle/Regulus/issues/167), only evaluated, not decided).
 
 ## Capabilities (proposed)
 
