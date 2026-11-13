@@ -6,6 +6,14 @@ linters:
     - misspell
     - revive
 
+  exclusions:
+    rules:
+      # misspell checks English; the Italian console table is full of words it
+      # takes for misspellings ("integrato", "Impossibile").
+      - path: internal/console/strings_it\.go
+        linters:
+          - misspell
+
   settings:
     revive:
       # Only this rule: every package must have an accurate comment (#119).
