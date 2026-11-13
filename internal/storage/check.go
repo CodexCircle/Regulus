@@ -105,6 +105,17 @@ func checkPostgres(ctx context.Context, db *sql.DB, cfg Config, rep Report) (Rep
 		return rep, err
 	}
 
+	// The migrations create the citext extension under an advisory lock, and
+	// CREATE EXTENSION IF NOT EXISTS is not safe against a concurrent creation
+	// (the second session fails with a duplicate key on pg_extension). Take the
+	// same lock so the check cannot collide with a hub that is migrating or with
+	// another check on the same database.
+	unlock, err := lockPostgres(ctx, db)
+	if err != nil {
+		return rep, errors.New(Explain(err))
+	}
+	defer unlock()
+
 	// Try, inside a transaction that is rolled back, what the migrations will
 	// do, so a missing privilege is found now and not at the first start.
 	tx, err := db.BeginTx(ctx, nil)

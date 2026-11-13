@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/CodexCircle/Regulus/internal/storage"
 	"github.com/CodexCircle/Regulus/internal/storage/storagetest"
@@ -140,6 +141,53 @@ func TestCheckPostgres(t *testing.T) {
 	bad.Schema = "no_such_schema"
 	if _, err := storage.Check(ctx, bad); err == nil || !strings.Contains(err.Error(), "schema") {
 		t.Errorf("missing schema: %v", err)
+	}
+}
+
+// Check creates the citext extension to test the privilege, and that is not
+// safe against a concurrent creation, so it must wait for the same advisory
+// lock the migrations hold. A flaky "duplicate key ... pg_extension_name_index"
+// in CI was this race. The test holds the lock and checks that Check waits.
+func TestCheckWaitsForTheMigrationLock(t *testing.T) {
+	requirePostgres(t)
+	cfg := storagetest.Config(t, t.TempDir())
+	ctx := context.Background()
+
+	db, err := storage.Open(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock(hashtext('regulus-migrate'))`); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := storage.Check(ctx, cfg)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("Check finished while the migration lock was held: %v", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext('regulus-migrate'))`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Check after the lock was released: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Check did not finish after the lock was released")
 	}
 }
 
