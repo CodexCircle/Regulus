@@ -13,7 +13,7 @@ The installer asks whether to include the **built-in agent** (so the hub's own s
 
 ## Choosing the database
 
-The database is chosen **once, at install time**. SQLite is the default and needs nothing. PostgreSQL is a server **you prepare first**; the installer connects to it and does not install PostgreSQL or create the role and the database (see [Database](database.md) for the three SQL statements and the `pg_hba.conf` and firewall notes). Installing and preparing PostgreSQL locally is a possible follow-up, not part of the installer today.
+The database is chosen **once, at install time**. SQLite is the default and needs nothing. PostgreSQL is either a server **you prepare first**, which the installer connects to (see [Database](database.md) for the three SQL statements and the `pg_hba.conf` and firewall notes), or one the installer sets up **on this server** with `--db-local` (below).
 
 - On a terminal, without `--database`, the installer asks `SQLite or PostgreSQL?`, and for PostgreSQL the host, port, database, user, TLS mode and the password (typed without echo).
 - With `--yes`, or without a terminal (the one-line `curl ... | sh` form), the answer is **SQLite**; nothing new is asked, so existing commands keep working.
@@ -26,6 +26,12 @@ sh install.sh --yes --database postgres --db-host db.example --db-sslmode verify
 ```
 
 **The password is never an option**: an option would show in the process list and in the shell history, and this script is usually piped. It is read from the first line of `--database-password-file`, from `REGULUS_DATABASE_PASSWORD`, or typed without echo, and it is written only to `/etc/regulus/regulus.env` (`0640`, `root:regulus`) — never to `config.yaml`, to a log or to the screen; `set -x` is turned off while it is handled.
+
+**One command with a local PostgreSQL (`--db-local`).** `install.sh --db-local` (it implies `--database postgres`) installs the distribution's PostgreSQL with `apt` if it is not there (14 on Ubuntu 22.04, 16 on 24.04), starts it, creates the role (`regulus`) and the database (`regulus`, owned by that role) with a **generated password of 32 letters and digits**, enables `citext`, writes the settings to `/etc/regulus/regulus.env` (`0640`, `root:regulus`) and then runs the usual check. It connects to `127.0.0.1` and creates only that role and that database, so other databases of an existing PostgreSQL are not touched. The password is sent to PostgreSQL on standard input, is never an argument of any command, and is never printed; it exists only in the environment file. `--db-name`, `--db-user`, `--db-port` and `--db-sslmode` still apply; `--db-host`, `--db-sslrootcert` and `--database-password-file` do not (it is this server, and the password is generated).
+
+- **If the role or the database already exists**, the installer stops and changes nothing; choose other names, or pass **`--db-reuse`**: it then uses the existing role and database, does not create or change them (it only makes sure `citext` is enabled) and needs the role's password from `--database-password-file` or `REGULUS_DATABASE_PASSWORD`.
+- **Running it again** on a server that already has Regulus keeps the database it has: `--db-local` is ignored with a note, nothing is created twice. If the check fails after the role and database were created, the settings are already saved, so fix the cause and run the installer again.
+- Not covered: tuning or hardening PostgreSQL, a non-default cluster layout (it uses the `postgres` system user over the local socket and the port you give, 5432 by default), and anything but `apt`.
 
 **The connection is checked before anything is installed.** The installer takes the new binary out of the verified package and runs `regulus db check` with your settings. A wrong password, an unreachable host, a missing database, a missing privilege or a PostgreSQL older than 14 stops the installer with the cause, before any file of the system or `/etc/regulus` was changed. After the install the same check runs again with the installed binary and the saved settings. If the package is installed by `apt` alone, its post-install step prints the result of the check but never fails the package.
 

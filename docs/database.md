@@ -2,7 +2,7 @@
 
 The hub keeps its accounts, sessions, layouts, enrolled agents and update state in one database. Two backends exist: **SQLite**, the default, which needs nothing, and **PostgreSQL**, which you prepare and point the hub at. The administrator chooses between them in the installer ([Installation](installation.md#choosing-the-database), #123); moving existing data from one to the other is #124 (not implemented). The settings below can also be set by hand.
 
-Both backends run the same code: the tests of the storage, auth, fleet, hub, update and command packages run on SQLite and on PostgreSQL in CI. The PostgreSQL job runs on versions 14 and 16 (14 is the minimum, 16 is the newest we test), and a separate CI job connects with `sslmode=verify-full` and `sslrootcert` to a PostgreSQL 16 that has TLS on (see below). What has **not** been checked yet is a PostgreSQL install through the installer on a real VM, with `apt` and with a database on another host (#81, #141; the checklist there needs a PostgreSQL item).
+Both backends run the same code: the tests of the storage, auth, fleet, hub, update and command packages run on SQLite and on PostgreSQL in CI. The PostgreSQL job runs on versions 14 and 16 (14 is the minimum, 16 is the newest we test), and a separate CI job connects with `sslmode=verify-full` and `sslrootcert` to a PostgreSQL 16 that has TLS on (see below). What has **not** been checked yet is a PostgreSQL install through the installer on a real VM, including `--db-local` with `apt`, and with a database on another host (#81, #141; the checklist there needs a PostgreSQL item).
 
 ## Settings
 
