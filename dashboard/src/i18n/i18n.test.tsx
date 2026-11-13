@@ -115,3 +115,17 @@ describe("LanguageProvider", () => {
     expect(screen.getByText("Updates")).toBeInTheDocument();
   });
 });
+
+describe("the areas", () => {
+  it("keep their keys to themselves, so a spread cannot hide a duplicate", async () => {
+    const { areas } = await import("./en");
+    const seen = new Map<string, string>();
+    for (const [area, messages] of Object.entries(areas)) {
+      for (const key of Object.keys(messages)) {
+        expect(key.startsWith(`${area === "core" ? "" : area + "."}`), `${key} in ${area}`).toBe(true);
+        expect(seen.get(key), `${key} is in ${seen.get(key)} and ${area}`).toBeUndefined();
+        seen.set(key, area);
+      }
+    }
+  });
+});
