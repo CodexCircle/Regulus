@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AgentList } from "./AgentList";
 import { createEnrollment, enableRemoteAgents, fetchAgentListener, type AgentListener, type Enrollment } from "./api";
+import { useT } from "./i18n";
 import { useCan } from "./session";
 import { errorMessage } from "./useApiList";
 
@@ -43,6 +44,7 @@ function RemoteAgentsOff({
   canManage: boolean;
   onEnabled: (l: AgentListener) => void;
 }) {
+  const t = useT();
   const [port, setPort] = useState(String(DEFAULT_AGENT_PORT));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -64,25 +66,23 @@ function RemoteAgentsOff({
 
   return (
     <section className="panel" aria-labelledby="remote-agents-heading">
-      <h3 id="remote-agents-heading">Remote agents are off</h3>
-      <p>Only this hub's own server is managed. To add other servers, the hub must listen for their agents on a port of its own.</p>
+      <h3 id="remote-agents-heading">{t("servers.remoteOff.title")}</h3>
+      <p>{t("servers.remoteOff.intro")}</p>
       {canManage && listener.editable ? (
         <form onSubmit={(e) => void turnOn(e)}>
           <label>
-            Port for remote agents
+            {t("servers.remoteOff.portLabel")}
             <input value={port} onChange={(e) => setPort(e.target.value.trim())} inputMode="numeric" autoComplete="off" />
           </label>
-          {!valid && <p className="muted">Use a port from 1024 to 65535.</p>}
+          {!valid && <p className="muted">{t("servers.remoteOff.portHint")}</p>}
           {error && <p role="alert">{error}</p>}
           <button type="submit" disabled={busy || !valid}>
-            Turn on remote agents
+            {t("servers.remoteOff.turnOn")}
           </button>
-          <p className="muted">
-            The hub starts listening at once and keeps it after a restart. Open this port in the firewall towards the servers you want to manage.
-          </p>
+          <p className="muted">{t("servers.remoteOff.turnOnNote")}</p>
         </form>
       ) : (
-        <p className="muted">Someone who manages servers can turn them on here.</p>
+        <p className="muted">{t("servers.remoteOff.askAdmin")}</p>
       )}
     </section>
   );
@@ -113,6 +113,7 @@ export function agentCommand(grant: Enrollment, hubHost: string): string {
 }
 
 function AddServer({ onAdded }: { onAdded: () => void }) {
+  const t = useT();
   const [name, setName] = useState("");
   const [grant, setGrant] = useState<Enrollment | null>(null);
   const [error, setError] = useState("");
@@ -137,37 +138,38 @@ function AddServer({ onAdded }: { onAdded: () => void }) {
   const host = window.location.hostname;
   return (
     <section className="panel" aria-labelledby="add-server-heading">
-      <h3 id="add-server-heading">Add a server</h3>
+      <h3 id="add-server-heading">{t("servers.add.title")}</h3>
       <form onSubmit={(e) => void create(e)}>
         <label>
-          Name (optional)
+          {t("servers.add.nameLabel")}
           <input value={name} onChange={(e) => setName(e.target.value)} maxLength={64} autoComplete="off" />
         </label>
         {error && <p role="alert">{error}</p>}
         <button type="submit" disabled={busy}>
-          Create enrollment token
+          {t("servers.add.createToken")}
         </button>
       </form>
       {grant && (
-        <div role="status" aria-label="Enrollment token">
+        <div role="status" aria-label={t("servers.add.tokenLabel")}>
           <p>
-            Run this on the server you want to add (Ubuntu or Debian, as a user that can use sudo). It installs Regulus{grant.hub_version ? ` ${grant.hub_version}, the version of this hub,` : ""} enrolls the server and starts the
-            agent. The token works once and expires at {new Date(grant.expires_at).toLocaleString()}. It is not shown again.
+            {grant.hub_version
+              ? t("servers.add.instructionsVersion", { version: grant.hub_version, expires: new Date(grant.expires_at).toLocaleString() })
+              : t("servers.add.instructions", { expires: new Date(grant.expires_at).toLocaleString() })}
           </p>
-          <CommandBox label="Install command" command={installCommand(grant, host)} />
+          <CommandBox label={t("servers.add.installCommand")} copyLabel={t("servers.add.copyInstall")} command={installCommand(grant, host)} />
           <p className="muted">
-            Replace <code>{host}</code> if the server reaches the hub under another name. The fingerprint lets the server check that it is talking to this
-            hub before it sends the token.
+            {t("servers.add.replaceBefore")} <code>{host}</code> {t("servers.add.replaceAfter")}
           </p>
-          <p>Regulus already installed on that server? Enroll and run the agent with:</p>
-          <CommandBox label="Agent command" command={agentCommand(grant, host)} />
+          <p>{t("servers.add.alreadyInstalled")}</p>
+          <CommandBox label={t("servers.add.agentCommand")} copyLabel={t("servers.add.copyAgent")} command={agentCommand(grant, host)} />
         </div>
       )}
     </section>
   );
 }
 
-function CommandBox({ label, command }: { label: string; command: string }) {
+function CommandBox({ label, copyLabel, command }: { label: string; copyLabel: string; command: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   return (
     <p>
@@ -181,7 +183,7 @@ function CommandBox({ label, command }: { label: string; command: string }) {
           );
         }}
       >
-        {copied ? "Copied" : `Copy ${label.toLowerCase()}`}
+        {copied ? t("servers.add.copied") : copyLabel}
       </button>
     </p>
   );

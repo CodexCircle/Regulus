@@ -1,4 +1,14 @@
 import type { ComponentType } from "react";
+import type { MessageKey } from "../i18n";
+
+// Translator is the function useT() returns.
+export type Translator = (key: MessageKey, params?: Record<string, string | number>) => string;
+
+// widgetTitle and widgetDescription give the text of a widget in the language
+// of the translator: its catalog text when it has a key, else its own text.
+export const widgetTitle = (def: { title: string; titleKey?: MessageKey }, t: Translator) => (def.titleKey ? t(def.titleKey) : def.title);
+export const widgetDescription = (def: { description: string; descriptionKey?: MessageKey }, t: Translator) =>
+  def.descriptionKey ? t(def.descriptionKey) : def.description;
 
 // Props every widget component receives.
 export interface WidgetProps {
@@ -16,8 +26,14 @@ export interface WidgetProps {
 export interface WidgetDefinition {
   // Stable id, saved in layouts. Plugins should prefix it with their own id.
   id: string;
+  // The English title and description. A widget that ships translations also
+  // sets titleKey and descriptionKey, and the dashboard shows those in the
+  // language of the page (see widgetTitle); otherwise these texts are shown
+  // as they are.
   title: string;
   description: string;
+  titleKey?: MessageKey;
+  descriptionKey?: MessageKey;
   // Size on the 12-column grid when the widget is added.
   defaultSize: { w: number; h: number };
   minSize?: { w: number; h: number };

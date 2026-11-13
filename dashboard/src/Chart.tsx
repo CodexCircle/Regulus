@@ -1,3 +1,5 @@
+import { useT } from "./i18n";
+
 export interface ChartSeries {
   // Name shown in the legend and read by screen readers.
   label: string;
@@ -62,12 +64,13 @@ export function paths(times: number[], values: (number | null)[], start: number,
 // Chart draws time series as lines with a light fill, in a box that scales to
 // its container. Colors come from the --series-N custom properties.
 export function Chart({ title, times, series, max, minTop, formatValue, windowMs = DEFAULT_WINDOW_MS }: Props) {
+  const t = useT();
   const end = times.length > 0 ? times[times.length - 1] : 0;
-  const from = times.findIndex((t) => t >= end - windowMs);
+  const from = times.findIndex((time) => time >= end - windowMs);
   if (times.length < 2 || from < 0 || from >= times.length - 1) {
-    return <p className="chart-empty">Collecting data…</p>;
+    return <p className="chart-empty">{t("servers.chart.collecting")}</p>;
   }
-  const t = times.slice(from);
+  const visibleTimes = times.slice(from);
   const visible = series.map((s) => ({ ...s, values: s.values.slice(from) }));
   const top = max ?? niceMax(Math.max(0, ...visible.flatMap((s) => s.values.filter((v): v is number => v !== null))), minTop);
   const start = end - windowMs;
@@ -80,7 +83,7 @@ export function Chart({ title, times, series, max, minTop, formatValue, windowMs
             <line key={y} className="chart-grid" x1="0" x2="100" y1={y} y2={y} />
           ))}
           {visible.map((s, n) => {
-            const d = paths(t, s.values, start, end, top);
+            const d = paths(visibleTimes, s.values, start, end, top);
             return (
               <g key={s.label} className={`chart-series s${n + 1}`}>
                 <path className="chart-area" d={d.area} />
@@ -93,7 +96,7 @@ export function Chart({ title, times, series, max, minTop, formatValue, windowMs
         <span className="chart-min">{formatValue(0)}</span>
       </div>
       <figcaption>
-        <span>last {Math.round(windowMs / 60000)} min</span>
+        <span>{t("servers.chart.lastMinutes", { minutes: Math.round(windowMs / 60000) })}</span>
         {visible.length > 1 &&
           visible.map((s, n) => (
             <span key={s.label} className="chart-legend">

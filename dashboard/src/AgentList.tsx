@@ -3,6 +3,8 @@ import { ApiError, fetchAgents, type Agent } from "./api";
 import { serverHref } from "./route";
 import { formatAgo, formatDuration } from "./format";
 import { useSession } from "./session";
+import { useT, type MessageKey } from "./i18n";
+import type { Translator } from "./widgets/registry";
 
 const REFRESH_MS = 5000;
 
@@ -25,6 +27,7 @@ interface Props {
 }
 
 export function AgentList({ refreshMs = REFRESH_MS, heading = true, onUnauthorized: onUnauthorizedProp, all = false, reloadKey = 0 }: Props) {
+  const t = useT();
   const session = useSession();
   const onUnauthorized = onUnauthorizedProp ?? session?.expired;
   const [state, setState] = useState<State>({ kind: "loading" });
@@ -54,10 +57,10 @@ export function AgentList({ refreshMs = REFRESH_MS, heading = true, onUnauthoriz
 
   return (
     <section aria-labelledby="agents-heading">
-      {heading ? <h2 id="agents-heading">Agents</h2> : <h2 id="agents-heading" className="visually-hidden">Agents</h2>}
-      {state.kind === "loading" && <p>Loading…</p>}
-      {state.kind === "error" && <p role="alert">Could not load agents: {state.message}</p>}
-      {state.kind === "ready" && state.agents.length === 0 && <p>{all ? "No servers yet." : "No agents connected."}</p>}
+      {heading ? <h2 id="agents-heading">{t("servers.list.heading")}</h2> : <h2 id="agents-heading" className="visually-hidden">{t("servers.list.heading")}</h2>}
+      {state.kind === "loading" && <p>{t("servers.loading")}</p>}
+      {state.kind === "error" && <p role="alert">{t("servers.list.loadError", { message: state.message })}</p>}
+      {state.kind === "ready" && state.agents.length === 0 && <p>{all ? t("servers.list.noServers") : t("servers.list.noneConnected")}</p>}
       {state.kind === "ready" && state.agents.length > 0 && <AgentTable agents={state.agents} />}
     </section>
   );
@@ -67,42 +70,43 @@ export function AgentList({ refreshMs = REFRESH_MS, heading = true, onUnauthoriz
 // host name, else its id.
 export const displayName = (a: Agent) => a.name || a.hostname || a.id;
 
-const STATUS_LABEL: Record<Agent["status"], string> = {
-  connected: "online",
-  stale: "stale",
-  offline: "offline",
-  revoked: "revoked",
-  incompatible: "incompatible",
+const STATUS_LABEL: Record<Agent["status"], MessageKey> = {
+  connected: "servers.status.online",
+  stale: "servers.status.stale",
+  offline: "servers.status.offline",
+  revoked: "servers.status.revoked",
+  incompatible: "servers.status.incompatible",
 };
 
 // versionNote says, in a few words, what to do about an agent whose release
 // differs from the hub's, or "" when there is nothing to do.
-export function versionNote(a: Agent): string {
-  if (a.status === "incompatible") return "too old for this hub: update it";
-  if (a.compatibility === "behind") return "behind the hub";
-  if (a.compatibility === "ahead") return "ahead of the hub: update the hub";
+export function versionNote(a: Agent, t: Translator): string {
+  if (a.status === "incompatible") return t("servers.list.noteTooOld");
+  if (a.compatibility === "behind") return t("servers.list.noteBehind");
+  if (a.compatibility === "ahead") return t("servers.list.noteAhead");
   return "";
 }
 
-export const statusLabel = (a: Agent) => STATUS_LABEL[a.status];
+export const statusLabel = (a: Agent, t: Translator) => t(STATUS_LABEL[a.status]);
 
 // lastContact says when the hub last heard from a server.
-export function lastContact(a: Agent): string {
+export function lastContact(a: Agent, t: Translator): string {
   if (a.status === "connected" || a.status === "stale") return formatAgo(a.last_heartbeat);
-  return a.last_seen_at ? formatAgo(a.last_seen_at) : "never connected";
+  return a.last_seen_at ? formatAgo(a.last_seen_at) : t("servers.list.neverConnected");
 }
 
 function AgentTable({ agents }: { agents: Agent[] }) {
+  const t = useT();
   return (
     <table>
       <thead>
         <tr>
-          <th>Server</th>
-          <th>System</th>
-          <th>Version</th>
-          <th>Status</th>
-          <th>Last contact</th>
-          <th>Uptime</th>
+          <th>{t("servers.fact.server")}</th>
+          <th>{t("servers.fact.system")}</th>
+          <th>{t("servers.list.version")}</th>
+          <th>{t("servers.fact.status")}</th>
+          <th>{t("servers.fact.lastContact")}</th>
+          <th>{t("servers.fact.uptime")}</th>
         </tr>
       </thead>
       <tbody>
@@ -115,12 +119,12 @@ function AgentTable({ agents }: { agents: Agent[] }) {
             <td>{[a.os_version ?? a.os, a.arch].filter(Boolean).join(" ") || "-"}</td>
             <td>
               {a.version || "-"}
-              {versionNote(a) && <span className="muted"> {versionNote(a)}</span>}
+              {versionNote(a, t) && <span className="muted"> {versionNote(a, t)}</span>}
             </td>
             <td>
-              <span className={`status ${a.status}`}>{statusLabel(a)}</span>
+              <span className={`status ${a.status}`}>{statusLabel(a, t)}</span>
             </td>
-            <td>{lastContact(a)}</td>
+            <td>{lastContact(a, t)}</td>
             <td>{a.uptime_seconds === null ? "-" : formatDuration(a.uptime_seconds)}</td>
           </tr>
         ))}

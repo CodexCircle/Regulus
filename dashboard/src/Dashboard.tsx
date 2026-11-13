@@ -3,10 +3,11 @@ import ReactGridLayout, { useContainerWidth, type Layout } from "react-grid-layo
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { addWidget, applyPositions, GRID_COLS, removeWidget, setWidgetConfig, type DashboardLayout, type WidgetInstance } from "./layout";
+import { useT } from "./i18n";
 import { useCan, useSession } from "./session";
 import { useDashboardLayout, type SaveState } from "./useDashboardLayout";
 import { registry as defaultRegistry } from "./widgets";
-import type { WidgetRegistry } from "./widgets/registry";
+import { widgetDescription, widgetTitle, type WidgetRegistry } from "./widgets/registry";
 
 const ROW_HEIGHT = 56;
 
@@ -18,6 +19,7 @@ interface Props {
 // Dashboard is the customizable grid of widgets. Each user arranges their own;
 // the layout is saved on the hub.
 export function Dashboard({ registry = defaultRegistry, saveDelayMs }: Props) {
+  const t = useT();
   const session = useSession();
   const canEdit = useCan("layout.edit");
   const { loaded, saveState, update, reset } = useDashboardLayout(registry, {
@@ -28,12 +30,12 @@ export function Dashboard({ registry = defaultRegistry, saveDelayMs }: Props) {
   const [picking, setPicking] = useState(false);
   const [confirmingReset, setConfirmingReset] = useState(false);
 
-  if (loaded.status === "loading") return <p>Loading…</p>;
-  if (loaded.status === "error") return <p role="alert">Could not load the dashboard: {loaded.message}</p>;
+  if (loaded.status === "loading") return <p>{t("servers.loading")}</p>;
+  if (loaded.status === "error") return <p role="alert">{t("servers.dashboard.loadError", { message: loaded.message })}</p>;
   const layout = loaded.layout;
 
   return (
-    <section aria-label="Dashboard">
+    <section aria-label={t("servers.dashboard.label")}>
       <div className="toolbar">
         {canEdit && (
           <button type="button" aria-pressed={editing} onClick={() => {
@@ -41,30 +43,30 @@ export function Dashboard({ registry = defaultRegistry, saveDelayMs }: Props) {
             setPicking(false);
             setConfirmingReset(false);
           }}>
-            {editing ? "Done" : "Customize"}
+            {editing ? t("servers.dashboard.done") : t("servers.dashboard.customize")}
           </button>
         )}
         {editing && canEdit && (
           <>
             <button type="button" aria-expanded={picking} onClick={() => setPicking(!picking)}>
-              Add widget
+              {t("servers.dashboard.addWidget")}
             </button>
             {confirmingReset ? (
               <span>
-                Replace your layout with the default?{" "}
+                {t("servers.dashboard.confirmReset")}{" "}
                 <button type="button" onClick={() => {
                   reset();
                   setConfirmingReset(false);
                 }}>
-                  Yes, reset
+                  {t("servers.dashboard.yesReset")}
                 </button>{" "}
                 <button type="button" onClick={() => setConfirmingReset(false)}>
-                  Cancel
+                  {t("servers.dashboard.cancel")}
                 </button>
               </span>
             ) : (
               <button type="button" onClick={() => setConfirmingReset(true)}>
-                Reset to default
+                {t("servers.dashboard.reset")}
               </button>
             )}
           </>
@@ -84,7 +86,7 @@ export function Dashboard({ registry = defaultRegistry, saveDelayMs }: Props) {
       )}
 
       {layout.widgets.length === 0 ? (
-        <p>The dashboard is empty. Choose Customize, then Add widget.</p>
+        <p>{t("servers.dashboard.empty")}</p>
       ) : (
         <Grid layout={layout} registry={registry} editing={editing} onChange={update} />
       )}
@@ -93,7 +95,13 @@ export function Dashboard({ registry = defaultRegistry, saveDelayMs }: Props) {
 }
 
 function SaveStatus({ state }: { state: SaveState }) {
-  const text = { idle: "", saving: "Saving…", saved: "Saved", error: "Could not save the layout" }[state];
+  const t = useT();
+  const text = {
+    idle: "",
+    saving: t("servers.dashboard.saving"),
+    saved: t("servers.dashboard.saved"),
+    error: t("servers.dashboard.saveError"),
+  }[state];
   return (
     <span className="save-status" role="status" aria-live="polite">
       {text}
@@ -102,16 +110,17 @@ function SaveStatus({ state }: { state: SaveState }) {
 }
 
 function WidgetPicker({ registry, onPick }: { registry: WidgetRegistry; onPick: (id: string) => void }) {
+  const t = useT();
   return (
-    <ul className="widget-picker" aria-label="Available widgets">
+    <ul className="widget-picker" aria-label={t("servers.dashboard.available")}>
       {registry.list().map((def) => (
         <li key={def.id}>
           <div>
-            <strong>{def.title}</strong>
-            <p>{def.description}</p>
+            <strong>{widgetTitle(def, t)}</strong>
+            <p>{widgetDescription(def, t)}</p>
           </div>
-          <button type="button" onClick={() => onPick(def.id)} aria-label={`Add ${def.title}`}>
-            Add
+          <button type="button" onClick={() => onPick(def.id)} aria-label={t("servers.dashboard.addNamed", { title: widgetTitle(def, t) })}>
+            {t("servers.dashboard.add")}
           </button>
         </li>
       ))}
@@ -181,14 +190,15 @@ interface FrameProps {
 // WidgetFrame draws the title bar and isolates failures: a widget that throws
 // shows an error in its own frame and leaves the rest of the dashboard alone.
 function WidgetFrame({ widget, registry, editing, onRemove, onConfig }: FrameProps) {
+  const t = useT();
   const def = registry.get(widget.type);
-  const title = def?.title ?? "Unavailable widget";
+  const title = def ? widgetTitle(def, t) : t("servers.dashboard.unavailable");
   return (
     <article className="widget" aria-label={title}>
       <header>
         <h3 className="widget-title">{title}</h3>
         {editing && (
-          <button type="button" className="widget-remove" onClick={onRemove} aria-label={`Remove ${title}`}>
+          <button type="button" className="widget-remove" onClick={onRemove} aria-label={t("servers.dashboard.removeNamed", { title })}>
             ×
           </button>
         )}
@@ -200,12 +210,17 @@ function WidgetFrame({ widget, registry, editing, onRemove, onConfig }: FramePro
           </WidgetBoundary>
         ) : (
           <p>
-            The widget type <code>{widget.type}</code> is not installed. You can remove it.
+            {t("servers.dashboard.notInstalledBefore")} <code>{widget.type}</code> {t("servers.dashboard.notInstalledAfter")}
           </p>
         )}
       </div>
     </article>
   );
+}
+
+function WidgetFailed({ message }: { message: string }) {
+  const t = useT();
+  return <p role="alert">{t("servers.dashboard.widgetFailed", { message })}</p>;
 }
 
 class WidgetBoundary extends Component<{ title: string; children: ReactNode }, { error: Error | null }> {
@@ -221,7 +236,7 @@ class WidgetBoundary extends Component<{ title: string; children: ReactNode }, {
 
   render() {
     if (this.state.error) {
-      return <p role="alert">This widget failed: {this.state.error.message}</p>;
+      return <WidgetFailed message={this.state.error.message} />;
     }
     return this.props.children;
   }
