@@ -12,6 +12,7 @@ import {
   type Me,
   type User,
 } from "./api";
+import { useT } from "./i18n";
 import { SessionContext, type Session } from "./session";
 import { TwoFactor } from "./TwoFactor";
 
@@ -33,6 +34,7 @@ const stateOf = (me: Me): State =>
 // AuthGate shows the first-run setup or the login page until there is a
 // session, then renders children.
 export function AuthGate({ children }: { children: (session: Session) => ReactNode }) {
+  const t = useT();
   const [state, setState] = useState<State>({ kind: "loading" });
   const expired = useCallback(() => setState({ kind: "login" }), []);
 
@@ -69,9 +71,9 @@ export function AuthGate({ children }: { children: (session: Session) => ReactNo
 
   switch (state.kind) {
     case "loading":
-      return <AuthFrame><p>Loading…</p></AuthFrame>;
+      return <AuthFrame><p>{t("auth.loading")}</p></AuthFrame>;
     case "error":
-      return <AuthFrame><p role="alert">Could not reach the hub: {state.message}</p></AuthFrame>;
+      return <AuthFrame><p role="alert">{t("auth.unreachable", { message: state.message })}</p></AuthFrame>;
     case "setup":
       return <AuthFrame><SetupForm onDone={signedIn} /></AuthFrame>;
     case "login":
@@ -92,12 +94,12 @@ export function AuthGate({ children }: { children: (session: Session) => ReactNo
         return (
           <SessionContext value={session}>
             <AuthFrame>
-              <h2>Set up two-factor authentication</h2>
-              <p>This hub requires two-factor authentication. You can use Regulus once it is on.</p>
+              <h2>{t("auth.enroll.title")}</h2>
+              <p>{t("auth.enroll.intro")}</p>
               <TwoFactor onChange={() => loadMe()} />
               <p>
                 <button type="button" onClick={() => void session.signOut()}>
-                  Sign out
+                  {t("auth.signOut")}
                 </button>
               </p>
             </AuthFrame>
@@ -121,11 +123,12 @@ export function AuthGate({ children }: { children: (session: Session) => ReactNo
 
 // AuthFrame is the centred card around the setup and login pages.
 export function AuthFrame({ children }: { children: ReactNode }) {
+  const t = useT();
   return (
     <main className="auth">
       <header>
-        <h1>Regulus</h1>
-        <p>CodexCircle Server Manager</p>
+        <h1>{t("app.brand")}</h1>
+        <p>{t("auth.tagline")}</p>
       </header>
       {children}
     </main>
@@ -148,6 +151,7 @@ function useSubmit<T>(action: () => Promise<T>, onDone: (result: T) => void) {
 }
 
 function LoginForm({ onDone }: { onDone: (result: LoginResult) => void }) {
+  const t = useT();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   // Set once the password was right and the account asks for a code.
@@ -165,13 +169,13 @@ function LoginForm({ onDone }: { onDone: (result: LoginResult) => void }) {
   }
   return (
     <form onSubmit={submit} aria-labelledby="login-heading">
-      <h2 id="login-heading">Sign in</h2>
+      <h2 id="login-heading">{t("auth.login.title")}</h2>
       <label>
-        Username
+        {t("auth.login.username")}
         <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
       </label>
       <label>
-        Password
+        {t("auth.login.password")}
         <input
           type="password"
           value={password}
@@ -182,9 +186,9 @@ function LoginForm({ onDone }: { onDone: (result: LoginResult) => void }) {
       </label>
       {error && <p role="alert">{error}</p>}
       <button type="submit" disabled={busy}>
-        Sign in
+        {t("auth.login.submit")}
       </button>
-      <p className="hint">Forgot your password? Ask an administrator for a reset link.</p>
+      <p className="hint">{t("auth.login.forgot")}</p>
     </form>
   );
 }
@@ -192,13 +196,14 @@ function LoginForm({ onDone }: { onDone: (result: LoginResult) => void }) {
 // CodeForm is the second step of a login: the code of the authenticator app,
 // or a recovery code.
 function CodeForm({ pending, onDone, onBack }: { pending: string; onDone: (r: LoginResult) => void; onBack: () => void }) {
+  const t = useT();
   const [code, setCode] = useState("");
   const { error, busy, submit } = useSubmit(() => loginTwoFactor(pending, code), onDone);
   return (
     <form onSubmit={submit} aria-labelledby="code-heading">
-      <h2 id="code-heading">Two-factor authentication</h2>
+      <h2 id="code-heading">{t("auth.code.title")}</h2>
       <label>
-        Authentication code
+        {t("auth.code.label")}
         <input
           value={code}
           onChange={(e) => setCode(e.target.value)}
@@ -208,14 +213,14 @@ function CodeForm({ pending, onDone, onBack }: { pending: string; onDone: (r: Lo
           required
         />
       </label>
-      <p className="hint">Enter the 6-digit code from your authenticator app, or one of your recovery codes.</p>
+      <p className="hint">{t("auth.code.hint")}</p>
       {error && <p role="alert">{error}</p>}
       <p className="row-actions">
         <button type="submit" disabled={busy}>
-          Verify
+          {t("auth.code.verify")}
         </button>
         <button type="button" onClick={onBack}>
-          Back
+          {t("auth.code.back")}
         </button>
       </p>
     </form>
@@ -224,15 +229,17 @@ function CodeForm({ pending, onDone, onBack }: { pending: string; onDone: (r: Lo
 
 // RecoveryNotice warns that a recovery code was used and how many are left.
 function RecoveryNotice({ left, onClose }: { left: number; onClose: () => void }) {
+  const t = useT();
   return (
     <p role="status" className="note warn">
-      You signed in with a recovery code; {left} {left === 1 ? "is" : "are"} left. If this was not you, change your password. Make new codes on the
-      Account page. <button type="button" onClick={onClose}>Dismiss</button>
+      {t(left === 1 ? "auth.recovery.one" : "auth.recovery.many", { count: left })}{" "}
+      <button type="button" onClick={onClose}>{t("auth.recovery.dismiss")}</button>
     </p>
   );
 }
 
 function SetupForm({ onDone }: { onDone: (result: LoginResult) => void }) {
+  const t = useT();
   const [token, setToken] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -252,21 +259,18 @@ function SetupForm({ onDone }: { onDone: (result: LoginResult) => void }) {
 
   return (
     <form onSubmit={onSubmit} aria-labelledby="setup-heading">
-      <h2 id="setup-heading">Create the admin account</h2>
-      <p>
-        This hub has no accounts yet. Copy the one-time setup token from the hub log (the line that says
-        &quot;no accounts yet&quot;).
-      </p>
+      <h2 id="setup-heading">{t("auth.setup.title")}</h2>
+      <p>{t("auth.setup.intro")}</p>
       <label>
-        Setup token
+        {t("auth.setup.token")}
         <input value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" required />
       </label>
       <label>
-        Username
+        {t("auth.setup.username")}
         <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
       </label>
       <label>
-        Password (at least 10 characters)
+        {t("auth.setup.password")}
         <input
           type="password"
           value={password}
@@ -277,7 +281,7 @@ function SetupForm({ onDone }: { onDone: (result: LoginResult) => void }) {
         />
       </label>
       <label>
-        Repeat the password
+        {t("auth.setup.repeat")}
         <input
           type="password"
           value={confirm}
@@ -286,10 +290,10 @@ function SetupForm({ onDone }: { onDone: (result: LoginResult) => void }) {
           required
         />
       </label>
-      {mismatch && <p role="alert">The passwords do not match.</p>}
+      {mismatch && <p role="alert">{t("auth.passwordsMismatch")}</p>}
       {error && <p role="alert">{error}</p>}
       <button type="submit" disabled={busy}>
-        Create the admin
+        {t("auth.setup.submit")}
       </button>
     </form>
   );

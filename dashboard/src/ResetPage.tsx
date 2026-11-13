@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from "react";
 import { resetPassword } from "./api";
+import { useT } from "./i18n";
 import { resetTokenFromHash } from "./route";
 import { errorMessage } from "./useApiList";
 
 // ResetPage is where the owner of an account opens a reset link and chooses a
 // new password.
 export function ResetPage() {
+  const t = useT();
   const token = resetTokenFromHash(window.location.hash);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -16,7 +18,7 @@ export function ResetPage() {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (password !== confirm) {
-      setError("The passwords do not match.");
+      setError(t("auth.passwordsMismatch"));
       return;
     }
     setError("");
@@ -36,10 +38,10 @@ export function ResetPage() {
   if (done) {
     return (
       <section aria-labelledby="reset-heading">
-        <h2 id="reset-heading">Password changed</h2>
-        <p role="status">Your password was changed and all your sessions were signed out.</p>
+        <h2 id="reset-heading">{t("auth.reset.doneTitle")}</h2>
+        <p role="status">{t("auth.reset.done")}</p>
         <p>
-          <a href="#/">Sign in</a>
+          <a href="#/">{t("auth.reset.signIn")}</a>
         </p>
       </section>
     );
@@ -47,19 +49,19 @@ export function ResetPage() {
 
   return (
     <form onSubmit={(e) => void submit(e)} aria-labelledby="reset-heading">
-      <h2 id="reset-heading">Choose a new password</h2>
-      <p>The link works once and expires an hour after the administrator made it.</p>
+      <h2 id="reset-heading">{t("auth.reset.title")}</h2>
+      <p>{t("auth.reset.intro")}</p>
       <label>
-        New password (at least 10 characters)
+        {t("auth.reset.password")}
         <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={10} required />
       </label>
       <label>
-        Repeat the password
+        {t("auth.reset.repeat")}
         <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" required />
       </label>
       {error && <p role="alert">{error}</p>}
       <button type="submit" disabled={busy}>
-        Change password
+        {t("auth.reset.submit")}
       </button>
     </form>
   );
