@@ -9,6 +9,7 @@ import {
   type TwoFactorSetup,
   type TwoFactorStatus,
 } from "./api";
+import { useT } from "./i18n";
 import { useSession } from "./session";
 import { errorMessage } from "./useApiList";
 
@@ -21,6 +22,7 @@ const FEW_CODES_LEFT = 3;
 // on and off and make new recovery codes. onChange is called after the state
 // changed, so a caller that waits for it can go on.
 export function TwoFactor({ onChange }: { onChange?: () => void }) {
+  const t = useT();
   const session = useSession();
   const expired = session?.expired;
   const [load, setLoad] = useState<Load>({ kind: "loading" });
@@ -46,9 +48,9 @@ export function TwoFactor({ onChange }: { onChange?: () => void }) {
 
   return (
     <section className="panel" aria-labelledby="two-factor-heading">
-      <h3 id="two-factor-heading">Two-factor authentication</h3>
-      {load.kind === "loading" && <p>Loading…</p>}
-      {load.kind === "error" && <p role="alert">Could not load the state: {load.message}</p>}
+      <h3 id="two-factor-heading">{t("account.twoFactor.title")}</h3>
+      {load.kind === "loading" && <p>{t("account.loading")}</p>}
+      {load.kind === "error" && <p role="alert">{t("account.twoFactor.loadError", { message: load.message })}</p>}
       {codes && (
         <RecoveryCodes
           codes={codes}
@@ -82,6 +84,7 @@ export function TwoFactor({ onChange }: { onChange?: () => void }) {
 }
 
 function Disabled({ mandatory, onEnabled }: { mandatory: boolean; onEnabled: (codes: string[]) => void }) {
+  const t = useT();
   const [password, setPassword] = useState("");
   const [setup, setSetup] = useState<TwoFactorSetup | null>(null);
   const [code, setCode] = useState("");
@@ -120,18 +123,18 @@ function Disabled({ mandatory, onEnabled }: { mandatory: boolean; onEnabled: (co
       <form onSubmit={(e) => void start(e)}>
         {mandatory ? (
           <p role="status" className="note warn">
-            This hub requires two-factor authentication. Set it up to continue.
+            {t("account.twoFactor.mandatoryNotice")}
           </p>
         ) : (
-          <p>Add a second step to your sign-in: a code from an authenticator app on your phone, besides your password.</p>
+          <p>{t("account.twoFactor.intro")}</p>
         )}
         <label>
-          Your password
+          {t("account.twoFactor.yourPassword")}
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
         </label>
         {error && <p role="alert">{error}</p>}
         <button type="submit" disabled={busy}>
-          Set up two-factor authentication
+          {t("account.twoFactor.setUp")}
         </button>
       </form>
     );
@@ -139,15 +142,13 @@ function Disabled({ mandatory, onEnabled }: { mandatory: boolean; onEnabled: (co
 
   return (
     <form onSubmit={(e) => void confirm(e)}>
+      <p>{t("account.twoFactor.scan")}</p>
+      <img className="qr" src={setup.qr} alt={t("account.twoFactor.qrAlt")} width={180} height={180} />
       <p>
-        1. Scan this code with an authenticator app (Google Authenticator, Aegis, 1Password, Bitwarden…), or type the key into it.
-      </p>
-      <img className="qr" src={setup.qr} alt="QR code to add this account to an authenticator app" width={180} height={180} />
-      <p>
-        Key: <code aria-label="Secret key">{setup.secret}</code>
+        {t("account.twoFactor.key")} <code aria-label={t("account.twoFactor.secretKey")}>{setup.secret}</code>
       </p>
       <label>
-        2. Enter the 6-digit code the app shows
+        {t("account.twoFactor.enterCode")}
         <input
           value={code}
           onChange={(e) => setCode(e.target.value)}
@@ -159,7 +160,7 @@ function Disabled({ mandatory, onEnabled }: { mandatory: boolean; onEnabled: (co
       </label>
       {error && <p role="alert">{error}</p>}
       <button type="submit" disabled={busy}>
-        Turn on two-factor authentication
+        {t("account.twoFactor.turnOn")}
       </button>
     </form>
   );
@@ -174,6 +175,7 @@ function Enabled({
   onCodes: (codes: string[]) => void;
   onDisabled: () => void;
 }) {
+  const t = useT();
   const [action, setAction] = useState<"" | "renew" | "disable">("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -208,25 +210,25 @@ function Enabled({
 
   return (
     <>
-      <p role="status">Two-factor authentication is on. You need a code from your app each time you sign in.</p>
+      <p role="status">{t("account.twoFactor.isOn")}</p>
       <p>
-        Recovery codes left: <strong>{status.recovery_codes_left}</strong>
+        {t("account.twoFactor.codesLeft")} <strong>{status.recovery_codes_left}</strong>
       </p>
       {status.recovery_codes_left <= FEW_CODES_LEFT && (
         <p role="alert" className="note warn">
-          You are running out of recovery codes. Make new ones and keep them somewhere safe.
+          {t("account.twoFactor.runningOut")}
         </p>
       )}
       {action === "" ? (
         <p className="row-actions">
           <button type="button" onClick={() => setAction("renew")}>
-            Make new recovery codes
+            {t("account.twoFactor.makeNew")}
           </button>
           {status.mandatory ? (
-            <span className="muted">The hub requires two-factor authentication, so it cannot be turned off.</span>
+            <span className="muted">{t("account.twoFactor.cannotTurnOff")}</span>
           ) : (
             <button type="button" onClick={() => setAction("disable")}>
-              Turn off two-factor authentication
+              {t("account.twoFactor.turnOff")}
             </button>
           )}
         </p>
@@ -234,25 +236,25 @@ function Enabled({
         <form onSubmit={(e) => void submit(e)}>
           <p>
             {action === "renew"
-              ? "The old recovery codes stop working."
-              : "Your account will be protected by the password alone."}{" "}
-            Confirm with your password and a code.
+              ? t("account.twoFactor.renewWarning")
+              : t("account.twoFactor.disableWarning")}{" "}
+            {t("account.twoFactor.confirmHint")}
           </p>
           <label>
-            Your password
+            {t("account.twoFactor.yourPassword")}
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
           </label>
           <label>
-            Code from the app, or a recovery code
+            {t("account.twoFactor.codeOrRecovery")}
             <input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" required />
           </label>
           {error && <p role="alert">{error}</p>}
           <p className="row-actions">
             <button type="submit" disabled={busy}>
-              {action === "renew" ? "Make new recovery codes" : "Turn off"}
+              {action === "renew" ? t("account.twoFactor.makeNew") : t("account.twoFactor.turnOffShort")}
             </button>
             <button type="button" onClick={close}>
-              Cancel
+              {t("account.twoFactor.cancel")}
             </button>
           </p>
         </form>
@@ -264,6 +266,7 @@ function Enabled({
 // RecoveryCodes shows the codes once. They are the way back in when the phone
 // is lost, so the user has to say they saved them before going on.
 function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
+  const t = useT();
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const text = codes.join("\n");
@@ -275,7 +278,7 @@ function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void 
     );
   };
   const download = () => {
-    const url = URL.createObjectURL(new Blob([`Regulus recovery codes\n\n${text}\n`], { type: "text/plain" }));
+    const url = URL.createObjectURL(new Blob([`${t("account.recovery.fileHeader")}\n\n${text}\n`], { type: "text/plain" }));
     const a = document.createElement("a");
     a.href = url;
     a.download = "regulus-recovery-codes.txt";
@@ -284,10 +287,9 @@ function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void 
   };
 
   return (
-    <div role="status" aria-label="Recovery codes">
+    <div role="status" aria-label={t("account.recovery.label")}>
       <p>
-        <strong>Save these recovery codes now.</strong> Each works once, instead of a code from the app, if you lose your phone. They are
-        not shown again.
+        <strong>{t("account.recovery.saveNow")}</strong> {t("account.recovery.explain")}
       </p>
       <ul className="recovery-codes">
         {codes.map((c) => (
@@ -298,17 +300,18 @@ function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void 
       </ul>
       <p className="row-actions">
         <button type="button" onClick={copy}>
-          {copied ? "Copied" : "Copy codes"}
+          {copied ? t("account.recovery.copied") : t("account.recovery.copy")}
         </button>
         <button type="button" onClick={download}>
-          Download codes
+          {t("account.recovery.download")}
         </button>
       </p>
       <label className="check">
-        <input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)} /> I saved these codes somewhere safe
+        <input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)} />{" "}
+        {t("account.recovery.saved")}
       </label>
       <button type="button" disabled={!saved} onClick={onDone}>
-        Done
+        {t("account.recovery.done")}
       </button>
     </div>
   );
