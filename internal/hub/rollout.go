@@ -300,6 +300,21 @@ func (h *Hub) runRollout(ctx context.Context, run *rolloutRun, by string) {
 		wg.Wait()
 	}
 
+	// The final state is made visible only after the audit event is written:
+	// anyone who sees "done" or "failed" (the API, a test) must find
+	// update_rollout_finished in the audit log. Writing it after the state
+	// left a window in which it was missing.
+	final := RolloutDone
+	if failed {
+		final = RolloutFailed
+	}
+	h.rollout.mu.Lock()
+	stopped := run.status.State == RolloutStopped
+	h.rollout.mu.Unlock()
+	if !stopped {
+		h.audit(context.Background(), by, EventRolloutFinished, h.version, final)
+	}
+
 	h.rollout.mu.Lock()
 	for i := range run.status.Agents {
 		if run.status.Agents[i].Status == AgentPending {
@@ -308,21 +323,15 @@ func (h *Hub) runRollout(ctx context.Context, run *rolloutRun, by string) {
 	}
 	finished := time.Now().UTC()
 	run.status.FinishedAt = &finished
-	switch {
-	case run.status.State == RolloutStopped:
-	case failed:
-		run.status.State = RolloutFailed
-		if by == update.SystemActor {
+	// A stop that arrived while the event was written wins: it has its own.
+	if run.status.State != RolloutStopped {
+		run.status.State = final
+		if final == RolloutFailed && by == update.SystemActor {
 			h.rollout.failedTarget = h.version
 		}
-	default:
-		run.status.State = RolloutDone
 	}
 	state := run.status.State
 	h.rollout.mu.Unlock()
-	if state != RolloutStopped {
-		h.audit(context.Background(), by, EventRolloutFinished, h.version, state)
-	}
 	h.log.Info("updating the servers finished", "target", h.version, "state", state)
 }
 
