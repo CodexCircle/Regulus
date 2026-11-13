@@ -30,6 +30,26 @@ paths:
           content:
             text/plain:
               schema: { type: string, examples: [ok] }
+  /api/database:
+    get:
+      tags: [auth]
+      summary: Whether the database answers
+      description: >
+        Public on purpose: while the database is down the hub cannot check a
+        session, so an endpoint that needs a login could not report it. Carries
+        one boolean; the reason stays in the log, `regulus status` and the
+        console. Always `ok: true` with SQLite. Updated every 15 seconds.
+      security: []
+      responses:
+        "200":
+          description: The state the hub last saw.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
   /api/auth/me:
     get:
       tags: [auth]

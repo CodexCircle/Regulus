@@ -160,6 +160,11 @@ export const revokeAgent = (id: string) =>
 export const fetchMe = (signal?: AbortSignal) =>
   request<Me>("GET", "/api/auth/me", undefined, signal);
 
+// fetchDatabaseStatus asks whether the hub's database answers. It needs no
+// login and carries one boolean (see /api/database in the OpenAPI file).
+export const fetchDatabaseStatus = (signal?: AbortSignal) =>
+  request<{ ok: boolean }>("GET", "/api/database", undefined, signal);
+
 // The answer to a correct password when the account has two-factor on: no
 // session yet, only a token to send with a code to loginTwoFactor.
 export interface TwoFactorPending {

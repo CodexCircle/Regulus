@@ -9,6 +9,7 @@ package hub
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -222,7 +223,7 @@ func (h *Hub) Close() error {
 // Serve serves HTTP on ln until ctx is cancelled, then shuts down gracefully.
 func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 	srv := &http.Server{
-		Handler:           NewHandler(Deps{UI: h.ui, Agents: h, Layouts: h, Log: h.log, Auth: h.auth, Fleet: h, Updates: h.updates, Rollout: h, Version: h.version}),
+		Handler:           NewHandler(Deps{UI: h.ui, Agents: h, Layouts: h, Log: h.log, Auth: h.auth, Fleet: h, Updates: h.updates, Rollout: h, Version: h.version, DatabaseProblem: h.dbState.get}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -402,6 +403,10 @@ type Deps struct {
 	// Version is the version the hub was built with. The enrollment answer
 	// carries it when it is a release, so a new agent installs the same one.
 	Version string
+	// DatabaseProblem returns why the database is not answering, or "" when it
+	// is. Nil means "no problem", as for SQLite and in tests. Only whether
+	// there is a problem is ever sent to a client, never the text.
+	DatabaseProblem func() string
 }
 
 // route is a protected API endpoint.
@@ -458,9 +463,9 @@ func apiRoutes(d Deps) []route {
 }
 
 // NewHandler returns the hub HTTP handler. The API (under /api/) requires a
-// login, except for the endpoints of the auth package. The dashboard files and
-// /healthz are public: they hold no data, and the page asks for a login before
-// it shows anything.
+// login, except for the endpoints of the auth package. The dashboard files,
+// /healthz and /api/database (one boolean) are public: they hold no data, and
+// the page asks for a login before it shows anything.
 func NewHandler(d Deps) http.Handler {
 	if d.Log == nil {
 		d.Log = slog.Default()
@@ -470,6 +475,16 @@ func NewHandler(d Deps) http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = fmt.Fprintln(w, "ok")
+	})
+	// /api/database is public on purpose. While the database is down the hub
+	// cannot check a session, so nobody could be told through an endpoint that
+	// needs a login. It carries one boolean and nothing else: the reason, the
+	// address and the user stay in the log, regulus status and the console.
+	mux.HandleFunc("GET /api/database", func(w http.ResponseWriter, _ *http.Request) {
+		ok := d.DatabaseProblem == nil || d.DatabaseProblem() == ""
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": ok})
 	})
 
 	api := http.NewServeMux()
