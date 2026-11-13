@@ -252,7 +252,7 @@ sequenceDiagram
 | Interface | Where | Notes |
 |---|---|---|
 | **Dashboard** | `dashboard/` (Vite + React + TypeScript), embedded by `internal/webui`; served by the hub on `listen` (default `:8080`, plain HTTP) | Widgets are registered in `dashboard/src/widgets/` with `registerWidget`. The layout is saved per user via `/api/layout`. |
-| **HTTP API** | `internal/hub/api.go` and friends; described in `internal/hub/openapi.yaml`, served at `/api/openapi.yaml`; a test keeps the file in step with the routes | Needs a login except `/api/auth/*`, `/healthz` and the dashboard files. |
+| **HTTP API** | `internal/hub/api.go` and friends; described in `internal/hub/openapi.yaml`, served at `/api/openapi.yaml`; a test keeps the file in step with the routes | Needs a login except `/api/auth/*`, `/healthz`, `/api/database` and the dashboard files. |
 | **Live stream** | `GET /api/stream`, a WebSocket (`internal/hub/stream.go`, `events.go`) | Sends a `snapshot`, then `agent.connected`, `agent.disconnected`, `agent.heartbeat`, `agent.metrics`. Needs the session cookie, refuses other origins, disconnects slow readers. |
 | **Agent listener** | `agent_listen` (for example `:8443`), gRPC over TLS | **Off by default.** Open the port only towards managed servers. |
 | **Local socket** | `<data_dir>/regulus.sock` (`internal/localstatus`) | Used by the console and `regulus status`; no login. |

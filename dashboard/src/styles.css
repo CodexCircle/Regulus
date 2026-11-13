@@ -638,3 +638,20 @@ label.choice {
   display: block;
   margin: 0.3rem 0;
 }
+
+/* database state, shown above everything, also before sign-in */
+.banner {
+  padding: 0.6rem 1rem;
+  font-size: 0.95rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.banner-danger {
+  border-left: 4px solid var(--danger);
+}
+
+.banner-ok {
+  border-left: 4px solid var(--ok);
+  color: var(--ok);
+}
