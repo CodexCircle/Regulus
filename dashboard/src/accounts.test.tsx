@@ -396,6 +396,8 @@ describe("ResetPage", () => {
     const calls = mockHub({});
     render(<App />);
     expect(await screen.findByRole("heading", { name: "Choose a new password" })).toBeInTheDocument();
-    expect(calls).toHaveLength(0); // no /api/auth/me, no login page
+    // No /api/auth/me and no login page. Only the public database state is
+    // asked, so a reset link also tells the user when the database is down.
+    expect(calls.filter((c) => c.path !== "/api/database")).toHaveLength(0);
   });
 });

@@ -18,6 +18,8 @@ Find what you need by what you want to do. For what Regulus is, see the [README]
 | find my way in the biggest source files | [Code map](code-map.md) |
 | look up a term | [Glossary](glossary.md) |
 | read the guide to hub promotion, redundancy and failover (skeleton, not implemented) | [Hub redundancy](hub-redundancy.md) |
+| see the kinds of machine in a group (hub, redundant hub, backup node, access gateway…) | [Node types](node-types.md) (design draft) |
+| read the design of the Android access app and the access gateway (skeleton, not implemented) | [Regulus Access](regulus-access.md) |
 | understand why a choice was made | [Design decisions](decisions.md) |
 | read the plugin design | [Plugins (design draft)](plugins.md) |
 | build and test Regulus | [Development](development.md) and [CONTRIBUTING](../CONTRIBUTING.md) |

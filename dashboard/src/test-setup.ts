@@ -4,7 +4,11 @@ import { afterEach, beforeEach, vi } from "vitest";
 import { FakeSocket } from "./fake-socket";
 
 // Vitest globals are off, so Testing Library cannot register its own cleanup.
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // The language choice is saved in the browser; no test may leak it.
+  window.localStorage.clear();
+});
 
 // No test may open a real connection: the live stream is a fake that does
 // nothing unless a test drives it.

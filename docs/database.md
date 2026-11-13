@@ -2,7 +2,7 @@
 
 The hub keeps its accounts, sessions, layouts, enrolled agents and update state in one database. Two backends exist: **SQLite**, the default, which needs nothing, and **PostgreSQL**, which you prepare and point the hub at. The administrator chooses between them in the installer ([Installation](installation.md#choosing-the-database), #123); moving existing data from one to the other is #124 (not implemented). The settings below can also be set by hand.
 
-Both backends run the same code: the tests of the storage, auth, fleet, hub, update and command packages run on SQLite and on PostgreSQL in CI. What has **not** been checked yet is a PostgreSQL install through the installer on a real VM (#81; the checklist there needs a PostgreSQL item).
+Both backends run the same code: the tests of the storage, auth, fleet, hub, update and command packages run on SQLite and on PostgreSQL in CI. The PostgreSQL job runs on versions 14 and 16 (14 is the minimum, 16 is the newest we test), and a separate CI job connects with `sslmode=verify-full` and `sslrootcert` to a PostgreSQL 16 that has TLS on (see below). What has **not** been checked yet is a PostgreSQL install through the installer on a real VM, including `--db-local` with `apt`, and with a database on another host (#81, #141; the checklist there needs a PostgreSQL item).
 
 ## Settings
 
@@ -22,11 +22,11 @@ All of them need a restart. They appear in `regulus config list`, in the console
 
 **The password.** It is read only from the environment, in practice from `/etc/regulus/regulus.env` (mode `0640`, `root:regulus`, loaded by the service unit). It is not a YAML key: the hub refuses a `password:` in `config.yaml` (the file is parsed with unknown keys rejected), `regulus config set database.password` refuses with an explanation, and everywhere a setting is shown (`config get`, `config list`, the console, the dashboard) the value appears as `********` when set. Logs and `regulus db check` never include it, and error messages from the database are rewritten so they do not echo connection strings.
 
-**TLS.** The default `prefer` encrypts when the server offers it and does not check the certificate; it is meant for a PostgreSQL on the same machine or a trusted network. For a database on another host use `verify-full` with `sslrootcert`.
+**TLS.** The default `prefer` encrypts when the server offers it and does not check the certificate; it is meant for a PostgreSQL on the same machine or a trusted network. For a database on another host use `verify-full` with `sslrootcert`. CI checks that `verify-full` with the right CA connects over an encrypted session, and that it refuses a host name the certificate does not name, a root that did not issue the certificate and a missing root file, without showing the password (`TestPostgresVerifyFull*`, which need `REGULUS_TEST_TLS_URL` and `REGULUS_TEST_TLS_CA` and are skipped without them). That uses a throwaway CA and a certificate for `localhost` on one machine; it does not cover a real remote host, a certificate chain with an intermediate, or `verify-ca`.
 
 ## Preparing PostgreSQL
 
-Supported versions: **14 or newer** (14 is in Ubuntu 22.04, 16 in Ubuntu 24.04). `regulus db check` refuses older ones. The tests run on 16.
+Supported versions: **14 or newer** (14 is in Ubuntu 22.04, 16 in Ubuntu 24.04). `regulus db check` refuses older ones. The tests run on 14 and 16 (matrix in `.github/workflows/ci.yml`).
 
 Run as a PostgreSQL superuser (for example `sudo -u postgres psql`):
 
@@ -57,7 +57,7 @@ With PostgreSQL the data is in the database, but **the key stays on the hub's di
 ## Failure behaviour
 
 - At start the hub waits up to 60 seconds for PostgreSQL to answer, then exits with the reason; the service manager starts it again. A database that comes up a little after the hub (after a reboot) needs nobody.
-- While running, the connection pool (at most 10 connections, recycled after 30 minutes) opens new connections by itself after PostgreSQL restarts. Requests made during the outage fail with an error; the hub does not exit. Every 15 seconds the hub checks the database, logs **once** when it stops answering and once when it answers again, and reports it in `regulus status` and in the Health section of the console (`check.database`). The dashboard does not show it yet (open gap).
+- While running, the connection pool (at most 10 connections, recycled after 30 minutes) opens new connections by itself after PostgreSQL restarts. Requests made during the outage fail with an error; the hub does not exit. Every 15 seconds the hub checks the database, logs **once** when it stops answering and once when it answers again, and reports it in `regulus status` and in the Health section of the console (`check.database`). The dashboard shows it too: a banner above every page, also before sign-in, says when the database stops answering and when it answers again (in English or Italian, by browser language). It comes from `GET /api/database`, which needs **no login** because the hub cannot check a session while the database is down; it carries one boolean (`ok`) and never the reason, which stays in the log, `regulus status` and the console. `/healthz` still answers `ok`, because the installer and the update helper wait for it and a hub that outlives its database is not dead.
 
 ## Migrations
 

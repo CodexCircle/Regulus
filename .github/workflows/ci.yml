@@ -36,11 +36,16 @@ jobs:
         run: grep -E '^(--- FAIL|FAIL|panic:)|_test\.go:[0-9]+:' go-test.log | head -40 | sed 's/^/::error::/' || true
 
   postgres:
-    name: Go tests on PostgreSQL
+    name: Go tests on PostgreSQL (${{ matrix.pg }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 14 is the oldest supported version (Ubuntu 22.04), 16 the one in Ubuntu 24.04.
+        pg: ["14", "16"]
     services:
       postgres:
-        image: postgres:16
+        image: postgres:${{ matrix.pg }}
         env:
           POSTGRES_USER: regulus
           POSTGRES_PASSWORD: regulus-ci
@@ -61,6 +66,60 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test -race ./internal/storage/... ./internal/auth/... ./internal/fleet/... ./internal/hub/... ./internal/update/... ./cmd/...
+
+  postgres-tls:
+    name: Go tests on PostgreSQL with TLS (verify-full)
+    runs-on: ubuntu-latest
+    env:
+      PGTLS_DIR: ${{ github.workspace }}/.pgtls
+      # The certificate names localhost and nothing else (no IP address), so a
+      # connection to 127.0.0.1 must be refused by verify-full.
+      REGULUS_TEST_TLS_URL: postgres://regulus:regulus-ci@localhost:5432/regulus_test
+      REGULUS_TEST_TLS_CA: ${{ github.workspace }}/.pgtls/ca.crt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Create a CA and a server certificate for localhost
+        run: |
+          mkdir -p "$PGTLS_DIR"
+          cd "$PGTLS_DIR"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=Regulus test CA" \
+            -addext "basicConstraints=critical,CA:TRUE" -keyout ca.key -out ca.crt
+          openssl req -newkey rsa:2048 -nodes -subj "/CN=localhost" -keyout server.key -out server.csr
+          printf 'subjectAltName=DNS:localhost\nbasicConstraints=CA:FALSE\n' > server.ext
+          openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 2 \
+            -extfile server.ext -out server.crt
+          chmod 755 "$PGTLS_DIR"
+          chmod 644 ca.crt server.crt
+          # PostgreSQL refuses a key that is not 0600 and owned by its own user
+          # (uid 999 in the official image).
+          sudo chown 999:999 server.key
+          sudo chmod 600 server.key
+      - name: Start PostgreSQL 16 with TLS
+        run: |
+          docker run -d --name pgtls -p 5432:5432 \
+            -e POSTGRES_USER=regulus -e POSTGRES_PASSWORD=regulus-ci -e POSTGRES_DB=regulus_test \
+            -v "$PGTLS_DIR:/certs:ro" \
+            postgres:16 \
+            -c ssl=on -c ssl_cert_file=/certs/server.crt -c ssl_key_file=/certs/server.key
+          # The image first runs a temporary server that listens on its socket
+          # only, so ask over TCP to wait for the real one.
+          for i in $(seq 1 30); do
+            if docker exec pgtls pg_isready -h 127.0.0.1 -U regulus -d regulus_test; then exit 0; fi
+            sleep 2
+          done
+          docker logs pgtls
+          exit 1
+      - name: Test verify-full
+        run: |
+          go test -race -count=1 -v -run 'TestPostgresVerifyFull' ./internal/storage/ | tee tls-test.log
+          # A skipped test would pass without proving anything.
+          if grep -q -e '--- SKIP' tls-test.log; then echo '::error::the TLS tests were skipped'; exit 1; fi
+      - name: PostgreSQL log
+        if: failure()
+        run: docker logs pgtls
 
   release-config:
     name: Release configuration (goreleaser check)

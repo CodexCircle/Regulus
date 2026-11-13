@@ -31,7 +31,7 @@ func TestOpenAPIMatchesTheRoutes(t *testing.T) {
 		}
 	}
 
-	served := []string{"GET /healthz"}
+	served := []string{"GET /healthz", "GET /api/database"}
 	served = append(served, auth.Routes...)
 	for _, r := range apiRoutes(Deps{}) {
 		served = append(served, r.pattern)
