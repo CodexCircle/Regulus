@@ -303,6 +303,7 @@ For a reading map of the biggest files, see [code-map.md](code-map.md).
 | `internal/hub` | the hub: HTTP server and API, agent service, live stream, rollout |
 | `internal/update` | finding releases, the download cache and its checks, installing with a rollback (hub and agent) |
 | `internal/agent` | agent runtime (client side of the contract), metrics collector, remote enrollment; also the built-in agent |
+| `internal/capability` | draft model of agent capabilities, permissions and presets (#168 to #170); not wired to anything yet |
 | `internal/protocol` | protocol version of the agent–hub contract |
 | `internal/inproc` | in-memory gRPC transport (built-in agent) |
 | `internal/gen` | generated Go code for `proto/` (do not edit) |
