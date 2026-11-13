@@ -195,7 +195,7 @@ function Version({
           <p className="muted">
             {status.checked_at
               ? t("updates.version.checked", {
-                  ago: formatAgo(status.checked_at),
+                  ago: formatAgo(status.checked_at, undefined, t),
                 })
               : t("updates.version.notChecked")}
           </p>
@@ -250,11 +250,11 @@ function Version({
             ? t("updates.last.appliedFrom", {
                 version: last.version,
                 from: last.from,
-                ago: formatAgo(last.at),
+                ago: formatAgo(last.at, undefined, t),
               })
             : t("updates.last.applied", {
                 version: last.version,
-                ago: formatAgo(last.at),
+                ago: formatAgo(last.at, undefined, t),
               })}
         </p>
       )}
@@ -603,7 +603,7 @@ function Servers() {
                         : "updates.rollout.lastFailed",
                   {
                     ago: rollout.finished_at
-                      ? formatAgo(rollout.finished_at)
+                      ? formatAgo(rollout.finished_at, undefined, t)
                       : "",
                   },
                 )}

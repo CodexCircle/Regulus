@@ -37,7 +37,7 @@ export function AgentView({ config, setConfig, children }: Props) {
       )}
       {stale && (
         <p role="status" className="note warn">
-          {t("servers.widget.staleNote", { ago: formatAgo(new Date(lastSeen(agent)).toISOString()) })}
+          {t("servers.widget.staleNote", { ago: formatAgo(new Date(lastSeen(agent)).toISOString(), undefined, t) })}
         </p>
       )}
       {connection === "offline" && (

@@ -34,9 +34,9 @@ export function SystemWidget(props: WidgetProps) {
         ];
         if (latest) {
           rows.push([t("servers.fact.loadAverage"), [latest.load_1, latest.load_5, latest.load_15].map((l) => l.toFixed(2)).join(" · ")]);
-          rows.push([t("servers.fact.uptime"), formatDuration(latest.uptime_seconds)]);
+          rows.push([t("servers.fact.uptime"), formatDuration(latest.uptime_seconds, t)]);
         } else if (agent.uptime_seconds !== null) {
-          rows.push([t("servers.fact.uptime"), formatDuration(agent.uptime_seconds)]);
+          rows.push([t("servers.fact.uptime"), formatDuration(agent.uptime_seconds, t)]);
         }
         return (
           <dl className="facts">
@@ -228,7 +228,7 @@ export function UptimeWidget(props: WidgetProps) {
         const since = latest ? Date.parse(latest.at) - seconds * 1000 : null;
         return (
           <Stat
-            value={formatDuration(seconds)}
+            value={formatDuration(seconds, t)}
             caption={since === null ? undefined : t("servers.widget.since", { date: new Date(since).toLocaleString() })}
           />
         );

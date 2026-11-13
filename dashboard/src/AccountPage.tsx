@@ -99,7 +99,7 @@ function Sessions() {
               <tr key={s.id}>
                 <td className="wrap">{s.user_agent || t("account.sessions.unknown")}</td>
                 <td>{s.remote_addr || t("account.sessions.unknown")}</td>
-                <td>{s.current ? t("account.sessions.thisOne") : formatAgo(s.last_used_at)}</td>
+                <td>{s.current ? t("account.sessions.thisOne") : formatAgo(s.last_used_at, undefined, t)}</td>
                 <td>
                   {!s.current && (
                     <button type="button" onClick={() => void end(s.id)}>

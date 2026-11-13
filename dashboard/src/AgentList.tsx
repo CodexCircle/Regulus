@@ -91,8 +91,8 @@ export const statusLabel = (a: Agent, t: Translator) => t(STATUS_LABEL[a.status]
 
 // lastContact says when the hub last heard from a server.
 export function lastContact(a: Agent, t: Translator): string {
-  if (a.status === "connected" || a.status === "stale") return formatAgo(a.last_heartbeat);
-  return a.last_seen_at ? formatAgo(a.last_seen_at) : t("servers.list.neverConnected");
+  if (a.status === "connected" || a.status === "stale") return formatAgo(a.last_heartbeat, undefined, t);
+  return a.last_seen_at ? formatAgo(a.last_seen_at, undefined, t) : t("servers.list.neverConnected");
 }
 
 function AgentTable({ agents }: { agents: Agent[] }) {
@@ -125,7 +125,7 @@ function AgentTable({ agents }: { agents: Agent[] }) {
               <span className={`status ${a.status}`}>{statusLabel(a, t)}</span>
             </td>
             <td>{lastContact(a, t)}</td>
-            <td>{a.uptime_seconds === null ? "-" : formatDuration(a.uptime_seconds)}</td>
+            <td>{a.uptime_seconds === null ? "-" : formatDuration(a.uptime_seconds, t)}</td>
           </tr>
         ))}
       </tbody>

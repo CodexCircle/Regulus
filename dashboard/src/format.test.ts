@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { formatAgo, formatBytes, formatDuration, formatPercent, formatRate } from "./format";
+import { translate } from "./i18n";
+
+const italian = (key: Parameters<typeof translate>[1], params?: Record<string, string | number>) => translate("it", key, params);
 
 describe("formatDuration", () => {
   it.each([
@@ -46,5 +49,24 @@ describe("formatPercent", () => {
     expect(formatPercent(7.26)).toBe("7.3%");
     expect(formatPercent(42.4)).toBe("42%");
     expect(formatPercent(100)).toBe("100%");
+  });
+});
+
+describe("in Italian", () => {
+  it("writes durations with Italian unit letters", () => {
+    expect(formatDuration(3 * 86400 + 4 * 3600, italian)).toBe("3g 4h");
+    expect(formatDuration(310, italian)).toBe("5m 10s");
+  });
+
+  it("says how long ago, and never", () => {
+    const now = Date.parse("2026-10-25T12:00:10Z");
+    expect(formatAgo("2026-10-25T12:00:00Z", now, italian)).toBe("10s fa");
+    expect(formatAgo(null, now, italian)).toBe("mai");
+  });
+
+  it("is the same English as before without a translator", () => {
+    const now = Date.parse("2026-10-25T12:00:10Z");
+    expect(formatAgo("2026-10-25T12:00:00Z", now)).toBe("10s ago");
+    expect(formatAgo(null)).toBe("never");
   });
 });
