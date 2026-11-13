@@ -87,7 +87,7 @@ Node permissions by default (all denied unless shown):
 | Permission | Compute | Backup | Access gateway | Development |
 |---|---|---|---|---|
 | `reach-hub` | ✓ | ✓ | ✓ | ✓ |
-| `reach-nodes` (direct links, #113; none exist today) | – | – | – | – (a grant, never a default) |
+| `reach-peers` (direct links, #113; none exist today) | – | – | – | – (a grant, never a default) |
 | `shared-resources` (none exist yet) | – | – | – | – (a **delayed grant**) |
 | `egress-network` (what the node may reach outside) | unrestricted | hub only | hub, plus inbound | restricted (open in #168) |
 | `inbound-listener` | – | – | opt-in | – |
