@@ -270,6 +270,13 @@ func loadFile(path string, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("read config file: %w", err)
 	}
+	// A file of zero bytes is what a write that died in the middle leaves, and
+	// it would load as "all defaults": a relative data directory, so a new
+	// database, a new secret key and a new CA. A file that holds only comments
+	// is fine.
+	if len(data) == 0 {
+		return fmt.Errorf("config file %s is empty (a write that was interrupted?): restore it from a copy, or delete it to run on the defaults on purpose", path)
+	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true) // reject typos instead of silently ignoring them
 	if err := dec.Decode(cfg); err != nil && !errors.Is(err, io.EOF) {

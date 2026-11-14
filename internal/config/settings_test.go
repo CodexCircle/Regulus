@@ -2,9 +2,11 @@ package config
 
 import (
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -324,5 +326,168 @@ func TestDatabaseSettings(t *testing.T) {
 	c.Database.Type = "postgres"
 	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "database.host") {
 		t.Errorf("Validate = %v", err)
+	}
+}
+
+// A write that fails in the middle must leave the old file, whole, and no
+// temporary file behind. Writing in place (truncate, then write) would leave an
+// empty or cut-short file, which loads as "all defaults".
+func TestSetFileLeavesTheOldFileWhenTheWriteFails(t *testing.T) {
+	path := copyPackaged(t)
+	before, _ := os.ReadFile(path)
+	oldRename := renameFile
+	renameFile = func(string, string) error { return io.ErrShortWrite } // the last step fails
+	t.Cleanup(func() { renameFile = oldRename })
+
+	if _, err := SetFile(path, "listen", "9090"); err == nil {
+		t.Fatal("the failure was not reported")
+	}
+	after, _ := os.ReadFile(path)
+	if string(after) != string(before) {
+		t.Errorf("the file changed although the write failed:\n%s", after)
+	}
+	entries, _ := os.ReadDir(filepath.Dir(path))
+	for _, e := range entries {
+		if e.Name() != filepath.Base(path) {
+			t.Errorf("left behind: %s", e.Name())
+		}
+	}
+}
+
+func TestSetFileKeepsTheModeOfTheFile(t *testing.T) {
+	path := copyPackaged(t)
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SetFile(path, "listen", "9090"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o640 {
+		t.Errorf("mode = %v, want 0640", info.Mode().Perm())
+	}
+	if got, _ := os.ReadFile(path); !strings.Contains(string(got), `listen: ":9090"`) {
+		t.Errorf("the value was not written:\n%s", got)
+	}
+}
+
+// A directory that takes no new file still allows the edit, in place.
+func TestSetFileFallsBackToWritingInPlace(t *testing.T) {
+	path := copyPackaged(t)
+	old := createTemp
+	createTemp = func(string, string) (*os.File, error) { return nil, fs.ErrPermission }
+	t.Cleanup(func() { createTemp = old })
+	if _, err := SetFile(path, "listen", "9090"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); !strings.Contains(string(got), `listen: ":9090"`) {
+		t.Errorf("the value was not written:\n%s", got)
+	}
+}
+
+// Two edits at the same time must both survive: each reads the file after the
+// other has written it.
+func TestSetFileEditsAtTheSameTimeAreNotLost(t *testing.T) {
+	path := copyPackaged(t)
+	edits := []struct{ key, raw, want string }{
+		{"listen", "9091", `listen: ":9091"`},
+		{"metrics_interval", "31s", `metrics_interval: 31s`},
+		{"log.level", "warn", `level: warn`},
+		{"log.format", "json", `format: json`},
+		{"updates.check", "false", `check: false`},
+		{"console.tui", "false", `tui: false`},
+	}
+	var wg sync.WaitGroup
+	for _, e := range edits {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := SetFile(path, e.key, e.raw); err != nil {
+				t.Errorf("%s: %v", e.key, err)
+			}
+		}()
+	}
+	wg.Wait()
+	got, _ := os.ReadFile(path)
+	for _, e := range edits {
+		if !strings.Contains(string(got), e.want) {
+			t.Errorf("the edit of %s was lost (want %q in the file)", e.key, e.want)
+		}
+	}
+}
+
+// data_dir is where the database, the secret key and the CA are. Pointing it
+// at an empty directory does not move them.
+func TestSetFileRefusesToLeaveTheHubDataBehind(t *testing.T) {
+	old, fresh := t.TempDir(), t.TempDir()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("data_dir: \""+old+"\"\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nothing in the old directory yet: a new installation may move freely.
+	if _, err := SetFile(path, "data_dir", fresh); err != nil {
+		t.Fatalf("a directory without data: %v", err)
+	}
+	if _, err := SetFile(path, "data_dir", old); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, file := range []string{"regulus.db", "secret.key", "ca.key"} {
+		if err := os.WriteFile(filepath.Join(old, file), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		before, _ := os.ReadFile(path)
+		_, err := SetFile(path, "data_dir", fresh)
+		if err == nil || !strings.Contains(err.Error(), "--force") || !strings.Contains(err.Error(), "does not move") {
+			t.Errorf("with %s in the old directory: err = %v, want a refusal that names --force", file, err)
+		}
+		if after, _ := os.ReadFile(path); string(after) != string(before) {
+			t.Errorf("the file changed although the change was refused")
+		}
+		_ = os.Remove(filepath.Join(old, file))
+	}
+
+	// To a directory that has the data too (copied by hand), and with --force.
+	if err := os.WriteFile(filepath.Join(old, "regulus.db"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fresh, "regulus.db"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SetFile(path, "data_dir", fresh); err != nil {
+		t.Errorf("to a directory that holds the data: %v", err)
+	}
+	other := t.TempDir()
+	if _, err := SetFile(path, "data_dir", other); err == nil {
+		t.Error("moving off a directory with data to an empty one was allowed")
+	}
+	if _, err := SetFileForce(path, "data_dir", other); err != nil {
+		t.Errorf("--force: %v", err)
+	}
+}
+
+// What a write that died in the middle leaves is an empty file, and that would
+// silently run the hub on defaults.
+func TestLoadRefusesAnEmptyConfigFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, nil, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Resolve(path, noEnv); err == nil || !strings.Contains(err.Error(), "is empty") {
+		t.Errorf("Resolve on an empty file: err = %v, want a message that says it is empty", err)
+	}
+	if _, err := Load([]string{"--config", path}, noEnv, io.Discard); err == nil || !strings.Contains(err.Error(), "is empty") {
+		t.Errorf("Load on an empty file: err = %v", err)
+	}
+	// A file with only comments is a deliberate "all defaults".
+	if err := os.WriteFile(path, []byte("# nothing here\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load([]string{"--config", path}, noEnv, io.Discard); err != nil {
+		t.Errorf("a file with only comments: %v", err)
 	}
 }
