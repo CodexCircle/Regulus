@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/CodexCircle/Regulus/internal/localstatus"
+	"github.com/CodexCircle/Regulus/internal/storage"
 )
 
 const maxBinary = 256 << 20
@@ -204,9 +205,23 @@ func (in *Installer) Apply(ctx context.Context) (ApplyResult, error) {
 		return finish(OutcomeFailed, fmt.Errorf("keeping the current binary for a rollback: %w", err))
 	}
 	syncDir(in.StateDir, in.Log)
+	// A new version may migrate the database at its first start, and the old
+	// one refuses a schema it does not know: without a copy taken now, a
+	// rollback would put back a program that cannot open its own data.
+	var snapshot string
+	var schemaBefore int
+	if !in.Agent && storage.HasSQLite(in.DataDir) {
+		snapshot = filepath.Join(in.StateDir, snapshotName)
+		if schemaBefore, err = storage.SnapshotSQLite(ctx, in.DataDir, snapshot); err != nil {
+			_ = os.Remove(snapshot)
+			return finish(OutcomeFailed, fmt.Errorf("keeping a copy of the database for a rollback: %w (nothing was changed)", err))
+		}
+		syncDir(in.StateDir, in.Log)
+	}
 	// Written before the swap: if this helper is killed from here on, whoever
 	// runs next knows an update was in flight and what to put back (Recover).
-	if err := in.writePending(Pending{From: from.String(), To: want.String(), Backup: backup, Unit: in.Unit, Agent: in.Agent, DataDir: in.DataDir, Started: in.Now().UTC()}); err != nil {
+	if err := in.writePending(Pending{From: from.String(), To: want.String(), Backup: backup, Snapshot: snapshot, SchemaBefore: schemaBefore, Unit: in.Unit, Agent: in.Agent, DataDir: in.DataDir, Started: in.Now().UTC()}); err != nil {
+		in.clearPending()
 		return finish(OutcomeFailed, fmt.Errorf("recording the update in progress: %w", err))
 	}
 	if err := os.Rename(candidate, in.Binary); err != nil {
@@ -222,19 +237,24 @@ func (in *Installer) Apply(ctx context.Context) (ApplyResult, error) {
 		// not leave the new version in place: the rollback has its own time.
 		rctx, cancel := in.rollbackContext(ctx)
 		defer cancel()
-		if rerr := in.rollback(rctx, backup, from.String()); rerr != nil {
+		note, rerr := in.rollback(rctx, backup, from.String(), snapshot, schemaBefore)
+		if rerr != nil {
 			// The marker stays: Recover tries once more.
 			return finish(OutcomeFailed, fmt.Errorf("%v; and putting %s back failed: %v", err, from, rerr))
 		}
 		in.clearPending()
-		return finish(OutcomeRolledBack, fmt.Errorf("%v; version %s was put back", err, from))
+		return finish(OutcomeRolledBack, fmt.Errorf("%v; version %s was put back%s", err, from, note))
 	}
 	in.clearPending()
 	return finish(OutcomeApplied, nil)
 }
 
-// backupName is the copy of the previous executable in the state directory.
-const backupName = "regulus.previous"
+// backupName is the copy of the previous executable in the state directory,
+// and snapshotName the copy of the database taken before the swap.
+const (
+	backupName   = "regulus.previous"
+	snapshotName = "pre-update.db"
+)
 
 // rollbackContext is a context for undoing an update that does not end when
 // ctx does, but is bounded.
@@ -347,16 +367,54 @@ func (in *Installer) restartAndWatch(ctx context.Context, want string) error {
 	}
 }
 
-func (in *Installer) rollback(ctx context.Context, backup, want string) error {
+// rollback puts the previous version back: the database first, when the new
+// version changed its schema, then the executable, then the service is
+// restarted. snapshot is the copy of the database taken before the swap ("" for
+// an agent, or a hub on PostgreSQL, which cannot be copied from here) and
+// schemaBefore the schema version it has. The note says what was done to the
+// database, for the message the hub shows.
+func (in *Installer) rollback(ctx context.Context, backup, want, snapshot string, schemaBefore int) (note string, err error) {
+	if snapshot != "" {
+		if note, err = in.restoreDatabase(ctx, snapshot, schemaBefore); err != nil {
+			return "", err
+		}
+	}
 	tmp := filepath.Join(filepath.Dir(in.Binary), ".regulus.rollback")
 	defer func() { _ = os.Remove(tmp) }()
 	if err := copyExecutable(backup, tmp); err != nil {
-		return err
+		return "", err
 	}
 	if err := os.Rename(tmp, in.Binary); err != nil {
-		return err
+		return "", err
 	}
 	syncDir(filepath.Dir(in.Binary), in.Log)
+	return note, in.restartOn(ctx, want)
+}
+
+// restoreDatabase stops the service, which has the database open, and puts the
+// copy back when the schema moved past it (or cannot be read). Nothing is
+// restored when the new version did not change the schema: the old version can
+// read that database, and what was written since is not lost.
+func (in *Installer) restoreDatabase(ctx context.Context, snapshot string, schemaBefore int) (string, error) {
+	if _, err := in.Run(ctx, "systemctl", "stop", in.Unit); err != nil {
+		return "", fmt.Errorf("stopping %s to look at the database: %w", in.Unit, err)
+	}
+	now, verr := storage.SQLiteSchemaVersion(ctx, in.DataDir)
+	if verr == nil && now <= schemaBefore {
+		return "", nil
+	}
+	if err := storage.RestoreSQLite(in.DataDir, snapshot); err != nil {
+		return "", fmt.Errorf("putting the database back from before the update: %w", err)
+	}
+	why := fmt.Sprintf("its schema had moved from %d to %d", schemaBefore, now)
+	if verr != nil {
+		why = fmt.Sprintf("it could not be read (%v)", verr)
+	}
+	return fmt.Sprintf("; the database was put back from before the update (%s): what was saved since then is lost", why), nil
+}
+
+// restartOn restarts the service and waits for the old version to run.
+func (in *Installer) restartOn(ctx context.Context, want string) error {
 	since := in.Now()
 	if _, err := in.Run(ctx, "systemctl", "restart", in.Unit); err != nil {
 		return err

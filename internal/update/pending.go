@@ -22,13 +22,18 @@ const pendingName = "pending.json"
 // its time limit, a restart of the machine) leaves it behind, and Recover
 // finishes the job.
 type Pending struct {
-	From    string    `json:"from"`
-	To      string    `json:"to"`
-	Backup  string    `json:"backup"`
-	Unit    string    `json:"unit"`
-	Agent   bool      `json:"agent"`
-	DataDir string    `json:"data_dir"`
-	Started time.Time `json:"started"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Backup string `json:"backup"`
+	// Snapshot is the copy of the SQLite database taken before the swap, and
+	// SchemaBefore the schema version it has; empty and 0 when there is none
+	// (an agent, or a hub on PostgreSQL).
+	Snapshot     string    `json:"snapshot,omitempty"`
+	SchemaBefore int       `json:"schema_before,omitempty"`
+	Unit         string    `json:"unit"`
+	Agent        bool      `json:"agent"`
+	DataDir      string    `json:"data_dir"`
+	Started      time.Time `json:"started"`
 }
 
 func (in *Installer) pendingPath() string { return filepath.Join(in.StateDir, pendingName) }
@@ -72,6 +77,9 @@ func (in *Installer) clearPending() {
 	if err := os.Remove(in.pendingPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 		in.Log.Error("removing the marker of the update in progress", "err", err)
 	}
+	// The copy of the database holds password hashes and keys: it does not
+	// outlive the update.
+	_ = os.Remove(filepath.Join(in.StateDir, snapshotName))
 	syncDir(in.StateDir, in.Log)
 }
 
@@ -121,7 +129,7 @@ func (in *Installer) Recover(ctx context.Context) (ApplyResult, bool, error) {
 	// What the marker says about the role is what the interrupted run was.
 	in.Unit, in.Agent, in.DataDir = p.Unit, p.Agent, p.DataDir
 	dir = ApplyDir(p.DataDir)
-	if filepath.Dir(p.Backup) != filepath.Clean(in.StateDir) {
+	if filepath.Dir(p.Backup) != filepath.Clean(in.StateDir) || (p.Snapshot != "" && filepath.Dir(p.Snapshot) != filepath.Clean(in.StateDir)) {
 		in.clearPending()
 		return ApplyResult{Outcome: OutcomeFailed, Message: "the marker of an interrupted update points outside the state directory and was removed", At: in.Now().UTC()}, true,
 			errors.New("the marker of an interrupted update names a file outside the state directory: it was removed")
@@ -156,8 +164,9 @@ func (in *Installer) Recover(ctx context.Context) (ApplyResult, bool, error) {
 	}
 	rctx, cancel := in.rollbackContext(ctx)
 	defer cancel()
-	if rerr := in.rollback(rctx, p.Backup, p.From); rerr != nil {
+	note, rerr := in.rollback(rctx, p.Backup, p.From, p.Snapshot, p.SchemaBefore)
+	if rerr != nil {
 		return finish(OutcomeFailed, fmt.Errorf("the helper was interrupted and putting %s back failed: %v", p.From, rerr))
 	}
-	return finish(OutcomeRolledBack, fmt.Errorf("the helper was interrupted; version %s was put back", p.From))
+	return finish(OutcomeRolledBack, fmt.Errorf("the helper was interrupted; version %s was put back%s", p.From, note))
 }

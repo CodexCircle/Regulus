@@ -6,16 +6,20 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/CodexCircle/Regulus/internal/storage"
 )
 
 // installFixture is a data directory with a release staged in it, a "binary"
@@ -576,5 +580,214 @@ func TestRecoverRemovesAnUnreadableMarker(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(f.in.StateDir, pendingName)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the marker is still there: %v", err)
+	}
+}
+
+// ---- the database and the rollback ----
+
+// withDatabase gives the fixture a real SQLite database holding one row, and
+// returns a function that opens it the way a hub that started later would.
+func (f *installFixture) withDatabase(t *testing.T) func() *sql.DB {
+	t.Helper()
+	db, err := storage.OpenSQLite(t.Context(), f.dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{`CREATE TABLE keepme (v TEXT)`, `INSERT INTO keepme VALUES ('before')`} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = db.Close()
+	return func() *sql.DB {
+		t.Helper()
+		d, err := sql.Open("sqlite", "file:"+storage.SQLitePath(f.dataDir)+"?_pragma=busy_timeout(5000)")
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.SetMaxOpenConns(1)
+		t.Cleanup(func() { _ = d.Close() })
+		return d
+	}
+}
+
+// onFirstRestart runs fn when the service is first restarted (the new version
+// starts there) and records the systemctl commands.
+func (f *installFixture) onFirstRestart(fn func()) *[]string {
+	var cmds []string
+	run := f.in.Run
+	done := false
+	f.in.Run = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
+		if cmd == "systemctl" && len(args) > 0 {
+			cmds = append(cmds, args[0])
+			if args[0] == "restart" && !done {
+				done = true
+				fn()
+			}
+		}
+		return run(ctx, cmd, args...)
+	}
+	return &cmds
+}
+
+func rows(t *testing.T, dataDir string) int {
+	t.Helper()
+	db, err := storage.OpenSQLite(t.Context(), dataDir) // what the old version does at its start
+	if err != nil {
+		t.Fatalf("the old version cannot open the database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM keepme`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// The case a rollback exists for: the new version migrated the database at its
+// first start and then did not come up. The old version refuses a schema it
+// does not know, so the database goes back with it.
+func TestRollbackPutsTheDatabaseBackWhenTheNewVersionMigratedIt(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	open := f.withDatabase(t)
+	f.healthy = func(v string) bool { return v != "0.2.0" }
+	cmds := f.onFirstRestart(func() { // the new hub starts, migrates, writes
+		db := open()
+		for _, q := range []string{`INSERT INTO schema_migrations (version, name) VALUES (9999, 'from_the_future')`, `INSERT INTO keepme VALUES ('after')`} {
+			if _, err := db.Exec(q); err != nil {
+				t.Error(err)
+			}
+		}
+		_ = db.Close()
+	})
+	f.request(t, "0.2.0")
+
+	res, _ := f.in.Apply(t.Context())
+	if res.Outcome != OutcomeRolledBack {
+		t.Fatalf("outcome = %q: %s", res.Outcome, res.Message)
+	}
+	if !strings.Contains(res.Message, "database was put back") || !strings.Contains(res.Message, "schema had moved") {
+		t.Errorf("the message does not say what happened to the database: %q", res.Message)
+	}
+	if got := f.installed(t); got != "0.1.0" {
+		t.Errorf("binary = %q", got)
+	}
+	if n := rows(t, f.dataDir); n != 1 {
+		t.Errorf("rows = %d, want the one from before the update", n)
+	}
+	// The service is stopped before the database is replaced, then restarted.
+	if want := []string{"restart", "stop", "restart"}; !slices.Equal(*cmds, want) {
+		t.Errorf("systemctl commands = %v, want %v", *cmds, want)
+	}
+	if _, err := os.Stat(filepath.Join(f.in.StateDir, snapshotName)); err == nil {
+		t.Error("the copy of the database was left behind")
+	}
+}
+
+// When the new version did not touch the schema the old one can read the
+// database as it is, and what was saved meanwhile is kept.
+func TestRollbackKeepsTheDatabaseWhenTheSchemaDidNotMove(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	open := f.withDatabase(t)
+	f.healthy = func(v string) bool { return v != "0.2.0" }
+	f.onFirstRestart(func() {
+		db := open()
+		if _, err := db.Exec(`INSERT INTO keepme VALUES ('after')`); err != nil {
+			t.Error(err)
+		}
+		_ = db.Close()
+	})
+	f.request(t, "0.2.0")
+
+	res, _ := f.in.Apply(t.Context())
+	if res.Outcome != OutcomeRolledBack || strings.Contains(res.Message, "database was put back") {
+		t.Fatalf("outcome = %q: %s", res.Outcome, res.Message)
+	}
+	if n := rows(t, f.dataDir); n != 2 {
+		t.Errorf("rows = %d, want both: nothing needed to be undone", n)
+	}
+}
+
+// A hub whose database cannot be copied is not updated: a rollback would have
+// nothing to put back.
+func TestUpdateIsRefusedWhenTheDatabaseCannotBeCopied(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	mustWrite(t, storage.SQLitePath(f.dataDir), []byte("this is not a database"))
+	f.request(t, "0.2.0")
+
+	res, err := f.in.Apply(t.Context())
+	if err == nil || res.Outcome != OutcomeFailed || !strings.Contains(res.Message, "copy of the database") {
+		t.Errorf("result = %+v, err = %v", res, err)
+	}
+	if got := f.installed(t); got != "0.1.0" {
+		t.Errorf("the binary was replaced: %q", got)
+	}
+	if _, ok := f.pendingMarker(); ok {
+		t.Error("a marker was written for an update that never started")
+	}
+}
+
+// The copy is for the hub's SQLite database only: an agent has none.
+func TestAnAgentUpdateTakesNoDatabaseCopy(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	f.withDatabase(t)
+	f.in.Agent = true
+	f.in.Unit = "regulus-agent.service"
+	var seen string
+	run := f.in.Run
+	f.in.Run = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
+		if cmd == "systemctl" && len(args) > 0 && args[0] == "restart" {
+			if _, err := os.Stat(filepath.Join(f.in.StateDir, snapshotName)); err == nil {
+				seen = "a copy exists"
+			}
+		}
+		return run(ctx, cmd, args...)
+	}
+	// The agent's health is that it connected again with the new version.
+	f.in.Probe = func(context.Context, time.Time) (string, error) { return "0.2.0", nil }
+	f.request(t, "0.2.0")
+	if res, err := f.in.Apply(t.Context()); err != nil || res.Outcome != OutcomeApplied {
+		t.Fatalf("result = %+v, err = %v", res, err)
+	}
+	if seen != "" {
+		t.Error("an agent update copied the database")
+	}
+}
+
+// An interrupted update whose new version migrated the database: Recover
+// puts back the database and the program.
+func TestRecoverPutsTheDatabaseBackToo(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	open := f.withDatabase(t)
+	snap := filepath.Join(f.in.StateDir, snapshotName)
+	before, err := storage.SnapshotSQLite(t.Context(), f.dataDir, snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := open() // the new version ran
+	for _, q := range []string{`INSERT INTO schema_migrations (version, name) VALUES (9999, 'from_the_future')`, `INSERT INTO keepme VALUES ('after')`} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = db.Close()
+
+	backup := filepath.Join(f.in.StateDir, backupName)
+	mustWrite(t, backup, []byte("0.1.0"))
+	if err := f.in.writePending(Pending{From: "0.1.0", To: "0.2.0", Backup: backup, Snapshot: snap, SchemaBefore: before, Unit: "regulus.service", DataDir: f.dataDir}); err != nil {
+		t.Fatal(err)
+	}
+	f.healthy = func(v string) bool { return v != "0.2.0" }
+	mustWrite(t, f.binary, []byte("0.2.0")) // the new version is in place and broken
+
+	res, did, _ := f.in.Recover(t.Context())
+	if !did || res.Outcome != OutcomeRolledBack || !strings.Contains(res.Message, "database was put back") {
+		t.Fatalf("did = %v, result = %+v", did, res)
+	}
+	if n := rows(t, f.dataDir); n != 1 {
+		t.Errorf("rows = %d, want 1", n)
+	}
+	if _, err := os.Stat(snap); err == nil {
+		t.Error("the copy of the database was left behind")
 	}
 }
