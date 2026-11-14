@@ -136,13 +136,18 @@ func (in *Installer) probeUnit(ctx context.Context, since time.Time) (string, er
 func (in *Installer) Apply(ctx context.Context) (ApplyResult, error) {
 	in.defaults()
 	dir := ApplyDir(in.DataDir)
-	req, ok := ReadRequest(dir)
-	if !ok {
+	// The request goes first (takeRequest removes it), so a failure cannot make
+	// systemd start the helper again and again.
+	req, state := takeRequest(dir)
+	switch state {
+	case requestNone:
 		return ApplyResult{}, ErrNoRequest
+	case requestInvalid:
+		err := errors.New("the update request could not be read (not a request, too large, or not a regular file): it was removed")
+		res := ApplyResult{Outcome: OutcomeFailed, Message: err.Error(), At: in.Now().UTC()}
+		_ = WriteResult(dir, res)
+		return res, err
 	}
-	// The request goes first, so a failure cannot make systemd start the
-	// helper again and again.
-	_ = os.Remove(filepath.Join(dir, requestName))
 
 	res := ApplyResult{Version: req.Version, RequestedBy: req.RequestedBy, At: in.Now().UTC()}
 	finish := func(outcome string, err error) (ApplyResult, error) {
@@ -349,9 +354,11 @@ func (in *Installer) rollback(ctx context.Context, backup, want string) error {
 	}
 }
 
-// openRegular opens a regular file without following a link.
+// openRegular opens a regular file without following a link. O_NONBLOCK keeps
+// the open of a FIFO planted in a directory the hub owns from blocking the
+// root helper (the check that follows refuses it).
 func openRegular(p string) (*os.File, error) {
-	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}

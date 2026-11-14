@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -313,5 +314,87 @@ func TestAgentHealthIsConnectingAgainAfterTheRestart(t *testing.T) {
 	_ = WriteConnected(f.dataDir, Connected{Version: "0.2.0", At: restart.Add(time.Second)})
 	if v, err := in.Probe(t.Context(), restart); err != nil || v != "0.2.0" {
 		t.Errorf("probe = %q, %v", v, err)
+	}
+}
+
+// A file in the request's place that is not a request must be removed once,
+// reported as failed and must not wake the helper again: systemd starts it for
+// as long as the file exists, and a helper that leaves it behind is started
+// until the path unit gives up, after which no update ever runs.
+func TestInstallerRemovesARequestItCannotUse(t *testing.T) {
+	big := make([]byte, maxControlFile+1)
+	for i := range big {
+		big[i] = ' '
+	}
+	for name, plant := range map[string]func(t *testing.T, path string){
+		"garbage":   func(t *testing.T, path string) { mustWrite(t, path, []byte("not json")) },
+		"empty":     func(t *testing.T, path string) { mustWrite(t, path, nil) },
+		"too large": func(t *testing.T, path string) { mustWrite(t, path, append(big, []byte(`{"version":"0.2.0"}`)...)) },
+		"a symlink": func(t *testing.T, path string) { mustSymlink(t, "/dev/zero", path) },
+		"a link to a request": func(t *testing.T, path string) {
+			target := filepath.Join(t.TempDir(), "r.json")
+			mustWrite(t, target, []byte(`{"version":"0.2.0"}`))
+			mustSymlink(t, target, path)
+		},
+		"a FIFO": func(t *testing.T, path string) {
+			if err := syscall.Mkfifo(path, 0o600); err != nil {
+				t.Skipf("no FIFO here: %v", err)
+			}
+		},
+		"a directory": func(t *testing.T, path string) {
+			if err := os.Mkdir(path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+			dir := ApplyDir(f.dataDir)
+			path := filepath.Join(dir, requestName)
+			plant(t, path)
+
+			done := make(chan struct{})
+			var res ApplyResult
+			var err error
+			go func() { res, err = f.in.Apply(t.Context()); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatal("the helper blocked on the file")
+			}
+			if err == nil || res.Outcome != OutcomeFailed {
+				t.Errorf("result = %+v, err = %v, want a failure", res, err)
+			}
+			if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
+				t.Errorf("the file is still there (%v): systemd would start the helper again", statErr)
+			}
+			if r, ok := ReadResult(dir); !ok || r.Outcome != OutcomeFailed || r.Message == "" {
+				t.Errorf("result for the hub = %+v (found %v)", r, ok)
+			}
+			// What a link pointed to is untouched.
+			if _, ok := ReadRequest(dir); ok {
+				t.Error("a request is still pending")
+			}
+
+			// The next valid request still works.
+			f.request(t, "0.2.0")
+			if res, err := f.in.Apply(t.Context()); err != nil || res.Outcome != OutcomeApplied {
+				t.Errorf("the request after it: result = %+v, err = %v", res, err)
+			}
+		})
+	}
+}
+
+func mustWrite(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustSymlink(t *testing.T, target, path string) {
+	t.Helper()
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
 	}
 }

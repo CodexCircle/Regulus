@@ -20,3 +20,7 @@ curl -fsSLO https://github.com/Stellatinus/Regulus/releases/download/vVERSION/in
 ```
 
 Use `--role agent` options as shown on **Servers → Add a server** for a remote agent; an agent that is already enrolled keeps its certificate. From the first release built after the move, updates work from the dashboard as before. See [Design decisions](decisions.md#the-repository-moved-audit-issue-231).
+
+## What the root helper does with a request it cannot use
+
+The directory that holds `request.json` belongs to the hub's unprivileged user, and systemd starts the helper for as long as the file exists. The helper therefore **removes whatever is at that place** (garbage, a file over 64 KiB, a symbolic link, a FIFO, a directory) before it does anything else, never follows a link and never blocks on a FIFO, writes a `failed` result that the Updates page shows ("the update request could not be read … it was removed"), and exits with an error. The path unit stays active, and the next valid request is installed normally. (Before this, an unreadable file was left in place and the helper was started again and again until the path unit gave up, so no later update ran until `systemctl reset-failed regulus-update.path`.) To test it on a real machine see the `[Test]` issue for the update helper under faults.
