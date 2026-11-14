@@ -26,6 +26,7 @@ func runUpdateApply(args []string) int {
 	unit := fs.String("unit", "regulus.service", "the service to restart")
 	binary := fs.String("binary", "", "the executable to replace (default: this one)")
 	isAgent := fs.Bool("agent", false, "this server runs the agent: healthy means the agent connected to the hub again")
+	recoverOnly := fs.Bool("recover", false, "only settle an update that an earlier run left unfinished (the marker in the state directory), then exit")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -64,6 +65,25 @@ func runUpdateApply(args []string) int {
 		Unit:     *unit,
 		Agent:    *isAgent,
 		Verifier: &update.SigstoreVerifier{Trust: update.PublicTrust(filepath.Join(*stateDir, "tuf"))},
+	}
+	// An earlier run that was killed between replacing the executable and
+	// confirming the result left a marker: settle it first, whatever else is
+	// asked now (systemd also runs this after the helper stops, see the unit).
+	if rres, did, rerr := in.Recover(ctx); did {
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "regulus: interrupted update from %s to %s: %s: %v\n", rres.From, rres.Version, rres.Outcome, rerr)
+		} else {
+			fmt.Printf("regulus: interrupted update from %s to %s: %s\n", rres.From, rres.Version, rres.Outcome)
+		}
+		if *recoverOnly {
+			if rerr != nil {
+				return 1
+			}
+			return 0
+		}
+	}
+	if *recoverOnly {
+		return 0
 	}
 	res, err := in.Apply(ctx)
 	switch {

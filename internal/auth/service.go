@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
@@ -148,9 +149,11 @@ func (s *Service) Setup(ctx context.Context, setupToken, username, password stri
 // Login checks the credentials and starts a session. remote identifies the
 // client (its IP address) for the limit on failed attempts.
 func (s *Service) Login(ctx context.Context, remote, username, password string) (User, string, time.Time, error) {
-	if s.limited(remote) {
+	att, allowed := s.begin(s.ipKey(remote), s.userKey(username))
+	if !allowed {
 		return User{}, "", time.Time{}, ErrRateLimited
 	}
+	defer att.abandon() // an error of the server, or a right password that still needs the second factor, is not a failure
 	user, hash, err := s.store.userByName(ctx, normalizeUsername(username))
 	known := err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -160,11 +163,14 @@ func (s *Service) Login(ctx context.Context, remote, username, password string) 
 		hash = s.dummy() // spend the same time as for a real user
 	}
 	ok, verr := VerifyPassword(hash, password)
+	if errors.Is(verr, ErrBusy) {
+		return User{}, "", time.Time{}, ErrBusy
+	}
 	if verr != nil {
 		s.log.Error("stored password hash is unusable", "user", user.Username, "err", verr)
 	}
 	if !known || !ok || user.Disabled {
-		s.recordFailure(remote)
+		att.failed()
 		detail := ""
 		if known && ok && user.Disabled {
 			detail = "account disabled"
@@ -181,7 +187,7 @@ func (s *Service) Login(ctx context.Context, remote, username, password string) 
 		}
 		return user, "", time.Time{}, pending
 	}
-	s.clearFailures(remote)
+	att.succeeded()
 
 	now := s.now()
 	_ = s.store.deleteExpiredSessions(ctx, now) // housekeeping; a failure here must not block the login
@@ -207,6 +213,38 @@ func (s *Service) Authenticate(ctx context.Context, token string) (User, error) 
 	return user, err
 }
 
+// SessionCheck returns a function that tells, at any later time, whether the
+// session of this request still exists and its user still holds the
+// permission. A connection that outlives the request (a WebSocket) calls it
+// now and then, because logging out, disabling the account, a new password or
+// a changed role only change the database: nothing reaches the open
+// connection by itself. A database error is not a verdict: the check says
+// "still allowed", so that a short outage does not cut every live view.
+func (s *Service) SessionCheck(r *http.Request, permission string) func(context.Context) bool {
+	token := ""
+	if c, err := r.Cookie(CookieName); err == nil {
+		token = c.Value
+	}
+	return func(ctx context.Context) bool {
+		if token == "" {
+			return false
+		}
+		u, err := s.store.sessionUser(ctx, hashToken(token), s.now())
+		if errors.Is(err, ErrUnauthenticated) {
+			return false
+		}
+		if err != nil {
+			return true
+		}
+		set, _, err := s.permsOfRole(ctx, u.Role)
+		if err != nil {
+			return true
+		}
+		u.Permissions = set.list()
+		return u.Can(permission) && !s.MustEnroll(ctx, u)
+	}
+}
+
 // Logout ends the session of the token. An unknown token is not an error.
 func (s *Service) Logout(ctx context.Context, token string) error {
 	if token == "" {
@@ -230,39 +268,6 @@ func (s *Service) newSession(ctx context.Context, userID int64, now time.Time) (
 func (s *Service) dummy() string {
 	s.dummyOnce.Do(func() { s.dummyHash, _ = HashPassword("not a real password") })
 	return s.dummyHash
-}
-
-// limited reports whether the client made too many failed logins recently.
-func (s *Service) limited(remote string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	f := s.failures[remote]
-	if f == nil {
-		return false
-	}
-	if s.now().Sub(f.since) > failureWindow {
-		delete(s.failures, remote)
-		return false
-	}
-	return f.count >= maxFailures
-}
-
-func (s *Service) recordFailure(remote string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := s.now()
-	f := s.failures[remote]
-	if f == nil || now.Sub(f.since) > failureWindow {
-		f = &failure{since: now}
-		s.failures[remote] = f
-	}
-	f.count++
-}
-
-func (s *Service) clearFailures(remote string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.failures, remote)
 }
 
 func normalizeUsername(u string) string {

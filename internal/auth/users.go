@@ -147,10 +147,11 @@ func (s *Service) userByName(ctx context.Context, username string) (User, error)
 // current passwords count toward the rate limit, so a stolen session cannot be
 // used to guess the password.
 func (s *Service) ChangePassword(ctx context.Context, user User, keepToken, current, next string) error {
-	key := fmt.Sprintf("password:%d", user.ID)
-	if s.limited(key) {
+	att, allowed := s.begin(fmt.Sprintf("password:%d", user.ID))
+	if !allowed {
 		return ErrRateLimited
 	}
+	defer att.abandon()
 	n := utf8.RuneCountInString(next)
 	if n < minPasswordLen || n > maxPasswordLen {
 		return &inputError{fmt.Sprintf("the new password must be %d to %d characters", minPasswordLen, maxPasswordLen)}
@@ -159,13 +160,16 @@ func (s *Service) ChangePassword(ctx context.Context, user User, keepToken, curr
 	if err != nil {
 		return err
 	}
-	ok, _ := VerifyPassword(hash, current)
+	ok, verr := VerifyPassword(hash, current)
+	if errors.Is(verr, ErrBusy) {
+		return ErrBusy
+	}
 	if !ok {
-		s.recordFailure(key)
+		att.failed()
 		s.audit(ctx, user.Username, EventPasswordFailed, user.Username, "")
 		return ErrWrongPassword
 	}
-	s.clearFailures(key)
+	att.succeeded()
 	newHash, err := HashPassword(next)
 	if err != nil {
 		return err

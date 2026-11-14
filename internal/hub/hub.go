@@ -36,7 +36,7 @@ import (
 )
 
 // ReleaseRepo is the repository the hub reads releases from.
-const ReleaseRepo = "CodexCircle/Regulus"
+const ReleaseRepo = update.Repository
 
 const shutdownTimeout = 10 * time.Second
 
@@ -222,14 +222,22 @@ func (h *Hub) Close() error {
 
 // Serve serves HTTP on ln until ctx is cancelled, then shuts down gracefully.
 func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
+	// The background work below stops with ctx. When the HTTP server fails by
+	// itself nobody cancels the caller's context, so Serve must: otherwise it
+	// would wait for that work forever instead of returning the error.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	srv := &http.Server{
 		Handler:           NewHandler(Deps{UI: h.ui, Agents: h, Layouts: h, Log: h.log, Auth: h.auth, Fleet: h, Updates: h.updates, Rollout: h, Version: h.version, DatabaseProblem: h.dbState.get}),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       time.Minute, // bodies are small JSON; WebSockets leave the server after the upgrade
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
 	}
 
 	// The built-in agent talks to the agent service over the in-process
 	// transport; remote agents use the network listener below.
-	grpcSrv := grpc.NewServer()
+	grpcSrv := grpc.NewServer(grpc.MaxRecvMsgSize(maxAgentMessageBytes))
 	agentv1.RegisterAgentServiceServer(grpcSrv, h.agents)
 	go func() { _ = grpcSrv.Serve(h.transport.Listener()) }()
 	defer grpcSrv.Stop() // agent streams are long-lived, so a graceful stop would wait forever
@@ -288,13 +296,14 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 
 	select {
 	case err := <-errc:
+		cancel() // before the deferred waits for the background work
 		return err
 	case <-ctx.Done():
 	}
 
 	h.log.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-	defer cancel()
+	shutdownCtx, stopShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer stopShutdown()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
@@ -308,17 +317,23 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 // the hub's own CA. Streams need the client certificate of an enrolled agent;
 // only Enroll works without one. The returned function stops it.
 func (h *Hub) serveAgents(addr string) (stop func(), err error) {
-	cert, err := h.fleet.CA().ServerCertificate(time.Now())
+	tlsConfig, validUntil, err := h.fleet.CA().ServerTLSRenewing(time.Now, func(notAfter time.Time) {
+		h.log.Info("the certificate of the agent listener was renewed", "valid_until", notAfter.UTC().Format(time.RFC3339))
+	})
 	if err != nil {
 		return nil, fmt.Errorf("agent listener certificate: %w", err)
 	}
+	h.log.Info("agent listener certificate", "valid_until", validUntil.UTC().Format(time.RFC3339), "renewed_before_end", "30 days")
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("agent listener: %w", err)
 	}
 	srv := grpc.NewServer(
-		grpc.Creds(credentials.NewTLS(h.fleet.CA().ServerTLS(cert))),
+		grpc.Creds(credentials.NewTLS(tlsConfig)),
 		grpc.StreamInterceptor(h.requireAgent),
+		grpc.MaxRecvMsgSize(maxAgentMessageBytes),
+		grpc.MaxConcurrentStreams(maxAgentStreams),
+		grpc.ConnectionTimeout(20*time.Second), // the TLS handshake of a client that never finishes it
 	)
 	agentv1.RegisterAgentServiceServer(srv, h.agents)
 	agentv1.RegisterEnrollmentServiceServer(srv, enrollServer{hub: h})
@@ -440,7 +455,7 @@ func apiRoutes(d Deps) []route {
 		{pattern: "GET /api/agents/{id}/metrics", handler: need(auth.PermServersRead, metricsHandler(d.Agents))},
 		{pattern: "GET /api/layout", handler: http.HandlerFunc(h.get)},
 		{pattern: "PUT /api/layout", handler: need(auth.PermLayoutEdit, auth.RequireJSON(http.HandlerFunc(h.put)))},
-		{pattern: "GET /api/stream", handler: need(auth.PermServersRead, streamHandler(d.Agents))},
+		{pattern: "GET /api/stream", handler: need(auth.PermServersRead, streamHandler(d.Agents, stillAllowed(d.Auth, auth.PermServersRead)))},
 		{pattern: "GET /api/agents/listener", handler: need(auth.PermServersRead, http.HandlerFunc(l.get)), needsAuth: true},
 		{pattern: "PUT /api/agents/listener", handler: need(auth.PermServersManage, auth.RequireJSON(http.HandlerFunc(l.put))), needsAuth: true},
 		{pattern: "POST /api/enrollment-tokens", handler: need(auth.PermServersManage, auth.RequireJSON(http.HandlerFunc(f.createToken))), needsAuth: true},
@@ -515,4 +530,13 @@ func NewHandler(d Deps) http.Handler {
 		files.ServeHTTP(w, r)
 	})
 	return mux
+}
+
+// stillAllowed makes the check an open stream repeats (see streamHandler); nil
+// when the hub has no logins.
+func stillAllowed(a *auth.Service, permission string) func(*http.Request) func(context.Context) bool {
+	if a == nil {
+		return nil
+	}
+	return func(r *http.Request) func(context.Context) bool { return a.SessionCheck(r, permission) }
 }

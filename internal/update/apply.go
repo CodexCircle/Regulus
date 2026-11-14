@@ -62,11 +62,41 @@ func WriteRequest(dir string, req ApplyRequest) error {
 	return writeJSON(filepath.Join(dir, requestName), req, 0o600)
 }
 
-// ReadRequest returns the request waiting for the helper, if any.
+// ReadRequest returns the request waiting for the helper, if any. A request
+// that cannot be used (garbage, too large, a link, a FIFO) is not one.
 func ReadRequest(dir string) (ApplyRequest, bool) {
 	var req ApplyRequest
 	ok := readJSON(filepath.Join(dir, requestName), &req)
 	return req, ok
+}
+
+// requestState is what the helper finds when it looks for a request.
+type requestState int
+
+const (
+	requestNone    requestState = iota // there is no file
+	requestOK                          // a request that can be read
+	requestInvalid                     // something is there that is not a request
+)
+
+// takeRequest reads the request and removes whatever is at its place, a valid
+// request or not, so that the file that woke the helper cannot wake it again.
+// systemd starts the helper for as long as the file exists, so an unreadable
+// file left in place would start it over and over until the path unit gives
+// up, and no later update would ever run. A symbolic link is removed, never
+// followed.
+func takeRequest(dir string) (ApplyRequest, requestState) {
+	path := filepath.Join(dir, requestName)
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		return ApplyRequest{}, requestNone
+	}
+	var req ApplyRequest
+	ok := readJSON(path, &req)
+	_ = os.Remove(path)
+	if !ok {
+		return ApplyRequest{}, requestInvalid
+	}
+	return req, requestOK
 }
 
 // WriteResult records the outcome. It is readable by the hub's user.
@@ -82,11 +112,14 @@ func ReadResult(dir string) (ApplyResult, bool) {
 }
 
 func readJSON(path string, v any) bool {
-	f, err := os.Open(path)
+	f, err := openRegular(path)
 	if err != nil {
 		return false
 	}
 	defer func() { _ = f.Close() }()
+	if info, err := f.Stat(); err != nil || info.Size() > maxControlFile {
+		return false
+	}
 	return json.NewDecoder(limited(f, maxControlFile)).Decode(v) == nil
 }
 

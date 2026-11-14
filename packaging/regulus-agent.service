@@ -1,6 +1,6 @@
 [Unit]
 Description=Regulus agent (CodexCircle Server Manager)
-Documentation=https://github.com/CodexCircle/Regulus
+Documentation=https://github.com/Stellatinus/Regulus
 After=network-online.target
 Wants=network-online.target
 # Installed by the package but started only on a server that was enrolled to a

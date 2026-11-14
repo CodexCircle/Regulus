@@ -200,3 +200,48 @@ func TestMutualTLSHandshake(t *testing.T) {
 		t.Error("connected to a hub whose CA is not pinned")
 	}
 }
+
+func TestServerCertificateIsRenewedBeforeItExpires(t *testing.T) {
+	ca, _ := LoadOrCreate(t.TempDir(), time.Now())
+	clock := time.Now()
+	var renewals []time.Time
+	cfg, firstEnd, err := ca.ServerTLSRenewing(func() time.Time { return clock }, func(end time.Time) { renewals = append(renewals, end) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GetCertificate == nil || len(cfg.Certificates) != 0 {
+		t.Fatal("the listener must get its certificate from GetCertificate")
+	}
+	get := func() tls.Certificate { // a copy: the listener reuses one value
+		t.Helper()
+		c, err := cfg.GetCertificate(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return *c
+	}
+	same := func(a, b tls.Certificate) bool { return string(a.Certificate[0]) == string(b.Certificate[0]) }
+	first := get()
+	if !same(get(), first) {
+		t.Error("a fresh certificate was replaced")
+	}
+	clock = clock.Add(serverValidity - serverRenewBefore - time.Hour) // not yet in the renewal window
+	if !same(get(), first) || len(renewals) != 0 {
+		t.Error("renewed too early")
+	}
+	clock = clock.Add(2 * time.Hour) // inside the window
+	second := get()
+	if same(second, first) || len(renewals) != 1 {
+		t.Fatalf("not renewed inside the window (renewals: %d)", len(renewals))
+	}
+	// The hub was not restarted for 400 days: the certificate it serves must
+	// still be one that an agent accepts at that moment.
+	clock = clock.Add(70 * 24 * time.Hour)
+	third := get()
+	if err := verifyPinned(ca.Fingerprint(), third.Certificate, clock); err != nil {
+		t.Errorf("an agent refuses the certificate after %s of uptime: %v", clock.Sub(firstEnd.Add(-serverValidity)).Round(24*time.Hour), err)
+	}
+	if err := verifyPinned(ca.Fingerprint(), first.Certificate, clock); err == nil {
+		t.Error("the first certificate should be expired by now (the test would prove nothing)")
+	}
+}

@@ -96,6 +96,9 @@ func (s *Service) fail(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrRateLimited):
 		w.Header().Set("Retry-After", "900")
 		writeError(w, http.StatusTooManyRequests, err.Error())
+	case errors.Is(err, ErrBusy):
+		w.Header().Set("Retry-After", "5")
+		writeError(w, http.StatusServiceUnavailable, err.Error())
 	default:
 		s.log.Error("request failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal error")

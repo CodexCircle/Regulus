@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
+	"time"
 )
 
 const statSample = `cpu  100 10 50 800 40 5 5 0 0 0
@@ -271,5 +273,71 @@ func TestDefaultCollectorFallsBackWithoutProc(t *testing.T) {
 	}
 	if _, ok := defaultCollector().(*LinuxCollector); !ok {
 		t.Fatal("expected the Linux collector")
+	}
+}
+
+// A filesystem that does not answer (a network mount whose server is gone)
+// blocks statfs for as long as it stays that way. The report must go out
+// without it, only once per mount may a call be stuck, and the mount must
+// return when it answers again.
+func TestHungMountIsLeftOutAndNotAskedAgain(t *testing.T) {
+	proc := t.TempDir()
+	writeProc(t, proc, map[string]string{
+		"stat":   statSample,
+		"mounts": "/dev/sda2 / ext4 rw 0 0\n/dev/sdc1 /mnt/hung ext4 rw 0 0\n",
+	})
+	release := make(chan struct{})
+	var mu sync.Mutex
+	calls := map[string]int{}
+	statfs := func(path string) (uint64, uint64, error) {
+		mu.Lock()
+		calls[path]++
+		mu.Unlock()
+		if path == "/mnt/hung" {
+			<-release
+		}
+		return 100, 40, nil
+	}
+	c := newLinuxCollector(proc, statfs)
+	c.statTimeout = 50 * time.Millisecond
+
+	mounts := func() []string {
+		start := time.Now()
+		r, err := c.Collect(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if took := time.Since(start); took > time.Second {
+			t.Errorf("the report took %v: it waited for the hung mount", took)
+		}
+		var names []string
+		for _, d := range r.GetDisks() {
+			names = append(names, d.GetMountPoint())
+		}
+		return names
+	}
+
+	for i := range 3 {
+		if got := mounts(); len(got) != 1 || got[0] != "/" {
+			t.Fatalf("report %d lists %v, want only /", i+1, got)
+		}
+	}
+	mu.Lock()
+	hungCalls := calls["/mnt/hung"]
+	mu.Unlock()
+	if hungCalls != 1 {
+		t.Errorf("statfs was called %d times on the hung mount, want 1 (more would pile up stuck threads)", hungCalls)
+	}
+
+	close(release) // the server is back
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if got := mounts(); len(got) == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the mount never came back in the reports")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

@@ -7,7 +7,7 @@ Thanks for helping with Regulus. This guide covers how to set up, how we work an
 Requirements: Go 1.26+, Node.js 22+, `make`. For linting, `golangci-lint` v2.
 
 ```sh
-git clone https://github.com/CodexCircle/Regulus.git
+git clone https://github.com/Stellatinus/Regulus.git
 cd Regulus
 make build        # builds the dashboard, then bin/regulus
 make test         # go vet, go test -race, dashboard typecheck and tests
@@ -25,6 +25,7 @@ See [docs/development.md](docs/development.md) and [docs/configuration.md](docs/
 - **Run `make lint test` before pushing.** CI runs the same checks and must be green to merge.
 - **Protobuf**: after editing a `.proto` file run `make proto` and commit the generated code in `internal/gen`. CI fails if it is out of date.
 - **Language**: everything is in English: code, comments, commit messages, issues, pull requests and documents. The only bilingual part is the **GUI** (dashboard and console), which must support English and Italian in every version, alpha included. A pull request that adds or changes a user-facing string provides both the English and the Italian text, and the Italian text is not optional. **Dashboard:** texts live in catalogs, one file per area in `dashboard/src/i18n/messages/` (`<area>.en.ts` is the source: a key like `servers.addTitle` that starts with its area, never the English text, with `{name}` placeholders; `<area>.it.ts` is typed on the English keys, so a missing Italian text does not compile; a test also catches duplicate keys across areas, extra keys, empty texts and different placeholders). Areas: core, auth, servers, updates, users, account. In a component use `const t = useT()` and `t("nav.servers")`. The language is the saved choice (the switch in the header) or the browser's. Migration of the existing strings is in progress, one page group per pull request (#125): a string still written in a component is a known gap, not a pattern to copy; **new strings go in the catalogs**. **Console:** the texts are in `internal/console/strings.go`, one table per language (`en`, `it`); `UseLocale` picks the language from `LC_ALL`, `LC_MESSAGES` or `LANG` (the first one set; `it`, `it_IT.UTF-8`... is Italian). A test fails when a text is empty in either language or a `%s` differs. Health-check names and a few small literals are still written in the code (#191).
+- **`[Test]` issues** are checks that need a real machine (a VM with systemd, a second server, a hard power-off, a browser) and cannot run in CI or in a cloud session. Title: `[Test] …`, label `test`. The body says what is needed, the steps, what to expect and what to report back, so that the maintainer can run all of them in one sitting; a pull request that adds behaviour only a real machine can confirm opens one and does not call that part verified (see #81). Audit findings have the title `[Audit] …` and the label `audit`.
 - **Decisions**: a pull request that makes or changes a design decision updates [docs/decisions.md](docs/decisions.md) too.
 - Keep changes focused. Unrelated clean-ups belong in their own pull request.
 

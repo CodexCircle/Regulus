@@ -6,15 +6,20 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/CodexCircle/Regulus/internal/storage"
 )
 
 // installFixture is a data directory with a release staged in it, a "binary"
@@ -313,5 +318,476 @@ func TestAgentHealthIsConnectingAgainAfterTheRestart(t *testing.T) {
 	_ = WriteConnected(f.dataDir, Connected{Version: "0.2.0", At: restart.Add(time.Second)})
 	if v, err := in.Probe(t.Context(), restart); err != nil || v != "0.2.0" {
 		t.Errorf("probe = %q, %v", v, err)
+	}
+}
+
+// A file in the request's place that is not a request must be removed once,
+// reported as failed and must not wake the helper again: systemd starts it for
+// as long as the file exists, and a helper that leaves it behind is started
+// until the path unit gives up, after which no update ever runs.
+func TestInstallerRemovesARequestItCannotUse(t *testing.T) {
+	big := make([]byte, maxControlFile+1)
+	for i := range big {
+		big[i] = ' '
+	}
+	for name, plant := range map[string]func(t *testing.T, path string){
+		"garbage":   func(t *testing.T, path string) { mustWrite(t, path, []byte("not json")) },
+		"empty":     func(t *testing.T, path string) { mustWrite(t, path, nil) },
+		"too large": func(t *testing.T, path string) { mustWrite(t, path, append(big, []byte(`{"version":"0.2.0"}`)...)) },
+		"a symlink": func(t *testing.T, path string) { mustSymlink(t, "/dev/zero", path) },
+		"a link to a request": func(t *testing.T, path string) {
+			target := filepath.Join(t.TempDir(), "r.json")
+			mustWrite(t, target, []byte(`{"version":"0.2.0"}`))
+			mustSymlink(t, target, path)
+		},
+		"a FIFO": func(t *testing.T, path string) {
+			if err := syscall.Mkfifo(path, 0o600); err != nil {
+				t.Skipf("no FIFO here: %v", err)
+			}
+		},
+		"a directory": func(t *testing.T, path string) {
+			if err := os.Mkdir(path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+			dir := ApplyDir(f.dataDir)
+			path := filepath.Join(dir, requestName)
+			plant(t, path)
+
+			done := make(chan struct{})
+			var res ApplyResult
+			var err error
+			go func() { res, err = f.in.Apply(t.Context()); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatal("the helper blocked on the file")
+			}
+			if err == nil || res.Outcome != OutcomeFailed {
+				t.Errorf("result = %+v, err = %v, want a failure", res, err)
+			}
+			if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
+				t.Errorf("the file is still there (%v): systemd would start the helper again", statErr)
+			}
+			if r, ok := ReadResult(dir); !ok || r.Outcome != OutcomeFailed || r.Message == "" {
+				t.Errorf("result for the hub = %+v (found %v)", r, ok)
+			}
+			// What a link pointed to is untouched.
+			if _, ok := ReadRequest(dir); ok {
+				t.Error("a request is still pending")
+			}
+
+			// The next valid request still works.
+			f.request(t, "0.2.0")
+			if res, err := f.in.Apply(t.Context()); err != nil || res.Outcome != OutcomeApplied {
+				t.Errorf("the request after it: result = %+v, err = %v", res, err)
+			}
+		})
+	}
+}
+
+func mustWrite(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustSymlink(t *testing.T, target, path string) {
+	t.Helper()
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *installFixture) pendingMarker() (Pending, bool) {
+	data, err := os.ReadFile(filepath.Join(f.in.StateDir, pendingName))
+	if err != nil {
+		return Pending{}, false
+	}
+	var p Pending
+	return p, json.Unmarshal(data, &p) == nil
+}
+
+// While the new version is being started the marker says what is in flight,
+// and it is gone once the update ended, applied or rolled back.
+func TestInstallerRecordsTheUpdateInFlight(t *testing.T) {
+	for name, healthy := range map[string]func(string) bool{
+		"applied":     func(string) bool { return true },
+		"rolled back": func(v string) bool { return v != "0.2.0" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+			f.healthy = healthy
+			run := f.in.Run
+			var seen Pending
+			var seenOK bool
+			f.in.Run = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
+				if cmd == "systemctl" && len(args) > 0 && args[0] == "restart" && !seenOK {
+					seen, seenOK = f.pendingMarker()
+				}
+				return run(ctx, cmd, args...)
+			}
+			f.request(t, "0.2.0")
+			if _, err := f.in.Apply(t.Context()); name == "applied" && err != nil {
+				t.Fatal(err)
+			}
+			if !seenOK || seen.From != "0.1.0" || seen.To != "0.2.0" || seen.Unit != "regulus.service" || filepath.Base(seen.Backup) != backupName {
+				t.Errorf("marker at the first restart = %+v (found %v)", seen, seenOK)
+			}
+			if _, ok := f.pendingMarker(); ok {
+				t.Error("the marker was left behind")
+			}
+		})
+	}
+}
+
+// A stop request or the helper's time limit cancels its context in the middle
+// of the watch. The old version must still be put back, and the service
+// restarted on it.
+func TestInstallerRollsBackEvenWhenItIsToldToStop(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	run := f.in.Run
+	restarts := 0
+	f.in.Run = func(c context.Context, cmd string, args ...string) ([]byte, error) {
+		if cmd == "systemctl" && len(args) > 0 && args[0] == "restart" {
+			restarts++
+			if restarts == 1 {
+				stop() // SIGTERM arrives while the new version starts
+				return nil, nil
+			}
+			if err := c.Err(); err != nil {
+				return nil, err // what a cancelled context does to the real command
+			}
+		}
+		return run(c, cmd, args...)
+	}
+	f.healthy = func(v string) bool { return v != "0.2.0" }
+	f.request(t, "0.2.0")
+
+	res, _ := f.in.Apply(ctx)
+	if res.Outcome != OutcomeRolledBack {
+		t.Errorf("outcome = %q (%s), want %q", res.Outcome, res.Message, OutcomeRolledBack)
+	}
+	if got := f.installed(t); got != "0.1.0" {
+		t.Errorf("the binary on disk is %q", got)
+	}
+	if restarts != 2 {
+		t.Errorf("restarts = %d: the service must be restarted on the old version too", restarts)
+	}
+	if _, ok := f.pendingMarker(); ok {
+		t.Error("the marker was left behind")
+	}
+}
+
+// interrupted builds the state a killed helper leaves: the previous binary
+// kept in the state directory, a marker, and whatever is on disk as the
+// executable.
+func (f *installFixture) interrupted(t *testing.T, onDisk string) {
+	t.Helper()
+	backup := filepath.Join(f.in.StateDir, backupName)
+	mustWrite(t, backup, []byte("0.1.0"))
+	if err := f.in.writePending(Pending{From: "0.1.0", To: "0.2.0", Backup: backup, Unit: "regulus.service", DataDir: f.dataDir, Started: f.in.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, f.binary, []byte(onDisk))
+}
+
+func TestRecoverSettlesAnInterruptedUpdate(t *testing.T) {
+	for name, tc := range map[string]struct {
+		onDisk   string
+		healthy  func(string) bool
+		wantOut  string
+		wantBin  string
+		wantFail bool
+	}{
+		"the new version is in place and healthy": {"0.2.0", func(string) bool { return true }, OutcomeApplied, "0.2.0", false},
+		"the new version is in place and broken":  {"0.2.0", func(v string) bool { return v != "0.2.0" }, OutcomeRolledBack, "0.1.0", true},
+		"the file is empty (power cut)":           {"", func(string) bool { return true }, OutcomeRolledBack, "0.1.0", true},
+		"the file is garbage":                     {"half a binary", func(string) bool { return true }, OutcomeRolledBack, "0.1.0", true},
+		"the swap never happened":                 {"0.1.0", func(string) bool { return true }, OutcomeFailed, "0.1.0", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+			f.healthy = tc.healthy
+			f.interrupted(t, tc.onDisk)
+
+			res, did, err := f.in.Recover(t.Context())
+			if !did {
+				t.Fatal("the marker was not found")
+			}
+			if res.Outcome != tc.wantOut || (err != nil) != tc.wantFail {
+				t.Errorf("result = %+v, err = %v, want outcome %q (error: %v)", res, err, tc.wantOut, tc.wantFail)
+			}
+			if got := f.installed(t); got != tc.wantBin {
+				t.Errorf("the executable is %q, want %q", got, tc.wantBin)
+			}
+			if _, ok := f.pendingMarker(); ok {
+				t.Error("the marker is still there: it would start the helper again")
+			}
+			if r, ok := ReadResult(ApplyDir(f.dataDir)); !ok || r.Outcome != tc.wantOut || r.Version != "0.2.0" || r.From != "0.1.0" {
+				t.Errorf("result for the hub = %+v (found %v)", r, ok)
+			}
+			// Settling twice does nothing.
+			if _, did, _ := f.in.Recover(t.Context()); did {
+				t.Error("a second run found a marker")
+			}
+		})
+	}
+}
+
+func TestRecoverWithoutAMarkerDoesNothing(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	if _, did, err := f.in.Recover(t.Context()); did || err != nil {
+		t.Errorf("did = %v, err = %v", did, err)
+	}
+	if _, ok := ReadResult(ApplyDir(f.dataDir)); ok {
+		t.Error("a result was written without a marker")
+	}
+}
+
+// The marker is in root's directory, but it is still checked: it names the
+// file that is copied over the executable.
+func TestRecoverRefusesAMarkerThatPointsElsewhere(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	elsewhere := filepath.Join(t.TempDir(), "evil")
+	mustWrite(t, elsewhere, []byte("evil"))
+	if err := f.in.writePending(Pending{From: "0.1.0", To: "0.2.0", Backup: elsewhere, Unit: "regulus.service", DataDir: f.dataDir}); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, f.binary, []byte(""))
+	if _, did, err := f.in.Recover(t.Context()); !did || err == nil {
+		t.Errorf("did = %v, err = %v, want an error", did, err)
+	}
+	if got := f.installed(t); got == "evil" {
+		t.Error("a file from outside the state directory was installed")
+	}
+	if _, ok := f.pendingMarker(); ok {
+		t.Error("the marker is still there")
+	}
+}
+
+func TestRecoverRemovesAnUnreadableMarker(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	mustWrite(t, filepath.Join(f.in.StateDir, pendingName), []byte("{"))
+	if _, did, err := f.in.Recover(t.Context()); !did || err == nil {
+		t.Errorf("did = %v, err = %v, want an error", did, err)
+	}
+	if _, err := os.Lstat(filepath.Join(f.in.StateDir, pendingName)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the marker is still there: %v", err)
+	}
+}
+
+// ---- the database and the rollback ----
+
+// withDatabase gives the fixture a real SQLite database holding one row, and
+// returns a function that opens it the way a hub that started later would.
+func (f *installFixture) withDatabase(t *testing.T) func() *sql.DB {
+	t.Helper()
+	db, err := storage.OpenSQLite(t.Context(), f.dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{`CREATE TABLE keepme (v TEXT)`, `INSERT INTO keepme VALUES ('before')`} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = db.Close()
+	return func() *sql.DB {
+		t.Helper()
+		d, err := sql.Open("sqlite", "file:"+storage.SQLitePath(f.dataDir)+"?_pragma=busy_timeout(5000)")
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.SetMaxOpenConns(1)
+		t.Cleanup(func() { _ = d.Close() })
+		return d
+	}
+}
+
+// onFirstRestart runs fn when the service is first restarted (the new version
+// starts there) and records the systemctl commands.
+func (f *installFixture) onFirstRestart(fn func()) *[]string {
+	var cmds []string
+	run := f.in.Run
+	done := false
+	f.in.Run = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
+		if cmd == "systemctl" && len(args) > 0 {
+			cmds = append(cmds, args[0])
+			if args[0] == "restart" && !done {
+				done = true
+				fn()
+			}
+		}
+		return run(ctx, cmd, args...)
+	}
+	return &cmds
+}
+
+func rows(t *testing.T, dataDir string) int {
+	t.Helper()
+	db, err := storage.OpenSQLite(t.Context(), dataDir) // what the old version does at its start
+	if err != nil {
+		t.Fatalf("the old version cannot open the database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM keepme`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// The case a rollback exists for: the new version migrated the database at its
+// first start and then did not come up. The old version refuses a schema it
+// does not know, so the database goes back with it.
+func TestRollbackPutsTheDatabaseBackWhenTheNewVersionMigratedIt(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	open := f.withDatabase(t)
+	f.healthy = func(v string) bool { return v != "0.2.0" }
+	cmds := f.onFirstRestart(func() { // the new hub starts, migrates, writes
+		db := open()
+		for _, q := range []string{`INSERT INTO schema_migrations (version, name) VALUES (9999, 'from_the_future')`, `INSERT INTO keepme VALUES ('after')`} {
+			if _, err := db.Exec(q); err != nil {
+				t.Error(err)
+			}
+		}
+		_ = db.Close()
+	})
+	f.request(t, "0.2.0")
+
+	res, _ := f.in.Apply(t.Context())
+	if res.Outcome != OutcomeRolledBack {
+		t.Fatalf("outcome = %q: %s", res.Outcome, res.Message)
+	}
+	if !strings.Contains(res.Message, "database was put back") || !strings.Contains(res.Message, "schema had moved") {
+		t.Errorf("the message does not say what happened to the database: %q", res.Message)
+	}
+	if got := f.installed(t); got != "0.1.0" {
+		t.Errorf("binary = %q", got)
+	}
+	if n := rows(t, f.dataDir); n != 1 {
+		t.Errorf("rows = %d, want the one from before the update", n)
+	}
+	// The service is stopped before the database is replaced, then restarted.
+	if want := []string{"restart", "stop", "restart"}; !slices.Equal(*cmds, want) {
+		t.Errorf("systemctl commands = %v, want %v", *cmds, want)
+	}
+	if _, err := os.Stat(filepath.Join(f.in.StateDir, snapshotName)); err == nil {
+		t.Error("the copy of the database was left behind")
+	}
+}
+
+// When the new version did not touch the schema the old one can read the
+// database as it is, and what was saved meanwhile is kept.
+func TestRollbackKeepsTheDatabaseWhenTheSchemaDidNotMove(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	open := f.withDatabase(t)
+	f.healthy = func(v string) bool { return v != "0.2.0" }
+	f.onFirstRestart(func() {
+		db := open()
+		if _, err := db.Exec(`INSERT INTO keepme VALUES ('after')`); err != nil {
+			t.Error(err)
+		}
+		_ = db.Close()
+	})
+	f.request(t, "0.2.0")
+
+	res, _ := f.in.Apply(t.Context())
+	if res.Outcome != OutcomeRolledBack || strings.Contains(res.Message, "database was put back") {
+		t.Fatalf("outcome = %q: %s", res.Outcome, res.Message)
+	}
+	if n := rows(t, f.dataDir); n != 2 {
+		t.Errorf("rows = %d, want both: nothing needed to be undone", n)
+	}
+}
+
+// A hub whose database cannot be copied is not updated: a rollback would have
+// nothing to put back.
+func TestUpdateIsRefusedWhenTheDatabaseCannotBeCopied(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	mustWrite(t, storage.SQLitePath(f.dataDir), []byte("this is not a database"))
+	f.request(t, "0.2.0")
+
+	res, err := f.in.Apply(t.Context())
+	if err == nil || res.Outcome != OutcomeFailed || !strings.Contains(res.Message, "copy of the database") {
+		t.Errorf("result = %+v, err = %v", res, err)
+	}
+	if got := f.installed(t); got != "0.1.0" {
+		t.Errorf("the binary was replaced: %q", got)
+	}
+	if _, ok := f.pendingMarker(); ok {
+		t.Error("a marker was written for an update that never started")
+	}
+}
+
+// The copy is for the hub's SQLite database only: an agent has none.
+func TestAnAgentUpdateTakesNoDatabaseCopy(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	f.withDatabase(t)
+	f.in.Agent = true
+	f.in.Unit = "regulus-agent.service"
+	var seen string
+	run := f.in.Run
+	f.in.Run = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
+		if cmd == "systemctl" && len(args) > 0 && args[0] == "restart" {
+			if _, err := os.Stat(filepath.Join(f.in.StateDir, snapshotName)); err == nil {
+				seen = "a copy exists"
+			}
+		}
+		return run(ctx, cmd, args...)
+	}
+	// The agent's health is that it connected again with the new version.
+	f.in.Probe = func(context.Context, time.Time) (string, error) { return "0.2.0", nil }
+	f.request(t, "0.2.0")
+	if res, err := f.in.Apply(t.Context()); err != nil || res.Outcome != OutcomeApplied {
+		t.Fatalf("result = %+v, err = %v", res, err)
+	}
+	if seen != "" {
+		t.Error("an agent update copied the database")
+	}
+}
+
+// An interrupted update whose new version migrated the database: Recover
+// puts back the database and the program.
+func TestRecoverPutsTheDatabaseBackToo(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	open := f.withDatabase(t)
+	snap := filepath.Join(f.in.StateDir, snapshotName)
+	before, err := storage.SnapshotSQLite(t.Context(), f.dataDir, snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := open() // the new version ran
+	for _, q := range []string{`INSERT INTO schema_migrations (version, name) VALUES (9999, 'from_the_future')`, `INSERT INTO keepme VALUES ('after')`} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = db.Close()
+
+	backup := filepath.Join(f.in.StateDir, backupName)
+	mustWrite(t, backup, []byte("0.1.0"))
+	if err := f.in.writePending(Pending{From: "0.1.0", To: "0.2.0", Backup: backup, Snapshot: snap, SchemaBefore: before, Unit: "regulus.service", DataDir: f.dataDir}); err != nil {
+		t.Fatal(err)
+	}
+	f.healthy = func(v string) bool { return v != "0.2.0" }
+	mustWrite(t, f.binary, []byte("0.2.0")) // the new version is in place and broken
+
+	res, did, _ := f.in.Recover(t.Context())
+	if !did || res.Outcome != OutcomeRolledBack || !strings.Contains(res.Message, "database was put back") {
+		t.Fatalf("did = %v, result = %+v", did, res)
+	}
+	if n := rows(t, f.dataDir); n != 1 {
+		t.Errorf("rows = %d, want 1", n)
+	}
+	if _, err := os.Stat(snap); err == nil {
+		t.Error("the copy of the database was left behind")
 	}
 }

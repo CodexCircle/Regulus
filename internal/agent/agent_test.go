@@ -383,3 +383,64 @@ func TestParsers(t *testing.T) {
 		}
 	}
 }
+
+// blockingCollector never returns, like a collector stuck in the kernel.
+type blockingCollector struct{ release chan struct{} }
+
+func (c blockingCollector) Collect(context.Context) (*agentv1.MetricsReport, error) {
+	<-c.release
+	return &agentv1.MetricsReport{}, nil
+}
+
+// A collection that does not come back must not stop the heartbeats: the hub
+// drops an agent that stops sending, and the agent would reconnect, hang
+// again and loop with nothing in the log.
+func TestHungCollectorDoesNotStopHeartbeats(t *testing.T) {
+	heartbeats := make(chan struct{}, 64)
+	metrics := make(chan struct{}, 64)
+	conn := newFakeHub(t, func(_ int, stream grpc.BidiStreamingServer[agentv1.AgentMessage, agentv1.HubMessage]) error {
+		if _, err := stream.Recv(); err != nil {
+			return err
+		}
+		if err := stream.Send(welcome("a", 10*time.Millisecond, 10*time.Millisecond)); err != nil {
+			return err
+		}
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				return nil
+			}
+			if msg.GetHeartbeat() != nil {
+				heartbeats <- struct{}{}
+			}
+			if msg.GetMetrics() != nil {
+				metrics <- struct{}{}
+			}
+		}
+	})
+	release := make(chan struct{})
+	o := opts()
+	o.Collector = blockingCollector{release: release}
+	runAgent(t, conn, o)
+
+	for range 10 { // far more heartbeats than a stuck loop could send
+		select {
+		case <-heartbeats:
+		case <-time.After(3 * time.Second):
+			t.Fatal("heartbeats stopped while the collector was stuck")
+		}
+	}
+	select {
+	case <-metrics:
+		t.Fatal("a report was sent although the collector never returned")
+	default:
+	}
+
+	// When it comes back, reports resume on the same connection.
+	close(release)
+	select {
+	case <-metrics:
+	case <-time.After(3 * time.Second):
+		t.Fatal("no report after the collector came back")
+	}
+}

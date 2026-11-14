@@ -88,7 +88,7 @@ function RemoteAgentsOff({
   );
 }
 
-const RELEASES_URL = "https://github.com/CodexCircle/Regulus/releases";
+const RELEASES_URL = "https://github.com/Stellatinus/Regulus/releases";
 
 const enrollOptions = (grant: Enrollment, hubHost: string) =>
   [`--hub ${hubHost}:${grant.agent_port}`, `--token ${grant.token}`, `--ca-fingerprint ${grant.ca_fingerprint}`].join(" ");

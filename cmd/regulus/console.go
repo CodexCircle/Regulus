@@ -401,8 +401,18 @@ func configCommand(args []string, e env) int {
 		v, _ := cfg.Get(rest[0])
 		_, _ = fmt.Fprintln(e.stdout, v)
 	case "set":
+		force := false
+		var operands []string
+		for _, a := range rest {
+			if a == "--force" {
+				force = true
+				continue
+			}
+			operands = append(operands, a)
+		}
+		rest = operands
 		if len(rest) != 2 {
-			return usageErr("usage: regulus config set KEY VALUE")
+			return usageErr("usage: regulus config set KEY VALUE [--force]")
 		}
 		key, raw := rest[0], rest[1]
 		setting, ok := config.Lookup(key)
@@ -412,7 +422,11 @@ func configCommand(args []string, e env) int {
 		if file == "" {
 			return fail("no configuration file to change: pass --config FILE or set REGULUS_CONFIG (the package installs %s)", config.DefaultFile)
 		}
-		value, err := config.SetFile(file, key, raw)
+		set := config.SetFile
+		if force {
+			set = config.SetFileForce
+		}
+		value, err := set(file, key, raw)
 		if err != nil {
 			return fail("%v", err)
 		}

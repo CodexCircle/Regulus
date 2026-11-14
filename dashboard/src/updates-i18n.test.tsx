@@ -30,7 +30,7 @@ const status: UpdateStatus = {
     tag: "v0.2.0",
     prerelease: false,
     channel: "stable",
-    url: "https://github.com/CodexCircle/Regulus/releases/tag/v0.2.0",
+    url: "https://github.com/Stellatinus/Regulus/releases/tag/v0.2.0",
     notes: "Adds updates.",
     published_at: now,
   },

@@ -51,16 +51,16 @@ Ubuntu Server LTS (22.04, 24.04 and 26.04, amd64 and arm64) is the reference pla
 3. **Phase 3**: separate agent and hub, protocol versioning, updates (manual, download-only or automatic).
 4. **Phase 4**: plugins.
 
-Third-party plugins come after the plugin system is stable. Work is tracked in the [issues](https://github.com/CodexCircle/Regulus/issues), grouped in milestones M1 to M6; [docs/decisions.md](docs/decisions.md#roadmap-phases-and-milestones) maps them to the phases.
+Third-party plugins come after the plugin system is stable. Work is tracked in the [issues](https://github.com/Stellatinus/Regulus/issues), grouped in milestones M1 to M6; [docs/decisions.md](docs/decisions.md#roadmap-phases-and-milestones) maps them to the phases.
 
 ## Quick install (Ubuntu Server)
 
 ```sh
-curl -fsSLO https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh
+curl -fsSLO https://github.com/Stellatinus/Regulus/releases/latest/download/install.sh
 sh install.sh
 ```
 
-It downloads the latest release, verifies its checksum and signature, installs it, starts the service and prints where to open the dashboard and the one-time setup token. Until the first stable release is out, `latest` has nothing to serve: use the command at the top of the notes of a [pre-release](https://github.com/CodexCircle/Regulus/releases). Options, what the package sets up and how to add other servers are in [Installation](docs/installation.md). The dashboard speaks plain HTTP on port 8080: put a reverse proxy with TLS in front of it before exposing it beyond a trusted network.
+It downloads the latest release, verifies its checksum and signature, installs it, starts the service and prints where to open the dashboard and the one-time setup token. Until the first stable release is out, `latest` has nothing to serve: use the command at the top of the notes of a [pre-release](https://github.com/Stellatinus/Regulus/releases). Options, what the package sets up and how to add other servers are in [Installation](docs/installation.md). The dashboard speaks plain HTTP on port 8080: put a reverse proxy with TLS in front of it before exposing it beyond a trusted network.
 
 ## Documentation
 

@@ -363,7 +363,7 @@ func TestPendingLoginLimits(t *testing.T) {
 	for range maxFailures {
 		p = pending("c")
 		_, _ = s.CompleteLogin(ctx, "c", p, "000000")
-		if s.limited("c") {
+		if s.failureCount(s.ipKey("c")) >= maxFailures {
 			break
 		}
 	}

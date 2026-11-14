@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -314,16 +315,33 @@ func collectKeys(prefix string, m map[string]any, out map[string]bool) {
 
 // SetFile changes one setting in the YAML file at path, keeping comments and
 // the rest of the file as they are, and returns the canonical value written.
-// The new file is checked as a whole before anything is written, and it is
-// written in place so the owner and mode of the file stay.
-func SetFile(path, key, raw string) (string, error) {
+// The new file is checked as a whole before anything is written, and it
+// replaces the old one in one step (see writeConfig), so a crash or a full
+// disk leaves the old file or the new one, never half of one.
+//
+// Changing data_dir away from a directory that holds the hub's data is
+// refused; SetFileForce does it.
+func SetFile(path, key, raw string) (string, error) { return setFile(path, key, raw, false) }
+
+// SetFileForce is SetFile without the refusal to move data_dir off a
+// directory that holds the hub's data.
+func SetFileForce(path, key, raw string) (string, error) { return setFile(path, key, raw, true) }
+
+func setFile(path, key, raw string, force bool) (string, error) {
 	value, err := Normalize(key, raw)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", key, err)
 	}
+	// Nobody else edits the file between the read and the write.
+	defer lockDir(filepath.Dir(path))()
 	old, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read config file: %w", err)
+	}
+	if key == "data_dir" && !force {
+		if err := checkDataDirChange(string(old), value); err != nil {
+			return "", err
+		}
 	}
 	updated, err := editYAML(string(old), key, value)
 	if err != nil {
@@ -346,13 +364,111 @@ func SetFile(path, key, raw string) (string, error) {
 	if updated == string(old) {
 		return value, nil
 	}
-	if err := os.WriteFile(path, []byte(updated), 0o600); err != nil {
+	if err := writeConfig(path, []byte(updated)); err != nil {
 		if errors.Is(err, fs.ErrPermission) {
 			return "", fmt.Errorf("write config file: %w (the file belongs to another user: run it with sudo)", err)
 		}
 		return "", fmt.Errorf("write config file: %w", err)
 	}
 	return value, nil
+}
+
+// The steps of writeConfig, replaceable by a test that makes one fail.
+var (
+	createTemp = os.CreateTemp
+	renameFile = os.Rename
+)
+
+// writeConfig replaces the file with data in one step: the new text goes to a
+// temporary file in the same directory, is synced, gets the owner and mode of
+// the old file and is renamed over it. Truncating the file in place (what
+// os.WriteFile does) leaves it empty or cut short if the process dies in the
+// middle, and an empty file loads as "all defaults": a hub started on it
+// would use a new database, a new secret key and a new CA.
+//
+// When the directory cannot take a new file (a file that the user may write
+// in a directory that they may not) it falls back to writing in place, the
+// only way left to change it.
+func writeConfig(path string, data []byte) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	tmp, err := createTemp(filepath.Dir(path), ".config-")
+	if err != nil {
+		if errors.Is(err, fs.ErrPermission) {
+			return os.WriteFile(path, data, info.Mode().Perm())
+		}
+		return err
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }() // gone after a successful rename, cleans up after a failure
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if uid, gid, ok := ownerOf(info); ok {
+		_ = tmp.Chown(uid, gid) // only root can give a file away; without it the file keeps the owner of whoever edits
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := renameFile(tmp.Name(), path); err != nil {
+		return err
+	}
+	if d, err := os.Open(filepath.Dir(path)); err == nil {
+		_ = d.Sync() // the rename itself must survive a power cut
+		_ = d.Close()
+	}
+	return nil
+}
+
+// stateFiles are what a hub keeps in its data directory: the database (a file
+// with SQLite), the key that protects the two-factor secrets and the CA that
+// every enrolled agent pins. The names are those of storage.FileName,
+// auth's secret.key and pki's ca.key.
+var stateFiles = []string{storage.FileName, "secret.key", "ca.key"}
+
+func holdsHubData(dir string) bool {
+	for _, f := range stateFiles {
+		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// checkDataDirChange refuses to point data_dir away from a directory that
+// holds the hub's data to one that holds none: the hub would start with an
+// empty database, a new secret key and a new CA, every enrolled agent would
+// distrust it and the two-factor secrets would be lost. The data is not moved
+// by changing the setting.
+func checkDataDirChange(oldYAML, newDir string) error {
+	cur := Default()
+	dec := yaml.NewDecoder(strings.NewReader(oldYAML))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cur); err != nil && !errors.Is(err, io.EOF) {
+		return nil // the edit itself reports an unreadable file
+	}
+	oldDir, newAbs := absPath(cur.DataDir), absPath(newDir)
+	if oldDir == newAbs || !holdsHubData(oldDir) || holdsHubData(newAbs) {
+		return nil
+	}
+	return fmt.Errorf("data_dir: %s holds the hub's data and %s holds none. Changing the setting does not move it: the hub would start with an empty database, a new secret key and a new CA, every enrolled agent would distrust it and the two-factor secrets would be lost. Stop the hub, copy the directory to the new place, then change the setting; or repeat the command with --force to start fresh on purpose", oldDir, newAbs)
+}
+
+func absPath(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return filepath.Clean(p)
 }
 
 var commentRE = regexp.MustCompile(`^(\s*[A-Za-z_]+:)[ \t]*("[^"]*"|'[^']*'|[^#\s][^#]*?)?([ \t]+#.*)?[ \t]*$`)

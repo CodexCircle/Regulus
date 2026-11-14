@@ -1,6 +1,6 @@
 # Node types
 
-The legend of the kinds of machine in a Regulus group. **Design draft:** only the **hub** and the **agent** (including the built-in agent) exist in the code today. Every other type below is *proposed*; nothing here is implemented (checked against the code on 2026-11-13). Names are provisional: the maintainer decides the final nomenclature later (see the [glossary](glossary.md), "Naming plan"). The design issue is [#160](https://github.com/CodexCircle/Regulus/issues/160); the role model it builds on is [#104](https://github.com/CodexCircle/Regulus/issues/104).
+The legend of the kinds of machine in a Regulus group. **Design draft:** only the **hub** and the **agent** (including the built-in agent) exist in the code today. Every other type below is *proposed*; nothing here is implemented (checked against the code on 2026-11-13). Names are provisional: the maintainer decides the final nomenclature later (see the [glossary](glossary.md), "Naming plan"). The design issue is [#160](https://github.com/Stellatinus/Regulus/issues/160); the role model it builds on is [#104](https://github.com/Stellatinus/Regulus/issues/104).
 
 "Node" is used here for the design discussion only, as in #103: any machine in the group. Do not use it in code or UI yet.
 
@@ -15,11 +15,11 @@ The exceptions are explicit and each has its own design issue: a node that **acc
 | Type | What it is | Talks to | Status |
 |---|---|---|---|
 | **Hub** (active hub) | Orchestrates the group: dashboard, API, database, CA, updates. Exactly one active per term. | every node (they connect to it) | **implemented** (`regulus hub`) |
-| **Redundant hub** (informally "secondary hub"; further ones "tertiary"…) | Passive hub holding a copy of what the hub needs; takes over when the active hub is unreachable, or when forced. A **pure-hub** attribute means it hosts no workloads. | the active hub (replication); after failover, every node | designed in the issues of #103, **not implemented**. More than one redundant hub, with priority, is parked in [#113](https://github.com/CodexCircle/Regulus/issues/113). |
-| **Compute node** (standard node) | A server that runs workloads and is managed from the hub. | the active hub only | **implemented** as the agent (`regulus agent`; the hub's own server is the built-in agent). Workload management is [#113](https://github.com/CodexCircle/Regulus/issues/113). |
-| **Backup node** | A storage node that keeps the backups of the other nodes. Has a connection **to the hub only** and **cannot contact other nodes**. | the active hub only | proposed in [#166](https://github.com/CodexCircle/Regulus/issues/166). |
-| **Access gateway** | A node with a public address that lets the Regulus Access phone app reach the hub from outside the local network. Forwards the phone's connection to the active hub; **mTLS stays end to end between phone and hub**. May later also host a notification server and, separately designed, an authentication server. | the active hub (outbound); phones (inbound, the only inbound listener of the group) | proposed in [#161](https://github.com/CodexCircle/Regulus/issues/161) (epic [#152](https://github.com/CodexCircle/Regulus/issues/152)). |
-| **Development node** | A node for developer and AI tools (for example Claude Code). Reaches the hub only, **never other nodes**, and cannot use the hub's shared resources unless an administrator writes a specific **grant**, whose confirmation is deliberately slow (a mandatory wait, enforced by the hub). | the active hub only | proposed in [#168](https://github.com/CodexCircle/Regulus/issues/168). What can be enforced outside Regulus (the host's own network) is open there. |
+| **Redundant hub** (informally "secondary hub"; further ones "tertiary"…) | Passive hub holding a copy of what the hub needs; takes over when the active hub is unreachable, or when forced. A **pure-hub** attribute means it hosts no workloads. | the active hub (replication); after failover, every node | designed in the issues of #103, **not implemented**. More than one redundant hub, with priority, is parked in [#113](https://github.com/Stellatinus/Regulus/issues/113). |
+| **Compute node** (standard node) | A server that runs workloads and is managed from the hub. | the active hub only | **implemented** as the agent (`regulus agent`; the hub's own server is the built-in agent). Workload management is [#113](https://github.com/Stellatinus/Regulus/issues/113). |
+| **Backup node** | A storage node that keeps the backups of the other nodes. Has a connection **to the hub only** and **cannot contact other nodes**. | the active hub only | proposed in [#166](https://github.com/Stellatinus/Regulus/issues/166). |
+| **Access gateway** | A node with a public address that lets the Regulus Access phone app reach the hub from outside the local network. Forwards the phone's connection to the active hub; **mTLS stays end to end between phone and hub**. May later also host a notification server and, separately designed, an authentication server. | the active hub (outbound); phones (inbound, the only inbound listener of the group) | proposed in [#161](https://github.com/Stellatinus/Regulus/issues/161) (epic [#152](https://github.com/Stellatinus/Regulus/issues/152)). |
+| **Development node** | A node for developer and AI tools (for example Claude Code). Reaches the hub only, **never other nodes**, and cannot use the hub's shared resources unless an administrator writes a specific **grant**, whose confirmation is deliberately slow (a mandatory wait, enforced by the hub). | the active hub only | proposed in [#168](https://github.com/Stellatinus/Regulus/issues/168). What can be enforced outside Regulus (the host's own network) is open there. |
 | **AI node** | A node that offers local AI (for example a server running Ollama) to other nodes. | the active hub, and possibly **directly** to the nodes that use it (see below) | idea only, not designed. |
 
 A node has **one** type (the role); capabilities are switched on one by one by an administrator on the hub. An access gateway is a normal enrolled node plus the gateway capability, so it is rebuilt from nothing by enrolling again.
@@ -38,7 +38,7 @@ Today the only "type" is the installer's `--role hub|agent`, written to `/etc/re
 
 **Role and types.** The **role** stays the exclusive enum of #104 (`agent`, `hub`, `hub-redundant`, plus the transient `candidate`); a **node type** such as "backup node" or "access gateway" is a named **preset of capabilities on the role `agent`** (compute node = no extra capability; backup node = `backup-storage`; access gateway = `relay`, later `notifications`). The UI and docs say "type"; the code keeps role plus capability set, so a new type is a new preset, not a new code path. "A backup node cannot contact other nodes" needs no rule today, because nodes never contact each other (all traffic goes through the hub); the rule matters when direct links exist (below).
 
-## Changing a type later, and the command line (proposal, [#164](https://github.com/CodexCircle/Regulus/issues/164))
+## Changing a type later, and the command line (proposal, [#164](https://github.com/Stellatinus/Regulus/issues/164))
 
 The intended flow: install the hub, enroll **only standard agents**, then decide from the dashboard that one becomes the redundant hub, another a backup node, another an access gateway, and undo it later. The **command line always stays** a way to do the same: advanced installs and scripts use it, and the dashboard and the CLI are two front ends to one operation.
 
@@ -48,9 +48,9 @@ It follows the two-key rule above, so what the dashboard can do depends on the n
 |---|---|---|
 | Backup node | reports free space and a storage directory; no new exposure | light |
 | Access gateway | an **allowed-capabilities list on the node**, empty by default, set at install (`--allow gateway`) or later on the node; the hub never changes it. Opening a firewall is outside Regulus. | medium |
-| Redundant hub | the promotion flow of [#105](https://github.com/CodexCircle/Regulus/issues/105): the one-time token on the node, or its "accept promotion autonomously" setting (off by default) | heavy: the whole epic #103 |
+| Redundant hub | the promotion flow of [#105](https://github.com/Stellatinus/Regulus/issues/105): the one-time token on the node, or its "accept promotion autonomously" setting (off by default) | heavy: the whole epic #103 |
 
-None of this exists in the code. Related: guided installation ([#165](https://github.com/CodexCircle/Regulus/issues/165): from the hub, "add a node of this type" gives the exact steps and checks each one) and a possible future **configurator**, a static web page where one describes a home lab or a company and gets the node list and the steps ([#167](https://github.com/CodexCircle/Regulus/issues/167), only evaluated, not decided).
+None of this exists in the code. Related: guided installation ([#165](https://github.com/Stellatinus/Regulus/issues/165): from the hub, "add a node of this type" gives the exact steps and checks each one) and a possible future **configurator**, a static web page where one describes a home lab or a company and gets the node list and the steps ([#167](https://github.com/Stellatinus/Regulus/issues/167), only evaluated, not decided).
 
 ## Capabilities (proposed)
 
@@ -66,7 +66,7 @@ The set is not final; it is what the issues mention today.
 
 ## Defaults per type (proposal)
 
-**One binary, one kind of machine.** Every node runs the same `regulus` binary, so in principle a node can be anything; a type is a **preset**: which capabilities are on and which permissions it has. Two lists are needed, one for *what a node does* (capabilities, [#169](https://github.com/CodexCircle/Regulus/issues/169)) and one for *what it may reach or use* (node permissions, [#170](https://github.com/CodexCircle/Regulus/issues/170); not the user permissions of `internal/auth`). Defaults can be overridden **per node**. Anything sensitive is **denied by default**. These tables are a starting point to argue about, not a decision.
+**One binary, one kind of machine.** Every node runs the same `regulus` binary, so in principle a node can be anything; a type is a **preset**: which capabilities are on and which permissions it has. Two lists are needed, one for *what a node does* (capabilities, [#169](https://github.com/Stellatinus/Regulus/issues/169)) and one for *what it may reach or use* (node permissions, [#170](https://github.com/Stellatinus/Regulus/issues/170); not the user permissions of `internal/auth`). Defaults can be overridden **per node**. Anything sensitive is **denied by default**. These tables are a starting point to argue about, not a decision.
 
 Capabilities on by default (✓ on, – off, `opt-in` = off until the administrator turns it on and the node agrees):
 
@@ -96,7 +96,7 @@ Node permissions by default (all denied unless shown):
 
 The hub and the redundant hub are *roles*, not presets of the agent (#104), so they are not in these tables.
 
-## Changing a type and migrating ([#171](https://github.com/CodexCircle/Regulus/issues/171))
+## Changing a type and migrating ([#171](https://github.com/Stellatinus/Regulus/issues/171))
 
 Turning a capability on or off moves no data. Some changes do need a **migration**, the backup node first: the general method is always "enroll a new node, give it the type, move the data and the assignments, switch over, retire the old one", with checks and a way back. Not designed yet.
 

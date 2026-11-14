@@ -156,8 +156,9 @@ func ParseFingerprint(s string) (string, error) {
 }
 
 // ServerCertificate issues a fresh certificate for the hub's agent listener,
-// valid for the given host names or addresses. It is not stored: a new one is
-// made at every start. The chain includes the CA, so agents that only know the
+// valid for the given host names or addresses. It is not stored: the hub makes
+// a new one at every start and replaces it 30 days before it expires (see
+// ServerTLSRenewing). The chain includes the CA, so agents that only know the
 // fingerprint can find what they pin.
 func (ca *CA) ServerCertificate(now time.Time, hosts ...string) (tls.Certificate, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

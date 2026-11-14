@@ -10,7 +10,7 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/testing/ca"
 )
 
-const releaseSigner = "https://github.com/CodexCircle/Regulus/.github/workflows/release.yml@refs/tags/v0.2.0"
+const releaseSigner = "https://github.com/Stellatinus/Regulus/.github/workflows/release.yml@refs/tags/v0.2.0"
 
 var checksumsText = []byte("abc  regulus_0.2.0_linux_amd64.tar.gz\n")
 
@@ -52,12 +52,13 @@ func TestSignatureRefusals(t *testing.T) {
 		tag       string
 		checksums []byte
 	}{
-		"the checksums were changed": {sign(v, releaseSigner, signerIssuer, checksumsText), "v0.2.0", []byte("evil  regulus_0.2.0_linux_amd64.tar.gz\n")},
-		"signed for another tag":     {sign(v, strings.Replace(releaseSigner, "v0.2.0", "v0.1.0", 1), signerIssuer, checksumsText), "v0.2.0", checksumsText},
-		"another workflow":           {sign(v, "https://github.com/CodexCircle/Regulus/.github/workflows/ci.yml@refs/tags/v0.2.0", signerIssuer, checksumsText), "v0.2.0", checksumsText},
-		"another repository":         {sign(v, "https://github.com/evil/Regulus/.github/workflows/release.yml@refs/tags/v0.2.0", signerIssuer, checksumsText), "v0.2.0", checksumsText},
-		"another issuer":             {sign(v, releaseSigner, "https://accounts.example.com", checksumsText), "v0.2.0", checksumsText},
-		"an untrusted Sigstore":      {sign(other, releaseSigner, signerIssuer, checksumsText), "v0.2.0", checksumsText},
+		"the checksums were changed":     {sign(v, releaseSigner, signerIssuer, checksumsText), "v0.2.0", []byte("evil  regulus_0.2.0_linux_amd64.tar.gz\n")},
+		"signed for another tag":         {sign(v, strings.Replace(releaseSigner, "v0.2.0", "v0.1.0", 1), signerIssuer, checksumsText), "v0.2.0", checksumsText},
+		"the repository before the move": {sign(v, "https://github.com/CodexCircle/Regulus/.github/workflows/release.yml@refs/tags/v0.2.0", signerIssuer, checksumsText), "v0.2.0", checksumsText},
+		"another workflow":               {sign(v, "https://github.com/Stellatinus/Regulus/.github/workflows/ci.yml@refs/tags/v0.2.0", signerIssuer, checksumsText), "v0.2.0", checksumsText},
+		"another repository":             {sign(v, "https://github.com/evil/Regulus/.github/workflows/release.yml@refs/tags/v0.2.0", signerIssuer, checksumsText), "v0.2.0", checksumsText},
+		"another issuer":                 {sign(v, releaseSigner, "https://accounts.example.com", checksumsText), "v0.2.0", checksumsText},
+		"an untrusted Sigstore":          {sign(other, releaseSigner, signerIssuer, checksumsText), "v0.2.0", checksumsText},
 	} {
 		if err := testVerifier().verifyEntity(v, tc.entity, tc.tag, tc.checksums); err == nil {
 			t.Errorf("%s: the signature was accepted", name)

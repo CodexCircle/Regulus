@@ -13,6 +13,7 @@ import (
 	"github.com/coder/websocket"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/CodexCircle/Regulus/internal/auth"
 	agentv1 "github.com/CodexCircle/Regulus/internal/gen/regulus/agent/v1"
 )
 
@@ -180,5 +181,84 @@ func TestStreamRefusesOtherOriginsAndAnonymousClients(t *testing.T) {
 	_, resp, err = websocket.Dial(ctx, "ws"+strings.TrimPrefix(secured.URL, "http")+"/api/stream", nil)
 	if err == nil || resp == nil || resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("anonymous upgrade: err = %v, response = %v, want 401", err, resp)
+	}
+}
+
+// An open stream must end when its session does: logging out, disabling the
+// account or taking the permission away only change the database, so the
+// stream has to ask.
+func TestStreamEndsWhenTheSessionEnds(t *testing.T) {
+	old := sessionRecheck
+	sessionRecheck = 50 * time.Millisecond
+	t.Cleanup(func() { sessionRecheck = old })
+
+	h := startHub(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	admin, adminToken, _, err := h.auth.Setup(ctx, h.auth.SetupToken(), "admin", "correct horse battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.auth.CreateUser(ctx, admin, "viewer1", "correct horse battery", auth.RoleViewer); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(NewHandler(Deps{UI: fstest.MapFS{}, Agents: h, Auth: h.auth}))
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/stream"
+
+	open := func(token string) *websocket.Conn {
+		t.Helper()
+		conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: http.Header{"Cookie": {auth.CookieName + "=" + token}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = conn.CloseNow() })
+		next(t, ctx, conn, "snapshot")
+		return conn
+	}
+	// closed waits for the server to end the stream and returns the close status.
+	closed := func(conn *websocket.Conn) websocket.StatusCode {
+		t.Helper()
+		for {
+			if _, _, err := conn.Read(ctx); err != nil {
+				return websocket.CloseStatus(err)
+			}
+		}
+	}
+	login := func(name string) string {
+		t.Helper()
+		_, token, _, err := h.auth.Login(ctx, "198.51.100."+name[len(name)-1:], name, "correct horse battery")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
+
+	// Logout.
+	token := login("viewer1")
+	conn := open(token)
+	if err := h.auth.Logout(ctx, token); err != nil {
+		t.Fatal(err)
+	}
+	if code := closed(conn); code != websocket.StatusPolicyViolation {
+		t.Errorf("after logout the stream ended with %v, want a policy violation", code)
+	}
+
+	// Disabled account.
+	conn = open(login("viewer1"))
+	disabled := true
+	if _, err := h.auth.UpdateUser(ctx, admin, "viewer1", auth.UserChange{Disabled: &disabled}); err != nil {
+		t.Fatal(err)
+	}
+	if code := closed(conn); code != websocket.StatusPolicyViolation {
+		t.Errorf("after disabling the account the stream ended with %v, want a policy violation", code)
+	}
+
+	// A session that stays valid keeps its stream.
+	conn = open(adminToken)
+	readCtx, stop := context.WithTimeout(ctx, 400*time.Millisecond)
+	defer stop()
+	if _, _, err := conn.Read(readCtx); err == nil || websocket.CloseStatus(err) != -1 {
+		t.Errorf("a valid session lost its stream: %v", err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"sync/atomic"
 	"time"
 
@@ -83,6 +84,24 @@ type agent struct {
 	id     string
 	// updating is set while an update is being fetched.
 	updating atomic.Bool
+	// collecting is set while a metrics collection runs; stuckLogged keeps the
+	// log to one line per episode.
+	collecting  atomic.Bool
+	stuckLogged atomic.Bool
+}
+
+// stableAfter is how long a connection must have lasted for the next retry to
+// start again from the shortest delay.
+var stableAfter = 30 * time.Second
+
+// reconnectJitter spreads the retries of many agents: a wait is a random
+// time between half of the delay and all of it, so that agents that lost the
+// hub together (it restarted) do not come back together.
+var reconnectJitter = func(d time.Duration) time.Duration {
+	if d <= 1 {
+		return d
+	}
+	return d/2 + rand.N(d/2+1)
 }
 
 // Run connects to the hub over conn and serves it until ctx is cancelled, in
@@ -112,12 +131,22 @@ func Run(ctx context.Context, conn grpc.ClientConnInterface, opts Options) error
 
 	backoff := opts.MinBackoff
 	for {
+		started := time.Now()
 		established, err := a.session(ctx)
+		lived := time.Since(started)
 		if ctx.Err() != nil {
 			return nil
 		}
 		var rejected *RejectedError
-		if errors.As(err, &rejected) {
+		identityInUse := status.Code(err) == codes.AlreadyExists
+		if identityInUse {
+			// The hub closed this stream because a newer connection with the same
+			// identity took over: two machines hold one certificate (a cloned
+			// disk or virtual machine). Reconnecting at once would only throw the
+			// other one out in turn, forever, so wait the longest time.
+			backoff = opts.MaxBackoff
+			a.log.Warn("the hub has another connection with this agent's identity (a cloned machine?); waiting before trying again", "err", err, "retry_in", backoff)
+		} else if errors.As(err, &rejected) {
 			if !versionRejection(rejected.Reason) {
 				return err
 			}
@@ -128,11 +157,14 @@ func Run(ctx context.Context, conn grpc.ClientConnInterface, opts Options) error
 		} else {
 			a.log.Warn("connection to the hub lost", "err", err, "retry_in", backoff)
 		}
-		if established {
+		// Start over from the shortest delay only after a connection that held:
+		// one that the hub accepted and dropped at once is no better than one it
+		// refused, and retrying it every second would be a loop.
+		if established && lived >= stableAfter && !identityInUse {
 			backoff = opts.MinBackoff
 		}
 		select {
-		case <-time.After(backoff):
+		case <-time.After(reconnectJitter(backoff)):
 		case <-ctx.Done():
 			return nil
 		}
@@ -209,24 +241,41 @@ func (a *agent) session(ctx context.Context) (established bool, err error) {
 	// Results of commands that take a while and run beside the loop.
 	results := make(chan *agentv1.CommandResult, 4)
 
+	// When the hub has already ended the stream, a send fails with a bare EOF
+	// and the reason (a revocation, a newer connection with this identity) is
+	// what Recv reports; give the receiving goroutine a moment to deliver it.
+	sendErr := func(err error) error {
+		if errors.Is(err, io.EOF) {
+			select {
+			case rerr := <-recvErr:
+				return rerr
+			case <-time.After(time.Second):
+			}
+		}
+		return err
+	}
+
+	// Collected reports come back here; see startCollection.
+	reports := make(chan *agentv1.MetricsReport, 1)
+
 	// Report right away so the hub has data without waiting for a full interval.
 	if err := a.sendHeartbeat(stream); err != nil {
-		return true, err
+		return true, sendErr(err)
 	}
-	if err := a.sendMetrics(ctx, stream); err != nil {
-		return true, err
-	}
+	a.startCollection(ctx, reports)
 
 	// Only this goroutine sends on the stream, which gRPC requires.
 	for {
 		select {
 		case <-heartbeat.C:
 			if err := a.sendHeartbeat(stream); err != nil {
-				return true, err
+				return true, sendErr(err)
 			}
 		case <-metrics.C:
-			if err := a.sendMetrics(ctx, stream); err != nil {
-				return true, err
+			a.startCollection(ctx, reports)
+		case report := <-reports:
+			if err := stream.Send(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Metrics{Metrics: report}}); err != nil {
+				return true, sendErr(err)
 			}
 		case msg := <-msgs:
 			cmd := msg.GetCommand()
@@ -240,11 +289,11 @@ func (a *agent) session(ctx context.Context) (established bool, err error) {
 			}
 			res := a.runCommand(cmd, heartbeat, metrics)
 			if err := stream.Send(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_CommandResult{CommandResult: res}}); err != nil {
-				return true, err
+				return true, sendErr(err)
 			}
 		case res := <-results:
 			if err := stream.Send(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_CommandResult{CommandResult: res}}); err != nil {
-				return true, err
+				return true, sendErr(err)
 			}
 		case err := <-recvErr:
 			return true, err
@@ -279,17 +328,35 @@ func (a *agent) sendHeartbeat(stream agentv1.AgentService_ConnectClient) error {
 	}})
 }
 
-// sendMetrics collects and sends a report. A failing collector is logged and
-// skipped: it must not take the connection down.
-func (a *agent) sendMetrics(ctx context.Context, stream agentv1.AgentService_ConnectClient) error {
-	collectCtx, cancel := context.WithTimeout(ctx, collectTimeout)
-	defer cancel()
-	report, err := a.opts.Collector.Collect(collectCtx)
-	if err != nil {
-		a.log.Warn("collecting metrics failed", "err", err)
-		return nil
+// startCollection collects a report beside the loop and hands it back on
+// reports, where the loop sends it. The loop also sends the heartbeats, and a
+// collector that does not come back (a source stuck in the kernel) must not
+// stop them, or the hub would drop the agent as silent. While one collection
+// is still running the next is skipped, so stuck ones cannot pile up. A
+// failing collector is logged and skipped: it must not take the connection
+// down.
+func (a *agent) startCollection(ctx context.Context, reports chan<- *agentv1.MetricsReport) {
+	if !a.collecting.CompareAndSwap(false, true) {
+		if a.stuckLogged.CompareAndSwap(false, true) {
+			a.log.Warn("the previous metrics collection has not finished; skipping reports until it does")
+		}
+		return
 	}
-	return stream.Send(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Metrics{Metrics: report}})
+	go func() {
+		defer a.collecting.Store(false)
+		collectCtx, cancel := context.WithTimeout(ctx, collectTimeout)
+		defer cancel()
+		report, err := a.opts.Collector.Collect(collectCtx)
+		a.stuckLogged.Store(false)
+		if err != nil {
+			a.log.Warn("collecting metrics failed", "err", err)
+			return
+		}
+		select {
+		case reports <- report:
+		case <-ctx.Done():
+		}
+	}()
 }
 
 func (a *agent) runCommand(cmd *agentv1.Command, heartbeat, metrics *time.Ticker) *agentv1.CommandResult {

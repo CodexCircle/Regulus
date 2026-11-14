@@ -1,6 +1,6 @@
 # Hub promotion, redundancy and failover
 
-The guide to the result of the epic [#103](https://github.com/CodexCircle/Regulus/issues/103): promoting an agent into a hub, a redundant (standby) hub, and failover. It is **written as the design issues close**. Today it is a skeleton: nothing here is implemented, and most of it is not even designed yet.
+The guide to the result of the epic [#103](https://github.com/Stellatinus/Regulus/issues/103): promoting an agent into a hub, a redundant (standby) hub, and failover. It is **written as the design issues close**. Today it is a skeleton: nothing here is implemented, and most of it is not even designed yet.
 
 Each section has a **status line**:
 
@@ -23,7 +23,7 @@ Baseline decisions by the maintainer (#103): a single active hub at all times, s
 
 What does not exist in the code today: a list of hub addresses on the agent, the term concept, any replication, any role other than hub and agent. Checked on 2026-10-29.
 
-## 2. Roles and transitions ([#104](https://github.com/CodexCircle/Regulus/issues/104))
+## 2. Roles and transitions ([#104](https://github.com/Stellatinus/Regulus/issues/104))
 
 *Status: not designed.*
 
@@ -45,7 +45,7 @@ stateDiagram-v2
 
 *Draft, drawn from the list of transitions in #104 and the maintainer's decisions in #103. Not decided; the table with triggers and preconditions is the work of #104. The old hub returning after a failover is #110 and is not shown.*
 
-## 3. Promoting a node ([#105](https://github.com/CodexCircle/Regulus/issues/105))
+## 3. Promoting a node ([#105](https://github.com/Stellatinus/Regulus/issues/105))
 
 *Status: not designed.*
 
@@ -70,7 +70,7 @@ sequenceDiagram
 
 *Draft from the flow in #105. Not decided.*
 
-## 4. What the redundant hub replicates ([#106](https://github.com/CodexCircle/Regulus/issues/106))
+## 4. What the redundant hub replicates ([#106](https://github.com/Stellatinus/Regulus/issues/106))
 
 *Status: not designed.*
 
@@ -82,19 +82,19 @@ Open in #106: the inventory table (copied, regenerated, never copied), RPO and R
 |---|---|---|
 | *to be filled when #106 is decided* | | |
 
-## 5. Trust and the secure channel ([#107](https://github.com/CodexCircle/Regulus/issues/107))
+## 5. Trust and the secure channel ([#107](https://github.com/Stellatinus/Regulus/issues/107))
 
 *Status: not designed.*
 
 What exists today and the new design builds on ([architecture.md](architecture.md), section 3): a CA created by the hub, agents pinning its fingerprint, 5-year client certificates, no certificate renewal (#128). Open in #107: the trust model options, what agents pin when the hub changes, the hub-to-redundant channel (the existing gRPC with mutual TLS is the baseline), signed hub-change announcements with replay protection, promotion token security, certificate lifecycle and revocation of a retired hub, and the threat model. Raspberry Pi class hardware must be supported.
 
-## 6. Failure detection, terms and split-brain prevention ([#108](https://github.com/CodexCircle/Regulus/issues/108))
+## 6. Failure detection, terms and split-brain prevention ([#108](https://github.com/Stellatinus/Regulus/issues/108))
 
 *Status: not designed.*
 
-Maintainer rules (#103): terms (epochs) are accepted; keep a single active hub; **partition-tolerant operation is not supported** (it is in the backlog, [#113](https://github.com/CodexCircle/Regulus/issues/113)); the rule must prefer temporary unavailability over two active hubs. Open in #108: term semantics, which signals count as failure, the activation rule, how agents find the standby, fencing of a hub that learns of a higher term, flapping control, observability, and an end-to-end test plan. Defaults will be listed here when decided.
+Maintainer rules (#103): terms (epochs) are accepted; keep a single active hub; **partition-tolerant operation is not supported** (it is in the backlog, [#113](https://github.com/Stellatinus/Regulus/issues/113)); the rule must prefer temporary unavailability over two active hubs. Open in #108: term semantics, which signals count as failure, the activation rule, how agents find the standby, fencing of a hub that learns of a higher term, flapping control, observability, and an end-to-end test plan. Defaults will be listed here when decided.
 
-## 7. Changing the active hub ([#109](https://github.com/CodexCircle/Regulus/issues/109))
+## 7. Changing the active hub ([#109](https://github.com/Stellatinus/Regulus/issues/109))
 
 *Status: not designed.*
 
@@ -117,23 +117,23 @@ sequenceDiagram
 
 *Draft from "Part 2" of #109. Not decided.*
 
-## 8. The old hub returns ([#110](https://github.com/CodexCircle/Regulus/issues/110))
+## 8. The old hub returns ([#110](https://github.com/Stellatinus/Regulus/issues/110))
 
 *Status: not designed.* The issue says the meaning of *failback* is **not settled**; the maintainer's starting hypothesis is that the old primary knows it was not operative, contacts the redundant hub, realigns as its redundant until everything is copied, and control returns gradually. The issue proposes that the old hub starts fenced (read-only) and that failback is always approved by the administrator. This section, and its failback diagram, are written once the meaning is clarified.
 
-## 9. Agents without a hub, and workloads on hubs ([#111](https://github.com/CodexCircle/Regulus/issues/111))
+## 9. Agents without a hub, and workloads on hubs ([#111](https://github.com/Stellatinus/Regulus/issues/111))
 
 *Status: not designed.*
 
 Maintainer decisions (#103): containers on other nodes keep running if the hub dies, and those nodes lose only the functions that need a hub (to be inventoried); a hub may host containers **only when it is not a pure-hub**, with built-in orchestration modules (for example nginx or Tailscale) as the exception. Open: the inventory of hub-dependent functions, reconnection with an ordered hub list, local indication of "no hub since…", behaviour of expired certificates in a long outage, how pure-hub is enforced, the warning on non-pure hubs, and the supported minimum hardware.
 
-## 10. Out-of-band channel ([#112](https://github.com/CodexCircle/Regulus/issues/112))
+## 10. Out-of-band channel ([#112](https://github.com/Stellatinus/Regulus/issues/112))
 
 *Status: not designed.*
 
 A second channel (email, Telegram or another, to be chosen) is wanted for notifications and for manual override. Open: a small provider interface, proof that an incoming command is authentic (a chat account is not enough), no secrets in messages, independence from the failing hub, rate limiting, and the configuration screens in English and Italian.
 
-## 11. Not yet ([#113](https://github.com/CodexCircle/Regulus/issues/113))
+## 11. Not yet ([#113](https://github.com/Stellatinus/Regulus/issues/113))
 
 Parked on purpose: containers (runtime not decided), redundancy of a single container, more than one redundant hub with priority, microcontroller (ESP) hubs, other node types, and partition-tolerant operation.
 

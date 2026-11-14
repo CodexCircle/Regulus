@@ -14,7 +14,10 @@
 //   - apply.go, installer.go: the handover to the root helper. The hub writes
 //     a request naming a version into a directory it owns; a systemd path unit
 //     starts `regulus update-apply`, which checks everything again, installs,
-//     and rolls back if the new version does not come up healthy.
+//     and rolls back if the new version does not come up healthy. On a hub
+//     with SQLite it keeps a copy of the database before the swap and puts it
+//     back with the old program when the new version migrated the schema
+//     (pending.go also settles an update that the helper did not finish).
 //   - version.go, compat.go: version parsing and the rule of which agent
 //     versions a hub accepts.
 //

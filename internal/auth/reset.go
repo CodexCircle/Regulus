@@ -66,15 +66,16 @@ func (s *Service) issueReset(ctx context.Context, by string, target User, detail
 // the account and uses the token up. remote identifies the client for the
 // limit on failed attempts. It does not log the user in.
 func (s *Service) ResetPassword(ctx context.Context, remote, token, password string) error {
-	key := "reset:" + remote
-	if s.limited(key) {
+	att, allowed := s.begin(s.resetKey(remote))
+	if !allowed {
 		return ErrRateLimited
 	}
+	defer att.abandon()
 	if n := utf8.RuneCountInString(password); n < minPasswordLen || n > maxPasswordLen {
 		return &inputError{fmt.Sprintf("the new password must be %d to %d characters", minPasswordLen, maxPasswordLen)}
 	}
 	if token == "" || len(token) > maxResetTokenLen {
-		s.recordFailure(key)
+		att.failed()
 		return ErrInvalidReset
 	}
 	hash := hashToken(token)
@@ -83,7 +84,7 @@ func (s *Service) ResetPassword(ctx context.Context, remote, token, password str
 		return err
 	}
 	if !ok {
-		s.recordFailure(key)
+		att.failed()
 		return ErrInvalidReset
 	}
 	// Hash before using the token up, so a failure here keeps it valid.
@@ -94,7 +95,7 @@ func (s *Service) ResetPassword(ctx context.Context, remote, token, password str
 	id, err := s.store.takeReset(ctx, hash, s.now())
 	if err != nil {
 		if errors.Is(err, ErrInvalidReset) {
-			s.recordFailure(key)
+			att.failed()
 		}
 		return err
 	}
@@ -111,7 +112,7 @@ func (s *Service) ResetPassword(ctx context.Context, remote, token, password str
 	if err := s.store.deleteSessionsOf(ctx, id, ""); err != nil {
 		return err
 	}
-	s.clearFailures(key)
+	att.succeeded()
 	s.audit(ctx, user.Username, EventPasswordReset, user.Username, "reset link used, sessions ended")
 	return nil
 }

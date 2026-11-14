@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -29,6 +31,48 @@ const (
 
 var b64 = base64.RawStdEncoding
 
+const (
+	// maxConcurrentHashes bounds the argon2 runs at the same moment. Each one
+	// takes 19 MiB, and logins come from anyone who can reach the hub, so
+	// without a bound a few thousand parallel requests would use gigabytes.
+	maxConcurrentHashes = 4
+)
+
+// hashWait is how long a request waits for a free slot before it is told the
+// server is busy (a variable so that a test need not wait that long).
+var hashWait = 5 * time.Second
+
+// ErrBusy means too many passwords are being checked at once.
+var ErrBusy = errors.New("the server is busy checking passwords, try again in a moment")
+
+var (
+	hashSlots   = make(chan struct{}, maxConcurrentHashes)
+	hashRunning atomic.Int32 // for tests: how many run now
+	hashPeak    atomic.Int32 // for tests: the most that ran together
+)
+
+// acquireHash takes one of the slots, or fails with ErrBusy after hashWait.
+func acquireHash() (release func(), err error) {
+	timer := time.NewTimer(hashWait)
+	defer timer.Stop()
+	select {
+	case hashSlots <- struct{}{}:
+	case <-timer.C:
+		return nil, ErrBusy
+	}
+	n := hashRunning.Add(1)
+	for {
+		peak := hashPeak.Load()
+		if n <= peak || hashPeak.CompareAndSwap(peak, n) {
+			break
+		}
+	}
+	return func() {
+		hashRunning.Add(-1)
+		<-hashSlots
+	}, nil
+}
+
 // HashPassword returns the argon2id hash of password in the PHC string format,
 // for example $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>.
 func HashPassword(password string) (string, error) {
@@ -36,7 +80,12 @@ func HashPassword(password string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("generate salt: %w", err)
 	}
+	release, err := acquireHash()
+	if err != nil {
+		return "", err
+	}
 	key := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	release()
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argon2.Version, argonMemory, argonTime, argonThreads, b64.EncodeToString(salt), b64.EncodeToString(key)), nil
 }
@@ -68,6 +117,11 @@ func VerifyPassword(encoded, password string) (bool, error) {
 	if err != nil || len(want) == 0 {
 		return false, errors.New("invalid hash")
 	}
+	release, err := acquireHash()
+	if err != nil {
+		return false, err
+	}
 	got := argon2.IDKey([]byte(password), salt, time, memory, threads, uint32(len(want)))
+	release()
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }

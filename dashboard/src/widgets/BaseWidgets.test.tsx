@@ -143,6 +143,17 @@ describe("built-in widgets", () => {
     expect(within(row).getByText("2.0 KiB/s")).toBeInTheDocument();
   });
 
+  it("network total does not count bridges and container ports twice", async () => {
+    const nic = (name: string, rate: number) => ({ interface: name, rx_bytes: 1, tx_bytes: 1, rx_bytes_per_sec: rate, tx_bytes_per_sec: rate });
+    // 1 KiB/s really crosses eth0; the same bytes also show on docker0 and the veth port.
+    mockHub({ history: { local: [point(0, { networks: [nic("eth0", 1024), nic("docker0", 1024), nic("veth1a2b", 1024)] })] } });
+    await show(<NetworkWidget {...props()} />);
+    expect(screen.getByText("↓ 1.0 KiB/s")).toBeInTheDocument();
+    // The table still lists every interface.
+    expect(screen.getByRole("row", { name: /docker0/ })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /veth1a2b/ })).toBeInTheDocument();
+  });
+
   it("network shows dashes while rates are not known yet", async () => {
     mockHub({
       history: { local: [point(0, { networks: [{ interface: "eth0", rx_bytes: 1, tx_bytes: 1, rx_bytes_per_sec: null, tx_bytes_per_sec: null }] })] },

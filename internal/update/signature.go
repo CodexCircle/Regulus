@@ -24,8 +24,17 @@ const VerifiedSignature = "signature"
 // workflow, at the tag of the release (see .goreleaser.yaml and release.yml).
 const (
 	signerIssuer   = "https://token.actions.githubusercontent.com"
-	signerWorkflow = "https://github.com/CodexCircle/Regulus/.github/workflows/release.yml@refs/tags/"
+	signerWorkflow = "https://github.com/" + Repository + "/.github/workflows/release.yml@refs/tags/"
 )
+
+// Repository is the GitHub repository ("owner/name") that publishes releases.
+// It is the one place that names it in Go code: the release feed, the
+// signature identity and the links shown in the dashboard follow it. After a
+// move of the repository, change this, packaging/install.sh (REPO) and the
+// links in the documents (TestNoStaleRepositoryName finds the ones left
+// behind). A signature made from any other repository is refused, so
+// binaries built before a move cannot install releases published after it.
+const Repository = "Stellatinus/Regulus"
 
 // Verifier checks the signature of a release's checksums.txt.
 type Verifier interface {

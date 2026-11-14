@@ -2,6 +2,7 @@ import { Chart } from "../Chart";
 import { useT } from "../i18n";
 import { formatBytes, formatDuration, formatPercent, formatRate } from "../format";
 import type { MetricsPoint } from "../api";
+import { countedInterfaces } from "../networkInterfaces";
 import { AgentView, Waiting } from "./AgentView";
 import type { WidgetProps } from "./registry";
 
@@ -172,8 +173,10 @@ export function NetworkWidget(props: WidgetProps) {
     <AgentView {...props}>
       {({ points, latest }) => {
         if (!latest) return <Waiting />;
-        const down = points.map((p) => total(p.networks.map((n) => n.rx_bytes_per_sec)));
-        const up = points.map((p) => total(p.networks.map((n) => n.tx_bytes_per_sec)));
+        // The total leaves out bridges, container ports and tunnels, whose bytes
+        // are already counted on the physical interface; the table lists all.
+        const down = points.map((p) => total(countedInterfaces(p.networks).map((n) => n.rx_bytes_per_sec)));
+        const up = points.map((p) => total(countedInterfaces(p.networks).map((n) => n.tx_bytes_per_sec)));
         return (
           <>
             <Stat

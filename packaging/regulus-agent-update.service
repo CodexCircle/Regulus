@@ -1,6 +1,6 @@
 [Unit]
 Description=Install a Regulus agent update (checks its signature, keeps the old version for a rollback)
-Documentation=https://github.com/CodexCircle/Regulus
+Documentation=https://github.com/Stellatinus/Regulus
 # Started by regulus-agent-update.path; not meant to be enabled.
 
 [Service]
@@ -11,6 +11,14 @@ Type=oneshot
 # workflow). The new agent is healthy when it connects to the hub again.
 ExecStart=/usr/bin/regulus update-apply --agent --data-dir /var/lib/regulus-agent --state-dir /var/lib/regulus-update --unit regulus-agent.service
 TimeoutStartSec=20min
+# A stop (systemctl stop, a shutdown) must not cut the helper off in the middle
+# of putting the old version back: the rollback has its own time.
+TimeoutStopSec=5min
+# Whatever ended the helper (killed, timed out, stopped), a leftover marker of
+# an update in flight is settled now: the new version is checked or the old one
+# is put back. "+" runs it with full privileges, outside the sandbox below; it
+# does nothing when the update finished normally.
+ExecStopPost=+/usr/bin/regulus update-apply --recover --state-dir /var/lib/regulus-update
 StateDirectory=regulus-update
 StateDirectoryMode=0700
 UMask=0077

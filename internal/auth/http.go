@@ -185,6 +185,9 @@ func (s *Service) finishLogin(w http.ResponseWriter, r *http.Request, user User,
 	case errors.Is(err, ErrRateLimited):
 		w.Header().Set("Retry-After", "900")
 		writeError(w, http.StatusTooManyRequests, err.Error())
+	case errors.Is(err, ErrBusy):
+		w.Header().Set("Retry-After", "5")
+		writeError(w, http.StatusServiceUnavailable, err.Error())
 	case errors.Is(err, ErrBadSetupToken):
 		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, ErrSetupDone):
