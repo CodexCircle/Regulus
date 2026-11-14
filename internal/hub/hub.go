@@ -222,6 +222,11 @@ func (h *Hub) Close() error {
 
 // Serve serves HTTP on ln until ctx is cancelled, then shuts down gracefully.
 func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
+	// The background work below stops with ctx. When the HTTP server fails by
+	// itself nobody cancels the caller's context, so Serve must: otherwise it
+	// would wait for that work forever instead of returning the error.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	srv := &http.Server{
 		Handler:           NewHandler(Deps{UI: h.ui, Agents: h, Layouts: h, Log: h.log, Auth: h.auth, Fleet: h, Updates: h.updates, Rollout: h, Version: h.version, DatabaseProblem: h.dbState.get}),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -291,13 +296,14 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 
 	select {
 	case err := <-errc:
+		cancel() // before the deferred waits for the background work
 		return err
 	case <-ctx.Done():
 	}
 
 	h.log.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-	defer cancel()
+	shutdownCtx, stopShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer stopShutdown()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
