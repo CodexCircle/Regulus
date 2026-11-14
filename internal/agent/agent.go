@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"sync/atomic"
 	"time"
 
@@ -89,6 +90,20 @@ type agent struct {
 	stuckLogged atomic.Bool
 }
 
+// stableAfter is how long a connection must have lasted for the next retry to
+// start again from the shortest delay.
+var stableAfter = 30 * time.Second
+
+// reconnectJitter spreads the retries of many agents: a wait is a random
+// time between half of the delay and all of it, so that agents that lost the
+// hub together (it restarted) do not come back together.
+var reconnectJitter = func(d time.Duration) time.Duration {
+	if d <= 1 {
+		return d
+	}
+	return d/2 + rand.N(d/2+1)
+}
+
 // Run connects to the hub over conn and serves it until ctx is cancelled, in
 // which case it returns nil. Connection failures are retried with exponential
 // backoff; a rejection by the hub is returned as a *RejectedError.
@@ -116,12 +131,22 @@ func Run(ctx context.Context, conn grpc.ClientConnInterface, opts Options) error
 
 	backoff := opts.MinBackoff
 	for {
+		started := time.Now()
 		established, err := a.session(ctx)
+		lived := time.Since(started)
 		if ctx.Err() != nil {
 			return nil
 		}
 		var rejected *RejectedError
-		if errors.As(err, &rejected) {
+		identityInUse := status.Code(err) == codes.AlreadyExists
+		if identityInUse {
+			// The hub closed this stream because a newer connection with the same
+			// identity took over: two machines hold one certificate (a cloned
+			// disk or virtual machine). Reconnecting at once would only throw the
+			// other one out in turn, forever, so wait the longest time.
+			backoff = opts.MaxBackoff
+			a.log.Warn("the hub has another connection with this agent's identity (a cloned machine?); waiting before trying again", "err", err, "retry_in", backoff)
+		} else if errors.As(err, &rejected) {
 			if !versionRejection(rejected.Reason) {
 				return err
 			}
@@ -132,11 +157,14 @@ func Run(ctx context.Context, conn grpc.ClientConnInterface, opts Options) error
 		} else {
 			a.log.Warn("connection to the hub lost", "err", err, "retry_in", backoff)
 		}
-		if established {
+		// Start over from the shortest delay only after a connection that held:
+		// one that the hub accepted and dropped at once is no better than one it
+		// refused, and retrying it every second would be a loop.
+		if established && lived >= stableAfter && !identityInUse {
 			backoff = opts.MinBackoff
 		}
 		select {
-		case <-time.After(backoff):
+		case <-time.After(reconnectJitter(backoff)):
 		case <-ctx.Done():
 			return nil
 		}
@@ -213,12 +241,26 @@ func (a *agent) session(ctx context.Context) (established bool, err error) {
 	// Results of commands that take a while and run beside the loop.
 	results := make(chan *agentv1.CommandResult, 4)
 
+	// When the hub has already ended the stream, a send fails with a bare EOF
+	// and the reason (a revocation, a newer connection with this identity) is
+	// what Recv reports; give the receiving goroutine a moment to deliver it.
+	sendErr := func(err error) error {
+		if errors.Is(err, io.EOF) {
+			select {
+			case rerr := <-recvErr:
+				return rerr
+			case <-time.After(time.Second):
+			}
+		}
+		return err
+	}
+
 	// Collected reports come back here; see startCollection.
 	reports := make(chan *agentv1.MetricsReport, 1)
 
 	// Report right away so the hub has data without waiting for a full interval.
 	if err := a.sendHeartbeat(stream); err != nil {
-		return true, err
+		return true, sendErr(err)
 	}
 	a.startCollection(ctx, reports)
 
@@ -227,13 +269,13 @@ func (a *agent) session(ctx context.Context) (established bool, err error) {
 		select {
 		case <-heartbeat.C:
 			if err := a.sendHeartbeat(stream); err != nil {
-				return true, err
+				return true, sendErr(err)
 			}
 		case <-metrics.C:
 			a.startCollection(ctx, reports)
 		case report := <-reports:
 			if err := stream.Send(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Metrics{Metrics: report}}); err != nil {
-				return true, err
+				return true, sendErr(err)
 			}
 		case msg := <-msgs:
 			cmd := msg.GetCommand()
@@ -247,11 +289,11 @@ func (a *agent) session(ctx context.Context) (established bool, err error) {
 			}
 			res := a.runCommand(cmd, heartbeat, metrics)
 			if err := stream.Send(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_CommandResult{CommandResult: res}}); err != nil {
-				return true, err
+				return true, sendErr(err)
 			}
 		case res := <-results:
 			if err := stream.Send(&agentv1.AgentMessage{Payload: &agentv1.AgentMessage_CommandResult{CommandResult: res}}); err != nil {
-				return true, err
+				return true, sendErr(err)
 			}
 		case err := <-recvErr:
 			return true, err
