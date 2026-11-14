@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -39,7 +40,27 @@ type LinuxCollector struct {
 
 	mu      sync.Mutex
 	prevCPU cpuTimes
+
+	// statTimeout is how long a report waits for the disks. A filesystem that
+	// does not answer (a network mount whose server is gone, dead storage) can
+	// block statfs for as long as it stays that way, in a state no signal
+	// ends; the report goes out without it.
+	statTimeout time.Duration
+	statMu      sync.Mutex
+	stats       map[string]*statJob // statfs calls that were started and not collected yet, by mount point
+	hung        map[string]bool     // mounts already reported as not answering
 }
+
+// statJob is one statfs call, run on its own goroutine.
+type statJob struct {
+	done        chan struct{}
+	total, used uint64
+	err         error
+}
+
+// defaultStatTimeout is well below the heartbeat interval times the number of
+// missed heartbeats the hub tolerates.
+const defaultStatTimeout = 2 * time.Second
 
 // NewLinuxCollector returns a collector that reads /proc.
 func NewLinuxCollector() *LinuxCollector {
@@ -47,7 +68,7 @@ func NewLinuxCollector() *LinuxCollector {
 }
 
 func newLinuxCollector(proc string, statfs statfsFunc) *LinuxCollector {
-	c := &LinuxCollector{proc: proc, statfs: statfs}
+	c := &LinuxCollector{proc: proc, statfs: statfs, statTimeout: defaultStatTimeout, stats: map[string]*statJob{}, hung: map[string]bool{}}
 	if t, err := parseCPUTimes(c.read("stat")); err == nil {
 		c.prevCPU = t
 	}
@@ -97,17 +118,91 @@ func (c *LinuxCollector) Collect(context.Context) (*agentv1.MetricsReport, error
 }
 
 func (c *LinuxCollector) disks() []*agentv1.DiskMetrics {
+	mounts := parseMounts(c.read("mounts"))
+	// Ask every mount at the same time and wait for all of them, once, up to
+	// statTimeout: the report takes as long as the slowest answer, or that
+	// limit, not the sum of them.
+	jobs := make([]*statJob, len(mounts))
+	for i, m := range mounts {
+		jobs[i] = c.startStat(m.mountPoint)
+	}
+	deadline := time.NewTimer(c.statTimeout)
+	defer deadline.Stop()
 	var disks []*agentv1.DiskMetrics
-	for _, m := range parseMounts(c.read("mounts")) {
-		total, used, err := c.statfs(m.mountPoint)
-		if err != nil || total == 0 {
+	expired := false
+	for i, m := range mounts {
+		job := jobs[i]
+		if job == nil {
+			continue // still stuck from an earlier report
+		}
+		if !expired {
+			select {
+			case <-job.done:
+			case <-deadline.C:
+				expired = true
+			}
+		}
+		select {
+		case <-job.done:
+			c.finishStat(m.mountPoint, job)
+		default:
+			c.noteHung(m.mountPoint)
+			continue
+		}
+		if job.err != nil || job.total == 0 {
 			continue
 		}
 		disks = append(disks, &agentv1.DiskMetrics{
-			MountPoint: m.mountPoint, Filesystem: m.fsType, TotalBytes: total, UsedBytes: used,
+			MountPoint: m.mountPoint, Filesystem: m.fsType, TotalBytes: job.total, UsedBytes: job.used,
 		})
 	}
 	return disks
+}
+
+// startStat starts statfs on the mount, unless an earlier call on it has not
+// returned: another call would only add one more stuck thread per report. It
+// returns nil in that case, and the mount is left out of the report until the
+// earlier call returns.
+func (c *LinuxCollector) startStat(mount string) *statJob {
+	c.statMu.Lock()
+	defer c.statMu.Unlock()
+	if old := c.stats[mount]; old != nil {
+		select {
+		case <-old.done: // it came back since: its answer is stale, ask again
+			delete(c.stats, mount)
+			delete(c.hung, mount)
+		default:
+			return nil
+		}
+	}
+	job := &statJob{done: make(chan struct{})}
+	c.stats[mount] = job
+	go func() {
+		job.total, job.used, job.err = c.statfs(mount)
+		close(job.done)
+	}()
+	return job
+}
+
+// finishStat forgets a call whose answer was used.
+func (c *LinuxCollector) finishStat(mount string, job *statJob) {
+	c.statMu.Lock()
+	defer c.statMu.Unlock()
+	if c.stats[mount] == job {
+		delete(c.stats, mount)
+		delete(c.hung, mount)
+	}
+}
+
+// noteHung says once per stuck mount that it is left out of the reports.
+func (c *LinuxCollector) noteHung(mount string) {
+	c.statMu.Lock()
+	first := !c.hung[mount]
+	c.hung[mount] = true
+	c.statMu.Unlock()
+	if first {
+		slog.Warn("a mounted filesystem does not answer; it is left out of the reports until it does", "mount", mount)
+	}
 }
 
 // cpuTimes are the cumulative jiffies of the aggregate "cpu" line of /proc/stat.

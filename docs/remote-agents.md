@@ -28,3 +28,7 @@ An agent is a remote machine, and one that is compromised or buggy must not be a
 | Reports | one per half of the metrics interval | the extra reports are dropped (logged once per stream) |
 
 With one report per interval and one hour of history, a single agent keeps at most about 50 KB per report times the number of reports of that hour (for example about 36 MB at the 10 s default in the worst case, a normal host uses a few hundred bytes per report). The hub does not yet keep a global memory budget across agents; the dashboard port also has header and idle limits (`internal/hub/hub.go`).
+
+## When a disk or the collector does not answer
+
+A network or storage mount whose server is gone can block `statfs` for as long as it stays that way, and no signal ends the call. The agent therefore asks every mount at the same time, waits up to **2 seconds** in total, and sends the report **without the mounts that did not answer** (one warning in the log per mount); a mount that is still stuck is not asked again (a new call per report would only pile up stuck threads) and comes back in the reports as soon as it answers. The whole collection also runs beside the loop that sends the heartbeats: while one is still running the next is skipped, so a collector that never returns costs reports, never the connection (the hub drops an agent that stops sending heartbeats). To try it on a real machine see the `[Test]` issue for hung mounts.
