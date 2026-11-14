@@ -224,6 +224,29 @@ type networkJSON struct {
 	TxBytesPerSec *float64 `json:"tx_bytes_per_sec"`
 }
 
+// maxRateGap is the longest time between two reports over which a rate is
+// still computed. A longer one (the agent was away, the machine slept) says
+// nothing about the speed now: the point has no rate rather than a made-up one.
+const maxRateGap = 5 * time.Minute
+
+// rateInterval is the time, in seconds, that the counters of two reports
+// cover, or 0 when no rate can be computed. It is measured between the times
+// the agent took the two reports, not between the times the hub received
+// them: a stall on the way delivers two reports a millisecond apart, and
+// dividing ten seconds of traffic by that is a spike a thousand times too
+// high. Reports without a time (an older agent) fall back to the receive
+// times.
+func rateInterval(s, prev MetricsSample) float64 {
+	d := s.At.Sub(prev.At)
+	if a, b := s.Report.GetCollectedAt(), prev.Report.GetCollectedAt(); a.IsValid() && b.IsValid() {
+		d = a.AsTime().Sub(b.AsTime())
+	}
+	if d <= 0 || d > maxRateGap {
+		return 0
+	}
+	return d.Seconds()
+}
+
 func toPoints(samples []MetricsSample) []pointJSON {
 	points := make([]pointJSON, 0, len(samples))
 	var prev *MetricsSample
@@ -258,7 +281,7 @@ func toPoint(s MetricsSample, prev *MetricsSample) pointJSON {
 	var before map[string]*agentv1.NetworkMetrics
 	var seconds float64
 	if prev != nil {
-		seconds = s.At.Sub(prev.At).Seconds()
+		seconds = rateInterval(s, *prev)
 		before = map[string]*agentv1.NetworkMetrics{}
 		for _, n := range prev.Report.GetNetworks() {
 			before[n.GetInterface()] = n
