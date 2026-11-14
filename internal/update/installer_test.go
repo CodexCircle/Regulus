@@ -398,3 +398,183 @@ func mustSymlink(t *testing.T, target, path string) {
 		t.Fatal(err)
 	}
 }
+
+func (f *installFixture) pendingMarker() (Pending, bool) {
+	data, err := os.ReadFile(filepath.Join(f.in.StateDir, pendingName))
+	if err != nil {
+		return Pending{}, false
+	}
+	var p Pending
+	return p, json.Unmarshal(data, &p) == nil
+}
+
+// While the new version is being started the marker says what is in flight,
+// and it is gone once the update ended, applied or rolled back.
+func TestInstallerRecordsTheUpdateInFlight(t *testing.T) {
+	for name, healthy := range map[string]func(string) bool{
+		"applied":     func(string) bool { return true },
+		"rolled back": func(v string) bool { return v != "0.2.0" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+			f.healthy = healthy
+			run := f.in.Run
+			var seen Pending
+			var seenOK bool
+			f.in.Run = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
+				if cmd == "systemctl" && len(args) > 0 && args[0] == "restart" && !seenOK {
+					seen, seenOK = f.pendingMarker()
+				}
+				return run(ctx, cmd, args...)
+			}
+			f.request(t, "0.2.0")
+			if _, err := f.in.Apply(t.Context()); name == "applied" && err != nil {
+				t.Fatal(err)
+			}
+			if !seenOK || seen.From != "0.1.0" || seen.To != "0.2.0" || seen.Unit != "regulus.service" || filepath.Base(seen.Backup) != backupName {
+				t.Errorf("marker at the first restart = %+v (found %v)", seen, seenOK)
+			}
+			if _, ok := f.pendingMarker(); ok {
+				t.Error("the marker was left behind")
+			}
+		})
+	}
+}
+
+// A stop request or the helper's time limit cancels its context in the middle
+// of the watch. The old version must still be put back, and the service
+// restarted on it.
+func TestInstallerRollsBackEvenWhenItIsToldToStop(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	run := f.in.Run
+	restarts := 0
+	f.in.Run = func(c context.Context, cmd string, args ...string) ([]byte, error) {
+		if cmd == "systemctl" && len(args) > 0 && args[0] == "restart" {
+			restarts++
+			if restarts == 1 {
+				stop() // SIGTERM arrives while the new version starts
+				return nil, nil
+			}
+			if err := c.Err(); err != nil {
+				return nil, err // what a cancelled context does to the real command
+			}
+		}
+		return run(c, cmd, args...)
+	}
+	f.healthy = func(v string) bool { return v != "0.2.0" }
+	f.request(t, "0.2.0")
+
+	res, _ := f.in.Apply(ctx)
+	if res.Outcome != OutcomeRolledBack {
+		t.Errorf("outcome = %q (%s), want %q", res.Outcome, res.Message, OutcomeRolledBack)
+	}
+	if got := f.installed(t); got != "0.1.0" {
+		t.Errorf("the binary on disk is %q", got)
+	}
+	if restarts != 2 {
+		t.Errorf("restarts = %d: the service must be restarted on the old version too", restarts)
+	}
+	if _, ok := f.pendingMarker(); ok {
+		t.Error("the marker was left behind")
+	}
+}
+
+// interrupted builds the state a killed helper leaves: the previous binary
+// kept in the state directory, a marker, and whatever is on disk as the
+// executable.
+func (f *installFixture) interrupted(t *testing.T, onDisk string) {
+	t.Helper()
+	backup := filepath.Join(f.in.StateDir, backupName)
+	mustWrite(t, backup, []byte("0.1.0"))
+	if err := f.in.writePending(Pending{From: "0.1.0", To: "0.2.0", Backup: backup, Unit: "regulus.service", DataDir: f.dataDir, Started: f.in.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, f.binary, []byte(onDisk))
+}
+
+func TestRecoverSettlesAnInterruptedUpdate(t *testing.T) {
+	for name, tc := range map[string]struct {
+		onDisk   string
+		healthy  func(string) bool
+		wantOut  string
+		wantBin  string
+		wantFail bool
+	}{
+		"the new version is in place and healthy": {"0.2.0", func(string) bool { return true }, OutcomeApplied, "0.2.0", false},
+		"the new version is in place and broken":  {"0.2.0", func(v string) bool { return v != "0.2.0" }, OutcomeRolledBack, "0.1.0", true},
+		"the file is empty (power cut)":           {"", func(string) bool { return true }, OutcomeRolledBack, "0.1.0", true},
+		"the file is garbage":                     {"half a binary", func(string) bool { return true }, OutcomeRolledBack, "0.1.0", true},
+		"the swap never happened":                 {"0.1.0", func(string) bool { return true }, OutcomeFailed, "0.1.0", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+			f.healthy = tc.healthy
+			f.interrupted(t, tc.onDisk)
+
+			res, did, err := f.in.Recover(t.Context())
+			if !did {
+				t.Fatal("the marker was not found")
+			}
+			if res.Outcome != tc.wantOut || (err != nil) != tc.wantFail {
+				t.Errorf("result = %+v, err = %v, want outcome %q (error: %v)", res, err, tc.wantOut, tc.wantFail)
+			}
+			if got := f.installed(t); got != tc.wantBin {
+				t.Errorf("the executable is %q, want %q", got, tc.wantBin)
+			}
+			if _, ok := f.pendingMarker(); ok {
+				t.Error("the marker is still there: it would start the helper again")
+			}
+			if r, ok := ReadResult(ApplyDir(f.dataDir)); !ok || r.Outcome != tc.wantOut || r.Version != "0.2.0" || r.From != "0.1.0" {
+				t.Errorf("result for the hub = %+v (found %v)", r, ok)
+			}
+			// Settling twice does nothing.
+			if _, did, _ := f.in.Recover(t.Context()); did {
+				t.Error("a second run found a marker")
+			}
+		})
+	}
+}
+
+func TestRecoverWithoutAMarkerDoesNothing(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	if _, did, err := f.in.Recover(t.Context()); did || err != nil {
+		t.Errorf("did = %v, err = %v", did, err)
+	}
+	if _, ok := ReadResult(ApplyDir(f.dataDir)); ok {
+		t.Error("a result was written without a marker")
+	}
+}
+
+// The marker is in root's directory, but it is still checked: it names the
+// file that is copied over the executable.
+func TestRecoverRefusesAMarkerThatPointsElsewhere(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	elsewhere := filepath.Join(t.TempDir(), "evil")
+	mustWrite(t, elsewhere, []byte("evil"))
+	if err := f.in.writePending(Pending{From: "0.1.0", To: "0.2.0", Backup: elsewhere, Unit: "regulus.service", DataDir: f.dataDir}); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, f.binary, []byte(""))
+	if _, did, err := f.in.Recover(t.Context()); !did || err == nil {
+		t.Errorf("did = %v, err = %v, want an error", did, err)
+	}
+	if got := f.installed(t); got == "evil" {
+		t.Error("a file from outside the state directory was installed")
+	}
+	if _, ok := f.pendingMarker(); ok {
+		t.Error("the marker is still there")
+	}
+}
+
+func TestRecoverRemovesAnUnreadableMarker(t *testing.T) {
+	f := newInstallFixture(t, "0.1.0", "0.2.0", nil)
+	mustWrite(t, filepath.Join(f.in.StateDir, pendingName), []byte("{"))
+	if _, did, err := f.in.Recover(t.Context()); !did || err == nil {
+		t.Errorf("did = %v, err = %v, want an error", did, err)
+	}
+	if _, err := os.Lstat(filepath.Join(f.in.StateDir, pendingName)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the marker is still there: %v", err)
+	}
+}

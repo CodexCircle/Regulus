@@ -199,23 +199,47 @@ func (in *Installer) Apply(ctx context.Context) (ApplyResult, error) {
 		return finish(OutcomeFailed, fmt.Errorf("the new binary does not report version %s (got %q, %v)", want, strings.TrimSpace(string(out)), err))
 	}
 
-	backup := filepath.Join(in.StateDir, "regulus.previous")
+	backup := filepath.Join(in.StateDir, backupName)
 	if err := copyExecutable(in.Binary, backup); err != nil {
 		return finish(OutcomeFailed, fmt.Errorf("keeping the current binary for a rollback: %w", err))
 	}
+	syncDir(in.StateDir, in.Log)
+	// Written before the swap: if this helper is killed from here on, whoever
+	// runs next knows an update was in flight and what to put back (Recover).
+	if err := in.writePending(Pending{From: from.String(), To: want.String(), Backup: backup, Unit: in.Unit, Agent: in.Agent, DataDir: in.DataDir, Started: in.Now().UTC()}); err != nil {
+		return finish(OutcomeFailed, fmt.Errorf("recording the update in progress: %w", err))
+	}
 	if err := os.Rename(candidate, in.Binary); err != nil {
+		in.clearPending()
 		return finish(OutcomeFailed, err)
 	}
+	syncDir(binDir, in.Log)
 	in.Log.Info("binary replaced; restarting", "unit", in.Unit, "from", from, "to", want)
 
 	if err := in.restartAndWatch(ctx, want.String()); err != nil {
 		in.Log.Error("the new version is not healthy; rolling back", "err", err)
-		if rerr := in.rollback(ctx, backup, from.String()); rerr != nil {
+		// A stop request or the helper's own timeout cancels ctx, and that must
+		// not leave the new version in place: the rollback has its own time.
+		rctx, cancel := in.rollbackContext(ctx)
+		defer cancel()
+		if rerr := in.rollback(rctx, backup, from.String()); rerr != nil {
+			// The marker stays: Recover tries once more.
 			return finish(OutcomeFailed, fmt.Errorf("%v; and putting %s back failed: %v", err, from, rerr))
 		}
+		in.clearPending()
 		return finish(OutcomeRolledBack, fmt.Errorf("%v; version %s was put back", err, from))
 	}
+	in.clearPending()
 	return finish(OutcomeApplied, nil)
+}
+
+// backupName is the copy of the previous executable in the state directory.
+const backupName = "regulus.previous"
+
+// rollbackContext is a context for undoing an update that does not end when
+// ctx does, but is bounded.
+func (in *Installer) rollbackContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 2*in.HealthTimeout+30*time.Second)
 }
 
 func (in *Installer) installedVersion(ctx context.Context) (Version, error) {
@@ -332,6 +356,7 @@ func (in *Installer) rollback(ctx context.Context, backup, want string) error {
 	if err := os.Rename(tmp, in.Binary); err != nil {
 		return err
 	}
+	syncDir(filepath.Dir(in.Binary), in.Log)
 	since := in.Now()
 	if _, err := in.Run(ctx, "systemctl", "restart", in.Unit); err != nil {
 		return err
@@ -415,6 +440,9 @@ func extractBinary(archive, dest string) error {
 			return err
 		}
 		n, err := io.Copy(out, io.LimitReader(tr, maxBinary+1))
+		if err == nil {
+			err = out.Sync() // the file must be on disk before it is renamed over the executable
+		}
 		if cerr := out.Close(); err == nil {
 			err = cerr
 		}

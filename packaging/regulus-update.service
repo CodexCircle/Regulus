@@ -10,6 +10,14 @@ Type=oneshot
 # again here (Sigstore signature of checksums.txt by the release workflow).
 ExecStart=/usr/bin/regulus update-apply --data-dir /var/lib/regulus --state-dir /var/lib/regulus-update --unit regulus.service
 TimeoutStartSec=20min
+# A stop (systemctl stop, a shutdown) must not cut the helper off in the middle
+# of putting the old version back: the rollback has its own time.
+TimeoutStopSec=5min
+# Whatever ended the helper (killed, timed out, stopped), a leftover marker of
+# an update in flight is settled now: the new version is checked or the old one
+# is put back. "+" runs it with full privileges, outside the sandbox below; it
+# does nothing when the update finished normally.
+ExecStopPost=+/usr/bin/regulus update-apply --recover --state-dir /var/lib/regulus-update
 StateDirectory=regulus-update
 StateDirectoryMode=0700
 UMask=0077
