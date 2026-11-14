@@ -449,7 +449,7 @@ func apiRoutes(d Deps) []route {
 		{pattern: "GET /api/agents/{id}/metrics", handler: need(auth.PermServersRead, metricsHandler(d.Agents))},
 		{pattern: "GET /api/layout", handler: http.HandlerFunc(h.get)},
 		{pattern: "PUT /api/layout", handler: need(auth.PermLayoutEdit, auth.RequireJSON(http.HandlerFunc(h.put)))},
-		{pattern: "GET /api/stream", handler: need(auth.PermServersRead, streamHandler(d.Agents))},
+		{pattern: "GET /api/stream", handler: need(auth.PermServersRead, streamHandler(d.Agents, stillAllowed(d.Auth, auth.PermServersRead)))},
 		{pattern: "GET /api/agents/listener", handler: need(auth.PermServersRead, http.HandlerFunc(l.get)), needsAuth: true},
 		{pattern: "PUT /api/agents/listener", handler: need(auth.PermServersManage, auth.RequireJSON(http.HandlerFunc(l.put))), needsAuth: true},
 		{pattern: "POST /api/enrollment-tokens", handler: need(auth.PermServersManage, auth.RequireJSON(http.HandlerFunc(f.createToken))), needsAuth: true},
@@ -524,4 +524,13 @@ func NewHandler(d Deps) http.Handler {
 		files.ServeHTTP(w, r)
 	})
 	return mux
+}
+
+// stillAllowed makes the check an open stream repeats (see streamHandler); nil
+// when the hub has no logins.
+func stillAllowed(a *auth.Service, permission string) func(*http.Request) func(context.Context) bool {
+	if a == nil {
+		return nil
+	}
+	return func(r *http.Request) func(context.Context) bool { return a.SessionCheck(r, permission) }
 }

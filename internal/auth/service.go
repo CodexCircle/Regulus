@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
@@ -210,6 +211,38 @@ func (s *Service) Authenticate(ctx context.Context, token string) (User, error) 
 		user.Permissions = s.permsOfUser(ctx, user).list()
 	}
 	return user, err
+}
+
+// SessionCheck returns a function that tells, at any later time, whether the
+// session of this request still exists and its user still holds the
+// permission. A connection that outlives the request (a WebSocket) calls it
+// now and then, because logging out, disabling the account, a new password or
+// a changed role only change the database: nothing reaches the open
+// connection by itself. A database error is not a verdict: the check says
+// "still allowed", so that a short outage does not cut every live view.
+func (s *Service) SessionCheck(r *http.Request, permission string) func(context.Context) bool {
+	token := ""
+	if c, err := r.Cookie(CookieName); err == nil {
+		token = c.Value
+	}
+	return func(ctx context.Context) bool {
+		if token == "" {
+			return false
+		}
+		u, err := s.store.sessionUser(ctx, hashToken(token), s.now())
+		if errors.Is(err, ErrUnauthenticated) {
+			return false
+		}
+		if err != nil {
+			return true
+		}
+		set, _, err := s.permsOfRole(ctx, u.Role)
+		if err != nil {
+			return true
+		}
+		u.Permissions = set.list()
+		return u.Can(permission) && !s.MustEnroll(ctx, u)
+	}
 }
 
 // Logout ends the session of the token. An unknown token is not an error.
