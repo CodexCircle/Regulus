@@ -225,11 +225,14 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 	srv := &http.Server{
 		Handler:           NewHandler(Deps{UI: h.ui, Agents: h, Layouts: h, Log: h.log, Auth: h.auth, Fleet: h, Updates: h.updates, Rollout: h, Version: h.version, DatabaseProblem: h.dbState.get}),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       time.Minute, // bodies are small JSON; WebSockets leave the server after the upgrade
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
 	}
 
 	// The built-in agent talks to the agent service over the in-process
 	// transport; remote agents use the network listener below.
-	grpcSrv := grpc.NewServer()
+	grpcSrv := grpc.NewServer(grpc.MaxRecvMsgSize(maxAgentMessageBytes))
 	agentv1.RegisterAgentServiceServer(grpcSrv, h.agents)
 	go func() { _ = grpcSrv.Serve(h.transport.Listener()) }()
 	defer grpcSrv.Stop() // agent streams are long-lived, so a graceful stop would wait forever
@@ -319,6 +322,9 @@ func (h *Hub) serveAgents(addr string) (stop func(), err error) {
 	srv := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(h.fleet.CA().ServerTLS(cert))),
 		grpc.StreamInterceptor(h.requireAgent),
+		grpc.MaxRecvMsgSize(maxAgentMessageBytes),
+		grpc.MaxConcurrentStreams(maxAgentStreams),
+		grpc.ConnectionTimeout(20*time.Second), // the TLS handshake of a client that never finishes it
 	)
 	agentv1.RegisterAgentServiceServer(srv, h.agents)
 	agentv1.RegisterEnrollmentServiceServer(srv, enrollServer{hub: h})

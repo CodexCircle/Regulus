@@ -112,6 +112,9 @@ type session struct {
 	pendingMu sync.Mutex
 	pending   map[string]chan *agentv1.CommandResult
 	nextCmd   uint64
+
+	lastReport  time.Time // when the last metrics report was accepted (serve goroutine only)
+	reportsLogd bool      // a dropped or cut report was already logged for this stream
 }
 
 func newAgentServer(log *slog.Logger) *agentServer {
@@ -137,6 +140,7 @@ func (s *agentServer) Connect(stream grpc.BidiStreamingServer[agentv1.AgentMessa
 	if err != nil {
 		return err
 	}
+	sanitizeHello(hello)
 	negotiated, ok := protocol.Negotiate(hello.GetMinProtocolVersion(), hello.GetProtocolVersion())
 	if !ok {
 		msg := fmt.Sprintf("protocol version %d is not supported by this hub (supported: %d to %d): update the agent", hello.GetProtocolVersion(), protocol.MinSupported, protocol.Version)
@@ -290,6 +294,15 @@ func (s *agentServer) handle(sess *session, msg *agentv1.AgentMessage) error {
 		s.mu.Unlock()
 		s.events.publish(heartbeatEvent{Type: "agent.heartbeat", ID: sess.info.ID, At: now.UTC()})
 	case *agentv1.AgentMessage_Metrics:
+		now := time.Now()
+		if reportTooSoon(sess.lastReport, now, s.metricsInterval) {
+			s.logReportProblem(sess, "an agent sends metrics faster than the interval; extra reports are dropped")
+			return nil
+		}
+		sess.lastReport = now
+		if sanitizeReport(p.Metrics) {
+			s.logReportProblem(sess, "an agent report listed too many disks or interfaces; the rest was cut")
+		}
 		s.mu.Lock()
 		sess.info.LastMetrics = p.Metrics
 		s.mu.Unlock()
@@ -302,6 +315,16 @@ func (s *agentServer) handle(sess *session, msg *agentv1.AgentMessage) error {
 		return status.Error(codes.InvalidArgument, "Hello was already received")
 	}
 	return nil
+}
+
+// logReportProblem logs once per stream, so that a misbehaving agent cannot
+// fill the log either.
+func (s *agentServer) logReportProblem(sess *session, msg string) {
+	if sess.reportsLogd {
+		return
+	}
+	sess.reportsLogd = true
+	s.log.Warn(msg, "agent", sess.info.ID)
 }
 
 // register adds the agent to the registry. A previous connection with the same
