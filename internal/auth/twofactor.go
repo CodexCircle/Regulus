@@ -174,16 +174,21 @@ func (s *Service) twoFactorKey(userID int64) string { return fmt.Sprintf("2fa:%d
 // checkPassword verifies the password of a logged-in user for a sensitive
 // action. Wrong passwords count toward the rate limit.
 func (s *Service) checkPassword(ctx context.Context, u User, password string) error {
-	key := s.twoFactorKey(u.ID)
-	if s.limited(key) {
+	att, allowed := s.begin(s.twoFactorKey(u.ID))
+	if !allowed {
 		return ErrRateLimited
 	}
+	defer att.abandon()
 	hash, err := s.store.passwordHash(ctx, u.ID)
 	if err != nil {
 		return err
 	}
-	if ok, _ := VerifyPassword(hash, password); !ok {
-		s.recordFailure(key)
+	ok, verr := VerifyPassword(hash, password)
+	if errors.Is(verr, ErrBusy) {
+		return ErrBusy
+	}
+	if !ok {
+		att.failed()
 		s.audit(ctx, u.Username, EventPasswordFailed, u.Username, "two-factor settings")
 		return ErrWrongPassword
 	}
@@ -253,10 +258,11 @@ func (s *Service) secretOf(row totpRow, userID int64) ([]byte, error) {
 // EnableTwoFactor confirms the enrollment with a code from the app and turns
 // two-factor on. It returns the recovery codes, which are never shown again.
 func (s *Service) EnableTwoFactor(ctx context.Context, u User, code string) ([]string, error) {
-	key := s.twoFactorKey(u.ID)
-	if s.limited(key) {
+	att, allowed := s.begin(s.twoFactorKey(u.ID))
+	if !allowed {
 		return nil, ErrRateLimited
 	}
+	defer att.abandon()
 	row, err := s.store.totpOf(ctx, u.ID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrTwoFactorNotStarted
@@ -273,7 +279,7 @@ func (s *Service) EnableTwoFactor(ctx context.Context, u User, code string) ([]s
 	}
 	step, ok := matchTOTP(secret, normalizeCode(code), s.now().Unix())
 	if !ok {
-		s.recordFailure(key)
+		att.failed()
 		return nil, ErrInvalidCode
 	}
 	if ok, err := s.store.confirmTOTP(ctx, u.ID, step, s.now()); err != nil {
@@ -281,7 +287,7 @@ func (s *Service) EnableTwoFactor(ctx context.Context, u User, code string) ([]s
 	} else if !ok {
 		return nil, ErrTwoFactorOn
 	}
-	s.clearFailures(key)
+	att.succeeded()
 	codes, err := s.newRecoveryCodes(ctx, u.ID)
 	if err != nil {
 		return nil, err
@@ -474,11 +480,13 @@ func (s *Service) beginPending(ctx context.Context, userID int64) (*TwoFactorReq
 // valid code the session starts. remote identifies the client for the limit on
 // failed attempts, which wrong codes count toward.
 func (s *Service) CompleteLogin(ctx context.Context, remote, pending, code string) (LoginResult, error) {
-	if s.limited(remote) {
+	att, allowed := s.begin(s.ipKey(remote))
+	if !allowed {
 		return LoginResult{}, ErrRateLimited
 	}
+	defer att.abandon()
 	if pending == "" || len(pending) > 128 {
-		s.recordFailure(remote)
+		att.failed()
 		return LoginResult{}, ErrLoginExpired
 	}
 	hash := hashToken(pending)
@@ -487,7 +495,7 @@ func (s *Service) CompleteLogin(ctx context.Context, remote, pending, code strin
 		return LoginResult{}, err
 	}
 	if !ok {
-		s.recordFailure(remote)
+		att.failed()
 		return LoginResult{}, ErrLoginExpired
 	}
 	user, err := s.userByID(ctx, userID)
@@ -500,12 +508,12 @@ func (s *Service) CompleteLogin(ctx context.Context, remote, pending, code strin
 		return LoginResult{}, err
 	}
 	if factor == factorNone {
-		s.recordFailure(remote)
+		att.failed()
 		s.audit(ctx, user.Username, EventLoginFailed, "", "wrong second factor")
 		return LoginResult{}, ErrInvalidCode
 	}
 	_ = s.store.deletePending(ctx, hash)
-	s.clearFailures(remote)
+	att.succeeded()
 
 	now := s.now()
 	_ = s.store.deleteExpiredSessions(ctx, now)
