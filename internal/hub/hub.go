@@ -36,7 +36,7 @@ import (
 )
 
 // ReleaseRepo is the repository the hub reads releases from.
-const ReleaseRepo = "CodexCircle/Regulus"
+const ReleaseRepo = update.Repository
 
 const shutdownTimeout = 10 * time.Second
 

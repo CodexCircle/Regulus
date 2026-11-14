@@ -25,6 +25,6 @@ Find what you need by what you want to do. For what Regulus is, see the [README]
 | build and test Regulus | [Development](development.md) and [CONTRIBUTING](../CONTRIBUTING.md) |
 | work on Regulus as an AI coding agent | [AGENTS.md](../AGENTS.md) |
 | report a security problem | [SECURITY](../SECURITY.md) |
-| see what is open | the [issues](https://github.com/CodexCircle/Regulus/issues) and the roadmap in the [README](../README.md#roadmap) |
+| see what is open | the [issues](https://github.com/Stellatinus/Regulus/issues) and the roadmap in the [README](../README.md#roadmap) |
 
 Every new page under `docs/` is added to this table in the same pull request. Documents are in English; only the GUI is bilingual (see [CONTRIBUTING](../CONTRIBUTING.md)).

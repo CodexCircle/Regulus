@@ -1,6 +1,6 @@
 [Unit]
 Description=Install the Regulus agent update the agent fetched from the hub
-Documentation=https://github.com/CodexCircle/Regulus
+Documentation=https://github.com/Stellatinus/Regulus
 
 [Path]
 # The agent (an unprivileged user) leaves this file after it fetched the

@@ -7,7 +7,7 @@ Thanks for helping with Regulus. This guide covers how to set up, how we work an
 Requirements: Go 1.26+, Node.js 22+, `make`. For linting, `golangci-lint` v2.
 
 ```sh
-git clone https://github.com/CodexCircle/Regulus.git
+git clone https://github.com/Stellatinus/Regulus.git
 cd Regulus
 make build        # builds the dashboard, then bin/regulus
 make test         # go vet, go test -race, dashboard typecheck and tests

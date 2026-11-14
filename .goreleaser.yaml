@@ -31,7 +31,7 @@ nfpms:
   - id: regulus
     package_name: regulus
     vendor: CodexCircle
-    homepage: https://github.com/CodexCircle/Regulus
+    homepage: https://github.com/Stellatinus/Regulus
     maintainer: CodexCircle <noreply@codexcircle.invalid>
     description: CodexCircle Server Manager (Regulus)
     license: Apache-2.0
@@ -77,7 +77,7 @@ checksum:
 # Keyless signature (Sigstore) of the checksums file, made with the GitHub
 # Actions identity of the release workflow. Verify with:
 #   cosign verify-blob --bundle checksums.txt.sigstore.json \
-#     --certificate-identity-regexp 'https://github.com/CodexCircle/Regulus/.github/workflows/release.yml@.*' \
+#     --certificate-identity-regexp 'https://github.com/Stellatinus/Regulus/.github/workflows/release.yml@.*' \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
 signs:
   - cmd: cosign
@@ -106,7 +106,7 @@ release:
     Install this version on Ubuntu Server 22.04 or newer:
 
     ```sh
-    curl -fsSLO https://github.com/CodexCircle/Regulus/releases/download/{{ .Tag }}/install.sh
+    curl -fsSLO https://github.com/Stellatinus/Regulus/releases/download/{{ .Tag }}/install.sh
     sh install.sh --version {{ .Version }}
     ```
 

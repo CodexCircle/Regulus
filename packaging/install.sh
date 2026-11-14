@@ -5,7 +5,7 @@
 # hub answers; as an agent (--role agent) it enrolls the server to a hub and
 # starts the agent.
 #
-#   curl -fsSL https://github.com/CodexCircle/Regulus/releases/latest/download/install.sh | sh
+#   curl -fsSL https://github.com/Stellatinus/Regulus/releases/latest/download/install.sh | sh
 #
 # The address above serves the script of the latest stable release. Every
 # release also carries its own copy, at .../releases/download/<tag>/install.sh.
@@ -18,7 +18,7 @@
 
 set -eu
 
-REPO=CodexCircle/Regulus
+REPO=Stellatinus/Regulus
 DEFAULT_BASE_URL="https://github.com/$REPO/releases/download"
 LATEST_URL="https://github.com/$REPO/releases/latest"
 API_URL="https://api.github.com/repos/$REPO/releases"

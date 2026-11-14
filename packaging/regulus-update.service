@@ -1,6 +1,6 @@
 [Unit]
 Description=Install a Regulus update (checks its signature, keeps the old version for a rollback)
-Documentation=https://github.com/CodexCircle/Regulus
+Documentation=https://github.com/Stellatinus/Regulus
 # Started by regulus-update.path; not meant to be enabled.
 
 [Service]
