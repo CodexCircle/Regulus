@@ -311,16 +311,19 @@ func (h *Hub) Serve(ctx context.Context, ln net.Listener) error {
 // the hub's own CA. Streams need the client certificate of an enrolled agent;
 // only Enroll works without one. The returned function stops it.
 func (h *Hub) serveAgents(addr string) (stop func(), err error) {
-	cert, err := h.fleet.CA().ServerCertificate(time.Now())
+	tlsConfig, validUntil, err := h.fleet.CA().ServerTLSRenewing(time.Now, func(notAfter time.Time) {
+		h.log.Info("the certificate of the agent listener was renewed", "valid_until", notAfter.UTC().Format(time.RFC3339))
+	})
 	if err != nil {
 		return nil, fmt.Errorf("agent listener certificate: %w", err)
 	}
+	h.log.Info("agent listener certificate", "valid_until", validUntil.UTC().Format(time.RFC3339), "renewed_before_end", "30 days")
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("agent listener: %w", err)
 	}
 	srv := grpc.NewServer(
-		grpc.Creds(credentials.NewTLS(h.fleet.CA().ServerTLS(cert))),
+		grpc.Creds(credentials.NewTLS(tlsConfig)),
 		grpc.StreamInterceptor(h.requireAgent),
 		grpc.MaxRecvMsgSize(maxAgentMessageBytes),
 		grpc.MaxConcurrentStreams(maxAgentStreams),
